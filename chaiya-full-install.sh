@@ -6,7 +6,7 @@ echo "🚀 CHAIYA VPN PRO MAX INSTALLER"
 
 rm -rf /usr/local/bin/chaiya*
 
-URL GitHub ของคุณ
+URL GitHub
 
 BASE_URL="https://raw.githubusercontent.com/Chaiyakey99/chaiya-vpn/main"
 
