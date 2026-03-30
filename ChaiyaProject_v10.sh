@@ -1502,33 +1502,12 @@ done
 CHAIYAEOF
 chmod +x /usr/local/bin/chaiya
 
-# ══════════════════════════════════════════════════════════════
-#  สรุปผลการติดตั้ง
-# ══════════════════════════════════════════════════════════════
-TOKEN=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null || echo "N/A")
-XUI_U=$(cat /etc/chaiya/xui-user.conf 2>/dev/null || echo "admin")
-XUI_P=$(cat /etc/chaiya/xui-pass.conf 2>/dev/null || echo "N/A")
-XUI_PT=$(cat /etc/chaiya/xui-port.conf 2>/dev/null || echo "2053")
-HOST_DISP=""
-[[ -f /etc/chaiya/domain.conf ]] && HOST_DISP=$(cat /etc/chaiya/domain.conf)
-[[ -z "$HOST_DISP" ]] && HOST_DISP="$MY_IP"
+# ── สรุปผลการติดตั้ง ─────────────────────────────────────────
 
 echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║  ✅ CHAIYA V2RAY PRO MAX v10 ติดตั้งเสร็จ!      ║"
-echo "╠══════════════════════════════════════════════════╣"
-printf "║  🔥 3x-ui Panel  : http://%-22s║\n" "${MY_IP}:${XUI_PT}"
-printf "║  👤 Admin User   : %-28s║\n" "$XUI_U"
-printf "║  🔑 Admin Pass   : %-28s║\n" "$XUI_P"
-echo "╠══════════════════════════════════════════════════╣"
-printf "║  🌐 SSH-WS URL   : http://%-22s║\n" "${HOST_DISP}/sshws/sshws.html"
-printf "║  🌐 Alt URL      : http://%-22s║\n" "${MY_IP}:81/sshws/sshws.html"
-printf "║  🔒 SSH-WS Token : %-28s║\n" "${TOKEN:0:28}"
-echo "╠══════════════════════════════════════════════════╣"
-echo "║  ⚡ Port 8080 : CHAIYA-AIS  (vmess+ws)          ║"
-echo "║  ⚡ Port 8880 : CHAIYA-TRUE (vmess+ws)          ║"
-echo "║  ⚡ Port 80   : SSH WebSocket                    ║"
-echo "╠══════════════════════════════════════════════════╣"
-echo "║  👉 พิมพ์: chaiya  เพื่อเปิดเมนู                ║"
-echo "╚══════════════════════════════════════════════════╝"
+echo "╔══════════════════════════════════════════════╗"
+echo "║  ✅ CHAIYA V2RAY PRO MAX v10 ติดตั้งเสร็จ!  ║"
+echo "║                                              ║"
+echo "║  👉 พิมพ์:  chaiya  เพื่อเปิดเมนู           ║"
+echo "╚══════════════════════════════════════════════╝"
 echo ""
