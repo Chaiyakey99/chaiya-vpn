@@ -546,13 +546,18 @@ chmod +x /usr/local/bin/chaiya-iplimit
 # ══════════════════════════════════════════════════════════════
 #  สร้าง sshws.html
 # ══════════════════════════════════════════════════════════════
-python3 - << PYGENEOF
+python3 - << 'PYGENEOF'
 import json, os
-token = "${SSHWS_TOKEN}"
-host  = "${SSHWS_HOST}"
-proto = "${SSHWS_PROTO}"
 
-html = open("/dev/stdin").read() if False else r"""<!DOCTYPE html>
+# อ่านค่าจากไฟล์แทนการรับจาก shell variable
+token = open("/etc/chaiya/sshws-token.conf").read().strip() if os.path.exists("/etc/chaiya/sshws-token.conf") else "N/A"
+domain_file = "/etc/chaiya/domain.conf"
+my_ip = os.popen("curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}'").read().strip()
+host  = open(domain_file).read().strip() if os.path.exists(domain_file) else my_ip
+cert_path = f"/etc/letsencrypt/live/{host}/fullchain.pem"
+proto = "https" if os.path.exists(cert_path) else "http"
+
+html = r"""<!DOCTYPE html>
 <html lang="th">
 <head>
 <meta charset="UTF-8">
@@ -1270,38 +1275,9 @@ menu_3() {
   local SEC="none"
   [[ -f "$DOMAIN_FILE" ]] && SEC="tls"
 
-  PAYLOAD=$(cat << PEOF
-{
-  "remark": "CHAIYA-${UNAME}",
-  "enable": true,
-  "listen": "",
-  "port": ${VPORT},
-  "protocol": "vless",
-  "settings": {
-    "clients": [{
-      "id": "${UUID}",
-      "email": "${UNAME}",
-      "limitIp": 2,
-      "totalGB": $((DATA_GB * 1073741824)),
-      "expiryTime": $(date -d "$EXP" +%s)000,
-      "enable": true,
-      "comment": "",
-      "reset": 0
-    }],
-    "decryption": "none"
-  },
-  "streamSettings": {
-    "network": "ws",
-    "security": "${SEC}",
-    "wsSettings": {
-      "path": "/vless",
-      "headers": {"Host": "${SNI}"}
-    }
-  },
-  "sniffing": {"enabled": true, "destOverride": ["http","tls"]}
-}
-PEOF
-)
+  local TOTAL_BYTES=$(( DATA_GB * 1073741824 ))
+  local EXP_MS=$(( $(date -d "$EXP" +%s) * 1000 ))
+  local PAYLOAD="{\"remark\":\"CHAIYA-${UNAME}\",\"enable\":true,\"listen\":\"\",\"port\":${VPORT},\"protocol\":\"vless\",\"settings\":{\"clients\":[{\"id\":\"${UUID}\",\"email\":\"${UNAME}\",\"limitIp\":2,\"totalGB\":${TOTAL_BYTES},\"expiryTime\":${EXP_MS},\"enable\":true,\"comment\":\"\",\"reset\":0}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"ws\",\"security\":\"${SEC}\",\"wsSettings\":{\"path\":\"/vless\",\"headers\":{\"Host\":\"${SNI}\"}}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}}"
 
   API_RESULT=$(xui_api POST "/panel/api/inbounds/add" "$PAYLOAD")
   if echo "$API_RESULT" | grep -q '"success":true'; then
