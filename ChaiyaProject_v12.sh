@@ -301,7 +301,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.auth(): return self.send_json(401,{"error":"unauthorized"})
         p = urllib.parse.urlparse(self.path).path.rstrip("/")
         body = self.read_body()
-        elif p == "/api/service":
+        if p == "/api/service":
             action = body.get("action","")
             if action == "start":
                 out,code = run("systemctl start chaiya-sshws")
