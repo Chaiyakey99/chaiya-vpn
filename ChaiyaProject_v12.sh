@@ -18,7 +18,7 @@ R6='\033[1;38;2;180;0;255m'
 PU='\033[1;38;2;200;0;255m'
 YE='\033[1;38;2;255;230;0m'
 WH='\033[1;38;2;255;255;255m'
-GR='\033[1;38;2;0;255;100m'
+GR='\033[1;38;2;0;200;255m'
 RD='\033[1;38;2;255;0;80m'
 CY='\033[1;38;2;0;255;220m'
 MG='\033[1;38;2;255;0;200m'
@@ -601,7 +601,7 @@ R6='\033[1;38;2;180;0;255m'
 PU='\033[1;38;2;200;0;255m'
 YE='\033[1;38;2;255;230;0m'
 WH='\033[1;38;2;255;255;255m'
-GR='\033[1;38;2;0;255;100m'
+GR='\033[1;38;2;0;200;255m'
 RD='\033[1;38;2;255;0;80m'
 CY='\033[1;38;2;0;255;220m'
 MG='\033[1;38;2;255;0;200m'
@@ -634,36 +634,36 @@ show_menu() {
   show_logo
   printf "\n"
   printf "${R1}╭──────────────────────────────────────────────╮${RS}\n"
-  printf "${R2}│${RS} 🔥 ${BLD}${R2}V2RAY PRO MAX v10${RS}                        ${R2}│${RS}\n"
+  printf "${R2}│${RS} 🔥 ${R2}V2RAY PRO MAX v10${RS}                        ${R2}│${RS}\n"
   if [[ -n "$HOST" ]]; then
-    printf "${R3}│${RS} 🌐 ${GR}Domain : %-30s${R3}│${RS}\n" "$HOST"
+    printf "${R3}│${RS} 🌐 ${GR}%-38s${R3}│${RS}\n" "Domain : $HOST"
   else
-    printf "${R3}│${RS} ⚠️  ${YE}ยังไม่มีโดเมน                             ${R3}│${RS}\n"
+    printf "${R3}│${RS} ⚠️  ${YE}%-40s${R3}│${RS}\n" "ยังไม่มีโดเมน"
   fi
-  printf "${R4}│${RS} 🌍 ${CY}IP     : %-30s${R4}│${RS}\n" "$MY_IP"
+  printf "${R4}│${RS} 🌍 ${CY}%-38s${R4}│${RS}\n" "IP     : $MY_IP"
   printf "${R4}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R5}│${RS} 💻 CPU: ${GR}%-4s%%%s${RS}  🧠 RAM: ${YE}%s/%s GB${RS}  👥 Users: ${PU}%-3s${R5}│${RS}\n" "$CPU" "" "$RAM_USED" "$RAM_TOTAL" "$USERS"
+  printf "${R5}│${RS} 💻 CPU:${GR}%-3s%%%s${RS} 🧠RAM:${YE}%s/%sGB${RS} 👥:${PU}%-2s${RS}          ${R5}│${RS}\n" "$CPU" "" "$RAM_USED" "$RAM_TOTAL" "$USERS"
   printf "${R5}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R6}│${RS}  ${R1}1.${RS}  ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ          ${R6}│${RS}\n"
-  printf "${R6}│${RS}  ${R2}2.${RS}  ตั้งค่าโดเมน + SSL อัตโนมัติ              ${R6}│${RS}\n"
-  printf "${PU}│${RS}  ${R3}3.${RS}  สร้าง VLESS (IP/โดเมน+port+SNI)          ${PU}│${RS}\n"
-  printf "${PU}│${RS}  ${R4}4.${RS}  ลบบัญชีหมดอายุ                           ${PU}│${RS}\n"
-  printf "${MG}│${RS}  ${R5}5.${RS}  ดูบัญชี                                   ${MG}│${RS}\n"
-  printf "${MG}│${RS}  ${R6}6.${RS}  ดู User Online Realtime                   ${MG}│${RS}\n"
-  printf "${CY}│${RS}  ${PU}7.${RS}  รีสตาร์ท 3x-ui                            ${CY}│${RS}\n"
-  printf "${CY}│${RS}  ${CY}8.${RS}  จัดการ Process CPU สูง                   ${CY}│${RS}\n"
-  printf "${R5}│${RS}  ${GR}9.${RS}  เช็คความเร็ว VPS                          ${R5}│${RS}\n"
-  printf "${R4}│${RS}  ${YE}10.${RS} จัดการ Port (เปิด/ปิด)                   ${R4}│${RS}\n"
-  printf "${R4}│${RS}  ${R2}11.${RS} ปลดแบน IP / จัดการ User                  ${R4}│${RS}\n"
-  printf "${R3}│${RS}  ${R3}12.${RS} บล็อก IP ต่างประเทศ                       ${R3}│${RS}\n"
-  printf "${R3}│${RS}  ${R4}13.${RS} สแกน Bug Host (SNI)                       ${R3}│${RS}\n"
-  printf "${R2}│${RS}  ${R5}14.${RS} ลบ User                                   ${R2}│${RS}\n"
-  printf "${R2}│${RS}  ${R6}15.${RS} ตั้งค่ารีบูตอัตโนมัติ                    ${R2}│${RS}\n"
+  printf "${R6}│${RS}  ${R1}1.${RS}  %-36s${R6}│${RS}\n" "ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ"
+  printf "${R6}│${RS}  ${R2}2.${RS}  %-36s${R6}│${RS}\n" "ตั้งค่าโดเมน + SSL อัตโนมัติ"
+  printf "${PU}│${RS}  ${R3}3.${RS}  %-36s${PU}│${RS}\n" "สร้าง VLESS (IP/โดเมน+port+SNI)"
+  printf "${PU}│${RS}  ${R4}4.${RS}  %-36s${PU}│${RS}\n" "ลบบัญชีหมดอายุ"
+  printf "${MG}│${RS}  ${R5}5.${RS}  %-36s${MG}│${RS}\n" "ดูบัญชี"
+  printf "${MG}│${RS}  ${R6}6.${RS}  %-36s${MG}│${RS}\n" "ดู User Online Realtime"
+  printf "${CY}│${RS}  ${PU}7.${RS}  %-36s${CY}│${RS}\n" "รีสตาร์ท 3x-ui"
+  printf "${CY}│${RS}  ${CY}8.${RS}  %-36s${CY}│${RS}\n" "จัดการ Process CPU สูง"
+  printf "${R5}│${RS}  ${GR}9.${RS}  %-36s${R5}│${RS}\n" "เช็คความเร็ว VPS"
+  printf "${R4}│${RS}  ${YE}10.${RS} %-36s${R4}│${RS}\n" "จัดการ Port (เปิด/ปิด)"
+  printf "${R4}│${RS}  ${R2}11.${RS} %-36s${R4}│${RS}\n" "ปลดแบน IP / จัดการ User"
+  printf "${R3}│${RS}  ${R3}12.${RS} %-36s${R3}│${RS}\n" "บล็อก IP ต่างประเทศ"
+  printf "${R3}│${RS}  ${R4}13.${RS} %-36s${R3}│${RS}\n" "สแกน Bug Host (SNI)"
+  printf "${R2}│${RS}  ${R5}14.${RS} %-36s${R2}│${RS}\n" "ลบ User"
+  printf "${R2}│${RS}  ${R6}15.${RS} %-36s${R2}│${RS}\n" "ตั้งค่ารีบูตอัตโนมัติ"
   printf "${R1}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R2}│${RS}  ${CY}16.${RS} ก่อนการติดตั้ง Chaiya                     ${R2}│${RS}\n"
-  printf "${R3}│${RS}  ${YE}17.${RS} เคลียร์ CPU อัตโนมัติ                    ${R3}│${RS}\n"
-  printf "${R4}│${RS}  ${GR}18.${RS} SSH WebSocket                             ${R4}│${RS}\n"
-  printf "${R5}│${RS}  ${WH}0.${RS}  ออก                                        ${R5}│${RS}\n"
+  printf "${R2}│${RS}  ${CY}16.${RS} %-36s${R2}│${RS}\n" "ก่อนการติดตั้ง Chaiya"
+  printf "${R3}│${RS}  ${YE}17.${RS} %-36s${R3}│${RS}\n" "เคลียร์ CPU อัตโนมัติ"
+  printf "${R4}│${RS}  ${GR}18.${RS} %-36s${R4}│${RS}\n" "SSH WebSocket"
+  printf "${R5}│${RS}  ${WH}0.${RS}  %-36s${R5}│${RS}\n" "ออก"
   printf "${R6}╰──────────────────────────────────────────────╯${RS}\n"
   printf "\n${MG}เลือก >> ${RS}"
 }
@@ -797,50 +797,16 @@ menu_1() {
   printf "${R1}│${RS}  ☠️  ${R2}${BLD}ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ${RS}           ${R1}│${RS}\n"
   printf "${R1}└──────────────────────────────────────────────────┘${RS}\n\n"
 
-  # ── ตรวจ x-ui ที่รันอยู่แล้ว ─────────────────────────────────
+  # ── ถ้า x-ui รันอยู่แล้ว ให้ลบออกอัตโนมัติก่อน ─────────────
   if systemctl is-active --quiet x-ui 2>/dev/null; then
-    local p; p=$(xui_port)
-    printf "${GR}✔ 3x-ui กำลังทำงานอยู่แล้ว${RS}\n"
-    printf "  Panel  : ${WH}http://%s:%s${RS}\n" "$MY_IP" "$p"
-    printf "  User   : ${WH}%s${RS}\n\n" "$(xui_user)"
-    printf "  ${YE}1.${RS} ดูข้อมูล inbounds ปัจจุบัน\n"
-    printf "  ${R2}2.${RS} เปลี่ยน credential admin\n"
-    printf "  ${RD}3.${RS} ติดตั้งใหม่ทับ\n"
-    read -rp "$(printf "${YE}เลือก (Enter = ออก): ${RS}")" sub
-    case $sub in
-      1)
-        printf "\n${YE}━━━ Inbounds ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RS}\n"
-        xui_api GET "/panel/api/inbounds/list" | python3 -c "
-import sys,json
-try:
-  d=json.load(sys.stdin)
-  items=d.get('obj',[])
-  if not items: print('  ไม่มี inbounds'); sys.exit()
-  print(f\"  {'PORT':<7} {'PROTOCOL':<10} {'REMARK':<28} {'STATUS'}\")
-  print('  '+'-'*60)
-  for x in items:
-    st='✅' if x.get('enable') else '❌'
-    print(f\"  {x['port']:<7} {x.get('protocol',''):<10} {x.get('remark',''):<28} {st}\")
-except Exception as e: print(f'  Error: {e}')
-"
-        read -rp "Enter ย้อนกลับ..." ;;
-      2)
-        read -rp "$(printf "${YE}Username ใหม่: ${RS}")" u
-        [[ -z "$u" ]] && { printf "${YE}ยกเลิก${RS}\n"; read -rp "Enter..."; return; }
-        read -rsp "$(printf "${YE}Password ใหม่: ${RS}")" pw; echo ""
-        [[ -z "$pw" ]] && { printf "${RD}ต้องใส่ password${RS}\n"; read -rp "Enter..."; return; }
-        echo "$u" > /etc/chaiya/xui-user.conf
-        echo "$pw" > /etc/chaiya/xui-pass.conf
-        chmod 600 /etc/chaiya/xui-user.conf /etc/chaiya/xui-pass.conf
-        /usr/local/x-ui/x-ui setting -username "$u" -password "$pw" 2>/dev/null || \
-          x-ui setting -username "$u" -password "$pw" 2>/dev/null || true
-        systemctl restart x-ui 2>/dev/null || true
-        printf "${GR}✔ อัพเดต credential แล้ว | User: %s${RS}\n" "$u"
-        read -rp "Enter..." ;;
-      3) : ;;
-      *) return ;;
-    esac
-    [[ "$sub" != "3" ]] && return
+    printf "  ${YE}⚙ พบ x-ui รันอยู่ — กำลังลบออกและติดตั้งใหม่...${RS}\n"
+    systemctl stop x-ui 2>/dev/null || true
+    systemctl disable x-ui 2>/dev/null || true
+    rm -f /etc/systemd/system/x-ui.service
+    rm -rf /usr/local/x-ui /usr/local/bin/x-ui
+    rm -rf /etc/x-ui
+    systemctl daemon-reload 2>/dev/null || true
+    printf "  ${GR}✔ ลบ x-ui เก่าเรียบร้อย${RS}\n\n"
   fi
 
   # ── ถาม Username / Password ──────────────────────────────────
