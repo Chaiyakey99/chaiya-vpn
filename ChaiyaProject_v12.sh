@@ -677,15 +677,18 @@ xui_login() {
   local p u pw bp
   p=$(xui_port); u=$(xui_user); pw=$(xui_pass)
   bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
+  # ลบ cookie เก่าก่อนเสมอ
+  rm -f "$XUI_COOKIE"
   local _r
-  _r=$(curl -s -c "$XUI_COOKIE" -b "$XUI_COOKIE" \
+  _r=$(curl -s -c "$XUI_COOKIE" \
     -X POST "http://127.0.0.1:${p}${bp}/login" \
     -d "username=${u}&password=${pw}" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --max-time 10 2>/dev/null)
   echo "$_r" | grep -q '"success":true' && return 0
   # fallback ไม่มี basepath
-  curl -s -c "$XUI_COOKIE" -b "$XUI_COOKIE" \
+  rm -f "$XUI_COOKIE"
+  curl -s -c "$XUI_COOKIE" \
     -X POST "http://127.0.0.1:${p}/login" \
     -d "username=${u}&password=${pw}" \
     -H "Content-Type: application/x-www-form-urlencoded" \
@@ -697,13 +700,14 @@ xui_api() {
   local p bp
   p=$(xui_port)
   bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
+  # login ใหม่ทุกครั้ง ไม่ใช้ cookie เก่า
   xui_login 2>/dev/null || true
   if [[ -n "$data" ]]; then
-    curl -s -c "$XUI_COOKIE" -b "$XUI_COOKIE" \
+    curl -s -b "$XUI_COOKIE" \
       -X "$method" "http://127.0.0.1:${p}${bp}${endpoint}" \
       -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null
   else
-    curl -s -c "$XUI_COOKIE" -b "$XUI_COOKIE" \
+    curl -s -b "$XUI_COOKIE" \
       -X "$method" "http://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null
   fi
 }
@@ -1134,16 +1138,63 @@ print('')
 
     local API_RESULT=""
     if [[ -n "$_inbound_id" ]]; then
-      # เพิ่ม client เข้า inbound เดิม
+      # เพิ่ม client เข้า inbound เดิม — settings ต้องเป็น JSON string
       local _client_payload
-      _client_payload=$(printf '{"id":%s,"settings":{"clients":[{"id":"%s","email":"%s","limitIp":2,"totalGB":%s,"expiryTime":%s,"enable":true,"comment":"","reset":0}]}}' \
-        "$_inbound_id" "$UUID" "$UNAME" "$TOTAL_BYTES" "$EXP_MS")
+      _client_payload=$(python3 -c "
+import json, sys
+client = {
+  'id': sys.argv[1],
+  'email': sys.argv[2],
+  'limitIp': 2,
+  'totalGB': int(sys.argv[3]),
+  'expiryTime': int(sys.argv[4]),
+  'enable': True,
+  'comment': '',
+  'reset': 0
+}
+payload = {
+  'id': int(sys.argv[5]),
+  'settings': json.dumps({'clients': [client]})
+}
+print(json.dumps(payload))
+" "$UUID" "$UNAME" "$TOTAL_BYTES" "$EXP_MS" "$_inbound_id")
       API_RESULT=$(xui_api POST "/panel/api/inbounds/addClient" "$_client_payload" 2>/dev/null)
     else
-      # ไม่มี inbound — สร้างใหม่เป็น VLESS
+      # ไม่มี inbound — สร้างใหม่พร้อม client
       local _vless_payload
-      _vless_payload=$(printf '{"remark":"CHAIYA-%s","enable":true,"listen":"","port":%s,"protocol":"vless","settings":{"clients":[{"id":"%s","email":"%s","limitIp":2,"totalGB":%s,"expiryTime":%s,"enable":true,"comment":"","reset":0}],"decryption":"none"},"streamSettings":{"network":"ws","security":"%s","wsSettings":{"path":"/vless","headers":{"Host":"%s"}}},"sniffing":{"enabled":true,"destOverride":["http","tls"]}}' \
-        "$UNAME" "$_vport" "$UUID" "$UNAME" "$TOTAL_BYTES" "$EXP_MS" "$SEC" "$_sni")
+      _vless_payload=$(python3 -c "
+import json, sys
+settings = json.dumps({
+  'clients': [{
+    'id': sys.argv[1],
+    'email': sys.argv[2],
+    'limitIp': 2,
+    'totalGB': int(sys.argv[3]),
+    'expiryTime': int(sys.argv[4]),
+    'enable': True,
+    'comment': '',
+    'reset': 0
+  }],
+  'decryption': 'none'
+})
+stream = json.dumps({
+  'network': 'ws',
+  'security': sys.argv[5],
+  'wsSettings': {'path': '/vless', 'headers': {'Host': sys.argv[6]}}
+})
+sniff = json.dumps({'enabled': True, 'destOverride': ['http','tls']})
+payload = {
+  'remark': 'CHAIYA-' + sys.argv[2],
+  'enable': True,
+  'listen': '',
+  'port': int(sys.argv[7]),
+  'protocol': 'vless',
+  'settings': settings,
+  'streamSettings': stream,
+  'sniffing': sniff
+}
+print(json.dumps(payload))
+" "$UUID" "$UNAME" "$TOTAL_BYTES" "$EXP_MS" "$SEC" "$_sni" "$_vport")
       API_RESULT=$(xui_api POST "/panel/api/inbounds/add" "$_vless_payload" 2>/dev/null)
       ufw allow "${_vport}"/tcp 2>/dev/null || true
     fi
@@ -1202,8 +1253,13 @@ print('')
     local _s; _s=$(echo "$_r" | cut -d'|' -f2)
     local _u; _u=$(echo "$_r" | cut -d'|' -f3)
     local _ar; _ar=$(echo "$_r" | cut -d'|' -f5)
-    local _st="${YE}⚠ API ไม่ตอบ — เพิ่ม client ใน panel เอง${RS}"
-    echo "$_ar" | grep -q '"success":true' && _st="${CY}✔ เพิ่ม client สำเร็จ${RS}"
+    local _st
+    if echo "$_ar" | grep -q '"success":true'; then
+      _st="${CY}✔ เพิ่ม client สำเร็จ${RS}"
+    else
+      local _err; _err=$(echo "$_ar" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('msg','no response'))" 2>/dev/null || echo "ไม่ได้รับ response")
+      _st="${RD}✗ ${_err}${RS}"
+    fi
     printf "${R4}│${RS}  ${CY}Port %-5s${RS} SNI: %s\n" "$_p" "$_s"
     printf "${R4}│${RS}  UUID: ${CY}%s${RS}\n" "$_u"
     printf "${R4}│${RS}  Status: %b\n" "$_st"
