@@ -634,36 +634,36 @@ show_menu() {
   show_logo
   printf "\n"
   printf "${R1}╭──────────────────────────────────────────────╮${RS}\n"
-  printf "${R2}│${RS} 🔥 ${R2}V2RAY PRO MAX v10${RS}                        ${R2}│${RS}\n"
+  printf "${R2}│${RS} 🔥 ${R2}V2RAY PRO MAX v10${RS}\n"
   if [[ -n "$HOST" ]]; then
-    printf "${R3}│${RS} 🌐 ${GR}%-38s${R3}│${RS}\n" "Domain : $HOST"
+    printf "${R3}│${RS} 🌐 ${CY}Domain : %s${RS}\n" "$HOST"
   else
-    printf "${R3}│${RS} ⚠️  ${YE}%-40s${R3}│${RS}\n" "ยังไม่มีโดเมน"
+    printf "${R3}│${RS} ⚠️  ${YE}ยังไม่มีโดเมน${RS}\n"
   fi
-  printf "${R4}│${RS} 🌍 ${CY}%-38s${R4}│${RS}\n" "IP     : $MY_IP"
+  printf "${R4}│${RS} 🌍 ${CY}IP     : %s${RS}\n" "$MY_IP"
   printf "${R4}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R5}│${RS} 💻 CPU:${GR}%-3s%%%s${RS} 🧠RAM:${YE}%s/%sGB${RS} 👥:${PU}%-2s${RS}          ${R5}│${RS}\n" "$CPU" "" "$RAM_USED" "$RAM_TOTAL" "$USERS"
+  printf "${R5}│${RS} 💻 CPU:${CY}%s%%%s${RS} 🧠RAM:${YE}%s/%sGB${RS} 👥:${PU}%s${RS}\n" "$CPU" "" "$RAM_USED" "$RAM_TOTAL" "$USERS"
   printf "${R5}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R6}│${RS}  ${R1}1.${RS}  %-36s${R6}│${RS}\n" "ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ"
-  printf "${R6}│${RS}  ${R2}2.${RS}  %-36s${R6}│${RS}\n" "ตั้งค่าโดเมน + SSL อัตโนมัติ"
-  printf "${PU}│${RS}  ${R3}3.${RS}  %-36s${PU}│${RS}\n" "สร้าง VLESS (IP/โดเมน+port+SNI)"
-  printf "${PU}│${RS}  ${R4}4.${RS}  %-36s${PU}│${RS}\n" "ลบบัญชีหมดอายุ"
-  printf "${MG}│${RS}  ${R5}5.${RS}  %-36s${MG}│${RS}\n" "ดูบัญชี"
-  printf "${MG}│${RS}  ${R6}6.${RS}  %-36s${MG}│${RS}\n" "ดู User Online Realtime"
-  printf "${CY}│${RS}  ${PU}7.${RS}  %-36s${CY}│${RS}\n" "รีสตาร์ท 3x-ui"
-  printf "${CY}│${RS}  ${CY}8.${RS}  %-36s${CY}│${RS}\n" "จัดการ Process CPU สูง"
-  printf "${R5}│${RS}  ${GR}9.${RS}  %-36s${R5}│${RS}\n" "เช็คความเร็ว VPS"
-  printf "${R4}│${RS}  ${YE}10.${RS} %-36s${R4}│${RS}\n" "จัดการ Port (เปิด/ปิด)"
-  printf "${R4}│${RS}  ${R2}11.${RS} %-36s${R4}│${RS}\n" "ปลดแบน IP / จัดการ User"
-  printf "${R3}│${RS}  ${R3}12.${RS} %-36s${R3}│${RS}\n" "บล็อก IP ต่างประเทศ"
-  printf "${R3}│${RS}  ${R4}13.${RS} %-36s${R3}│${RS}\n" "สแกน Bug Host (SNI)"
-  printf "${R2}│${RS}  ${R5}14.${RS} %-36s${R2}│${RS}\n" "ลบ User"
-  printf "${R2}│${RS}  ${R6}15.${RS} %-36s${R2}│${RS}\n" "ตั้งค่ารีบูตอัตโนมัติ"
+  printf "${R6}│${RS}  ${R1}1.${RS}  ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ\n"
+  printf "${R6}│${RS}  ${R2}2.${RS}  ตั้งค่าโดเมน + SSL อัตโนมัติ\n"
+  printf "${PU}│${RS}  ${R3}3.${RS}  สร้าง VLESS (IP/โดเมน+port+SNI)\n"
+  printf "${PU}│${RS}  ${R4}4.${RS}  ลบบัญชีหมดอายุ\n"
+  printf "${MG}│${RS}  ${R5}5.${RS}  ดูบัญชี\n"
+  printf "${MG}│${RS}  ${R6}6.${RS}  ดู User Online Realtime\n"
+  printf "${CY}│${RS}  ${PU}7.${RS}  รีสตาร์ท 3x-ui\n"
+  printf "${CY}│${RS}  ${CY}8.${RS}  จัดการ Process CPU สูง\n"
+  printf "${R5}│${RS}  ${CY}9.${RS}  เช็คความเร็ว VPS\n"
+  printf "${R4}│${RS}  ${YE}10.${RS} จัดการ Port (เปิด/ปิด)\n"
+  printf "${R4}│${RS}  ${R2}11.${RS} ปลดแบน IP / จัดการ User\n"
+  printf "${R3}│${RS}  ${R3}12.${RS} บล็อก IP ต่างประเทศ\n"
+  printf "${R3}│${RS}  ${R4}13.${RS} สแกน Bug Host (SNI)\n"
+  printf "${R2}│${RS}  ${R5}14.${RS} ลบ User\n"
+  printf "${R2}│${RS}  ${R6}15.${RS} ตั้งค่ารีบูตอัตโนมัติ\n"
   printf "${R1}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R2}│${RS}  ${CY}16.${RS} %-36s${R2}│${RS}\n" "ก่อนการติดตั้ง Chaiya"
-  printf "${R3}│${RS}  ${YE}17.${RS} %-36s${R3}│${RS}\n" "เคลียร์ CPU อัตโนมัติ"
-  printf "${R4}│${RS}  ${GR}18.${RS} %-36s${R4}│${RS}\n" "SSH WebSocket"
-  printf "${R5}│${RS}  ${WH}0.${RS}  %-36s${R5}│${RS}\n" "ออก"
+  printf "${R2}│${RS}  ${CY}16.${RS} ก่อนการติดตั้ง Chaiya\n"
+  printf "${R3}│${RS}  ${YE}17.${RS} เคลียร์ CPU อัตโนมัติ\n"
+  printf "${R4}│${RS}  ${CY}18.${RS} SSH WebSocket\n"
+  printf "${R5}│${RS}  ${WH}0.${RS}  ออก\n"
   printf "${R6}╰──────────────────────────────────────────────╯${RS}\n"
   printf "\n${MG}เลือก >> ${RS}"
 }
@@ -1201,27 +1201,28 @@ print('')
     local _p; _p=$(echo "$_r" | cut -d'|' -f1)
     local _s; _s=$(echo "$_r" | cut -d'|' -f2)
     local _u; _u=$(echo "$_r" | cut -d'|' -f3)
-    local _l; _l=$(echo "$_r" | cut -d'|' -f4)
     local _ar; _ar=$(echo "$_r" | cut -d'|' -f5)
-    local _st="${YE}⚠ API ไม่ตอบ${RS}"
-    echo "$_ar" | grep -q '"success":true' && _st="${GR}✔ API สำเร็จ${RS}"
-    printf "${R4}│${RS}  ${CY}Port %-5s${RS} SNI: ${YE}%-30s${R4}│${RS}\n" "$_p" "$_s"
-    printf "${R4}│${RS}  UUID: ${CY}%-44s${R4}│${RS}\n" "$_u"
-    printf "${R4}│${RS}  Status: %b%-40s${R4}│${RS}\n" "$_st" ""
-    printf "${R4}│${RS}  ${YE}Link:${RS} ${WH}%.46s${R4}│${RS}\n" "$_l"
+    local _st="${YE}⚠ API ไม่ตอบ — เพิ่ม client ใน panel เอง${RS}"
+    echo "$_ar" | grep -q '"success":true' && _st="${CY}✔ เพิ่ม client สำเร็จ${RS}"
+    printf "${R4}│${RS}  ${CY}Port %-5s${RS} SNI: %s\n" "$_p" "$_s"
+    printf "${R4}│${RS}  UUID: ${CY}%s${RS}\n" "$_u"
+    printf "${R4}│${RS}  Status: %b\n" "$_st"
     printf "${R4}├──────────────────────────────────────────────────┤${RS}\n"
   done
 
-  printf "${R4}│${RS}  ${GR}📥 Config URL:${RS}                                 ${R4}│${RS}\n"
+  # ลิงค์ x-ui panel
+  local _xp; _xp=$(xui_port)
+  local _bp; _bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
+  local _proto="http"
+  [[ -f "$DOMAIN_FILE" ]] && _proto="https"
+  local _panel_host; _panel_host=$(cat "$DOMAIN_FILE" 2>/dev/null || echo "$MY_IP")
+
+  printf "${R4}│${RS}  ${YE}🔗 X-UI Panel:${RS}\n"
+  printf "${R4}│${RS}  ${WH}%s://%s:%s%s/${RS}\n" "$_proto" "$_panel_host" "$_xp" "$_bp"
+  printf "${R4}├──────────────────────────────────────────────────┤${RS}\n"
+  printf "${R4}│${RS}  ${CY}📥 Config HTML:${RS}\n"
   printf "${R4}│${RS}  ${WH}http://%s:81/config/%s.html${RS}\n" "$MY_IP" "$UNAME"
   printf "${R4}└──────────────────────────────────────────────────┘${RS}\n\n"
-
-  # QR Code (port แรก)
-  if [[ ${#_RESULTS[@]} -gt 0 ]]; then
-    local _ql; _ql=$(echo "${_RESULTS[0]}" | cut -d'|' -f4)
-    command -v qrencode &>/dev/null && qrencode -t ANSIUTF8 "$_ql" && \
-      printf "  ${YE}QR Code: Port $(echo "${_RESULTS[0]}" | cut -d'|' -f1)${RS}\n"
-  fi
 
   read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"
 }
