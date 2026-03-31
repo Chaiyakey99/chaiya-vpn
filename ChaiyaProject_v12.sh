@@ -9,20 +9,20 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 # ── สีและ style ──────────────────────────────────────────────
-R1='\033[38;2;255;0;85m'
-R2='\033[38;2;255;102;0m'
-R3='\033[38;2;255;238;0m'
-R4='\033[38;2;0;255;68m'
-R5='\033[38;2;0;204;255m'
-R6='\033[38;2;204;68;255m'
-PU='\033[38;2;204;68;255m'
-YE='\033[38;2;255;238;0m'
-WH='\033[1;37m'
-GR='\033[38;2;0;255;68m'
-RD='\033[38;2;255;0;85m'
-CY='\033[38;2;0;255;220m'
-MG='\033[38;2;255;0;255m'
-OR='\033[38;2;255;165;0m'
+R1='\033[1;38;2;255;0;128m'
+R2='\033[1;38;2;255;80;0m'
+R3='\033[1;38;2;255;230;0m'
+R4='\033[1;38;2;0;255;80m'
+R5='\033[1;38;2;0;220;255m'
+R6='\033[1;38;2;180;0;255m'
+PU='\033[1;38;2;200;0;255m'
+YE='\033[1;38;2;255;230;0m'
+WH='\033[1;38;2;255;255;255m'
+GR='\033[1;38;2;0;255;100m'
+RD='\033[1;38;2;255;0;80m'
+CY='\033[1;38;2;0;255;220m'
+MG='\033[1;38;2;255;0;200m'
+OR='\033[1;38;2;255;140;0m'
 RS='\033[0m'
 BLD='\033[1m'
 
@@ -591,19 +591,21 @@ XUI_PASS_FILE="/etc/chaiya/xui-pass.conf"
 
 mkdir -p "$VLESS_DIR"
 
-# ── สี ────────────────────────────────────────────────────────
-R1='\033[38;2;255;0;85m'
-R2='\033[38;2;255;102;0m'
-R3='\033[38;2;255;238;0m'
-R4='\033[38;2;0;255;68m'
-R5='\033[38;2;0;204;255m'
-R6='\033[38;2;204;68;255m'
-PU='\033[38;2;204;68;255m'
-YE='\033[38;2;255;238;0m'
-WH='\033[1;37m'
-GR='\033[38;2;0;255;68m'
-RD='\033[38;2;255;0;85m'
-CY='\033[38;2;0;255;220m'
+# ── สี นีออนรุ้งเข้ม ──────────────────────────────────────────
+R1='\033[1;38;2;255;0;128m'
+R2='\033[1;38;2;255;80;0m'
+R3='\033[1;38;2;255;230;0m'
+R4='\033[1;38;2;0;255;80m'
+R5='\033[1;38;2;0;220;255m'
+R6='\033[1;38;2;180;0;255m'
+PU='\033[1;38;2;200;0;255m'
+YE='\033[1;38;2;255;230;0m'
+WH='\033[1;38;2;255;255;255m'
+GR='\033[1;38;2;0;255;100m'
+RD='\033[1;38;2;255;0;80m'
+CY='\033[1;38;2;0;255;220m'
+MG='\033[1;38;2;255;0;200m'
+OR='\033[1;38;2;255;140;0m'
 RS='\033[0m'
 BLD='\033[1m'
 
@@ -631,39 +633,39 @@ show_menu() {
   clear
   show_logo
   printf "\n"
-  printf "${R1}┌──────────────────────────────────────────────┐${RS}\n"
-  printf "${R1}│${RS} 🔥 ${BLD}${R2}V2RAY PRO MAX v10${RS}                        ${R1}│${RS}\n"
+  printf "${R1}╭──────────────────────────────────────────────╮${RS}\n"
+  printf "${R2}│${RS} 🔥 ${BLD}${R2}V2RAY PRO MAX v10${RS}                        ${R2}│${RS}\n"
   if [[ -n "$HOST" ]]; then
-    printf "${R1}│${RS} 🌐 ${GR}Domain : %-30s${R1}│${RS}\n" "$HOST"
+    printf "${R3}│${RS} 🌐 ${GR}Domain : %-30s${R3}│${RS}\n" "$HOST"
   else
-    printf "${R1}│${RS} ⚠️  ${YE}ยังไม่มีโดเมน                             ${R1}│${RS}\n"
+    printf "${R3}│${RS} ⚠️  ${YE}ยังไม่มีโดเมน                             ${R3}│${RS}\n"
   fi
-  printf "${R1}│${RS} 🌍 ${CY}IP     : %-30s${R1}│${RS}\n" "$MY_IP"
+  printf "${R4}│${RS} 🌍 ${CY}IP     : %-30s${R4}│${RS}\n" "$MY_IP"
+  printf "${R4}├──────────────────────────────────────────────┤${RS}\n"
+  printf "${R5}│${RS} 💻 CPU: ${GR}%-4s%%%s${RS}  🧠 RAM: ${YE}%s/%s GB${RS}  👥 Users: ${PU}%-3s${R5}│${RS}\n" "$CPU" "" "$RAM_USED" "$RAM_TOTAL" "$USERS"
+  printf "${R5}├──────────────────────────────────────────────┤${RS}\n"
+  printf "${R6}│${RS}  ${R1}1.${RS}  ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ          ${R6}│${RS}\n"
+  printf "${R6}│${RS}  ${R2}2.${RS}  ตั้งค่าโดเมน + SSL อัตโนมัติ              ${R6}│${RS}\n"
+  printf "${PU}│${RS}  ${R3}3.${RS}  สร้าง VLESS (IP/โดเมน+port+SNI)          ${PU}│${RS}\n"
+  printf "${PU}│${RS}  ${R4}4.${RS}  ลบบัญชีหมดอายุ                           ${PU}│${RS}\n"
+  printf "${MG}│${RS}  ${R5}5.${RS}  ดูบัญชี                                   ${MG}│${RS}\n"
+  printf "${MG}│${RS}  ${R6}6.${RS}  ดู User Online Realtime                   ${MG}│${RS}\n"
+  printf "${CY}│${RS}  ${PU}7.${RS}  รีสตาร์ท 3x-ui                            ${CY}│${RS}\n"
+  printf "${CY}│${RS}  ${CY}8.${RS}  จัดการ Process CPU สูง                   ${CY}│${RS}\n"
+  printf "${R5}│${RS}  ${GR}9.${RS}  เช็คความเร็ว VPS                          ${R5}│${RS}\n"
+  printf "${R4}│${RS}  ${YE}10.${RS} จัดการ Port (เปิด/ปิด)                   ${R4}│${RS}\n"
+  printf "${R4}│${RS}  ${R2}11.${RS} ปลดแบน IP / จัดการ User                  ${R4}│${RS}\n"
+  printf "${R3}│${RS}  ${R3}12.${RS} บล็อก IP ต่างประเทศ                       ${R3}│${RS}\n"
+  printf "${R3}│${RS}  ${R4}13.${RS} สแกน Bug Host (SNI)                       ${R3}│${RS}\n"
+  printf "${R2}│${RS}  ${R5}14.${RS} ลบ User                                   ${R2}│${RS}\n"
+  printf "${R2}│${RS}  ${R6}15.${RS} ตั้งค่ารีบูตอัตโนมัติ                    ${R2}│${RS}\n"
   printf "${R1}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R1}│${RS} 💻 CPU: ${GR}%-4s%%%s${RS}  🧠 RAM: ${YE}%s/%s GB${RS}  👥 Users: ${PU}%-3s${R1}│${RS}\n" "$CPU" "" "$RAM_USED" "$RAM_TOTAL" "$USERS"
-  printf "${R1}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R1}│${RS}  ${R2}1.${RS}  ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ          ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R3}2.${RS}  ตั้งค่าโดเมน + SSL อัตโนมัติ              ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R4}3.${RS}  สร้าง VLESS (IP/โดเมน+port+SNI)          ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R5}4.${RS}  ลบบัญชีหมดอายุ                           ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R6}5.${RS}  ดูบัญชี                                   ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${PU}6.${RS}  ดู User Online Realtime                   ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${CY}7.${RS}  รีสตาร์ท 3x-ui                            ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${GR}8.${RS}  จัดการ Process CPU สูง                   ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${YE}9.${RS}  เช็คความเร็ว VPS                          ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R2}10.${RS} จัดการ Port (เปิด/ปิด)                   ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R3}11.${RS} ปลดแบน IP / จัดการ User                  ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R4}12.${RS} บล็อก IP ต่างประเทศ                       ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R5}13.${RS} สแกน Bug Host (SNI)                       ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${R6}14.${RS} ลบ User                                   ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${PU}15.${RS} ตั้งค่ารีบูตอัตโนมัติ                    ${R1}│${RS}\n"
-  printf "${R1}├──────────────────────────────────────────────┤${RS}\n"
-  printf "${R1}│${RS}  ${CY}16.${RS} ก่อนการติดตั้ง Chaiya                     ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${YE}17.${RS} เคลียร์ CPU อัตโนมัติ                    ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${GR}18.${RS} SSH WebSocket                             ${R1}│${RS}\n"
-  printf "${R1}│${RS}  ${WH}0.${RS}  ออก                                        ${R1}│${RS}\n"
-  printf "${R1}└──────────────────────────────────────────────┘${RS}\n"
-  printf "\n${YE}เลือก >> ${RS}"
+  printf "${R2}│${RS}  ${CY}16.${RS} ก่อนการติดตั้ง Chaiya                     ${R2}│${RS}\n"
+  printf "${R3}│${RS}  ${YE}17.${RS} เคลียร์ CPU อัตโนมัติ                    ${R3}│${RS}\n"
+  printf "${R4}│${RS}  ${GR}18.${RS} SSH WebSocket                             ${R4}│${RS}\n"
+  printf "${R5}│${RS}  ${WH}0.${RS}  ออก                                        ${R5}│${RS}\n"
+  printf "${R6}╰──────────────────────────────────────────────╯${RS}\n"
+  printf "\n${MG}เลือก >> ${RS}"
 }
 
 # ── helper: x-ui API ─────────────────────────────────────────
@@ -907,15 +909,27 @@ except Exception as e: print(f'  Error: {e}')
     sleep 5
   fi
 
-  # ── 80% login API ──
+  # ── 80% login API — retry จนกว่าจะสำเร็จ ──
   rgb_bar 80 "Login API..."
   local _login_ok=0
-  for _li in $(seq 1 5); do
+  for _li in $(seq 1 15); do
     if xui_login 2>/dev/null; then
       _login_ok=1; break
     fi
-    sleep 3
+    sleep 4
   done
+
+  # ถ้า login ไม่ได้เลย ลอง restart x-ui แล้ว retry
+  if [[ "$_login_ok" == "0" ]]; then
+    systemctl restart x-ui 2>/dev/null || true
+    sleep 6
+    for _li in $(seq 1 10); do
+      if xui_login 2>/dev/null; then
+        _login_ok=1; break
+      fi
+      sleep 4
+    done
+  fi
 
   # ── 85–95% สร้าง inbounds ──
   local _inbounds=(
@@ -941,14 +955,32 @@ except Exception as e: print(f'  Error: {e}')
   "sniffing":{"enabled":true,"destOverride":["http","tls"]}
 }' "$_ibremark" "$_ibport" "$_ibuid" "$_ibsni")
 
-    local _res
-    _res=$(xui_api POST "/panel/api/inbounds/add" "$_payload" 2>/dev/null)
+    # retry สร้าง inbound สูงสุด 3 ครั้ง
+    local _res _created=0
+    for _try in 1 2 3; do
+      _res=$(xui_api POST "/panel/api/inbounds/add" "$_payload" 2>/dev/null)
+      if echo "$_res" | grep -q '"success":true'; then
+        _created=1; break
+      fi
+      # ถ้า port ซ้ำอยู่แล้ว ถือว่าสำเร็จ
+      if echo "$_res" | grep -qi "already\|duplicate\|exist"; then
+        _created=2; break
+      fi
+      # login ใหม่แล้วลองอีกครั้ง
+      xui_login 2>/dev/null || true
+      sleep 3
+    done
+
     ufw allow "${_ibport}"/tcp >> /dev/null 2>&1 || true
 
-    if echo "$_res" | grep -q '"success":true'; then
-      _ib_results+=("${GR}✔ Port ${_ibport} (${_ibremark})${RS}")
+    if [[ "$_created" == "1" ]]; then
+      _ib_results+=("${GR}✔ Port ${_ibport} (${_ibremark}) — สร้างสำเร็จ${RS}")
+    elif [[ "$_created" == "2" ]]; then
+      _ib_results+=("${CY}ℹ Port ${_ibport} (${_ibremark}) — มีอยู่แล้ว${RS}")
     else
-      _ib_results+=("${YE}⚠ Port ${_ibport} — สร้างซ้ำหรือ API ยังไม่พร้อม${RS}")
+      # แสดง response จริงเพื่อ debug
+      local _err_msg; _err_msg=$(echo "$_res" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('msg','unknown'))" 2>/dev/null || echo "no response")
+      _ib_results+=("${RD}✗ Port ${_ibport} — ${_err_msg}${RS}")
     fi
   done
 
@@ -1679,9 +1711,9 @@ chmod +x /usr/local/bin/chaiya
 # ── สรุปผลการติดตั้ง ─────────────────────────────────────────
 
 echo ""
-echo "╔══════════════════════════════════════════════╗"
+echo "╭══════════════════════════════════════════════╮"
 echo "║  ✅ CHAIYA V2RAY PRO MAX v10 ติดตั้งเสร็จ!  ║"
 echo "║                                              ║"
 echo "║  👉 พิมพ์:  chaiya  เพื่อเปิดเมนู           ║"
-echo "╚══════════════════════════════════════════════╝"
+echo "╰══════════════════════════════════════════════╯"
 echo ""
