@@ -946,14 +946,26 @@ except Exception as e: print(f'  Error: {e}')
 
     rgb_bar $(( 85 + _ib_n * 5 )) "สร้าง inbound port ${_ibport}..."
 
-    local _payload
-    _payload=$(printf '{
-  "remark":"%s","enable":true,"listen":"","port":%s,"protocol":"vmess",
-  "settings":{"clients":[{"id":"%s","alterId":0}],"disableInsecureEncryption":false},
-  "streamSettings":{"network":"ws","security":"none",
-    "wsSettings":{"path":"/","headers":{"Host":"%s"}}},
-  "sniffing":{"enabled":true,"destOverride":["http","tls"]}
-}' "$_ibremark" "$_ibport" "$_ibuid" "$_ibsni")
+    # 3x-ui ต้องการ settings/streamSettings/sniffing เป็น JSON string (escaped)
+    local _settings _stream _sniff _payload
+    _settings=$(printf '{"clients":[{"id":"%s","alterId":0}],"disableInsecureEncryption":false}' "$_ibuid")
+    _stream=$(printf '{"network":"ws","security":"none","wsSettings":{"path":"/","headers":{"Host":"%s"}}}' "$_ibsni")
+    _sniff='{"enabled":true,"destOverride":["http","tls"]}'
+
+    _payload=$(python3 -c "
+import json, sys
+d = {
+  'remark':         sys.argv[1],
+  'enable':         True,
+  'listen':         '',
+  'port':           int(sys.argv[2]),
+  'protocol':       'vmess',
+  'settings':       sys.argv[3],
+  'streamSettings': sys.argv[4],
+  'sniffing':       sys.argv[5],
+}
+print(json.dumps(d))
+" "$_ibremark" "$_ibport" "$_settings" "$_stream" "$_sniff")
 
     # retry สร้าง inbound สูงสุด 3 ครั้ง
     local _res _created=0
