@@ -667,8 +667,19 @@ xui_login() {
   rm -f "$_cookie"
 
   local _r
-  # ลอง with basepath ก่อน
+  # ลอง https + basepath ก่อน (3x-ui เปิด SSL by default)
   if [[ -n "$bp" && "$bp" != "/" ]]; then
+    _r=$(curl -sk -c "$_cookie" \
+      -X POST "https://127.0.0.1:${p}${bp}/login" \
+      -d "username=${u}&password=${pw}" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --max-time 10 2>/dev/null)
+    if echo "$_r" | grep -q '"success":true'; then
+      [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
+      return 0
+    fi
+    rm -f "$_cookie"
+    # fallback http + basepath
     _r=$(curl -s -c "$_cookie" \
       -X POST "http://127.0.0.1:${p}${bp}/login" \
       -d "username=${u}&password=${pw}" \
@@ -681,7 +692,17 @@ xui_login() {
     rm -f "$_cookie"
   fi
 
-  # fallback ไม่มี basepath
+  # fallback https ไม่มี basepath
+  _r=$(curl -sk -c "$_cookie" \
+    -X POST "https://127.0.0.1:${p}/login" \
+    -d "username=${u}&password=${pw}" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --max-time 10 2>/dev/null)
+  if echo "$_r" | grep -q '"success":true'; then
+    [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
+    return 0
+  fi
+  # fallback http ไม่มี basepath
   _r=$(curl -s -c "$_cookie" \
     -X POST "http://127.0.0.1:${p}/login" \
     -d "username=${u}&password=${pw}" \
@@ -704,12 +725,12 @@ xui_api() {
   xui_login 2>/dev/null || true
 
   if [[ -n "$data" ]]; then
-    curl -s -b "$_cookie" \
-      -X "$method" "http://127.0.0.1:${p}${bp}${endpoint}" \
+    curl -sk -b "$_cookie" \
+      -X "$method" "https://127.0.0.1:${p}${bp}${endpoint}" \
       -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null
   else
-    curl -s -b "$_cookie" \
-      -X "$method" "http://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null
+    curl -sk -b "$_cookie" \
+      -X "$method" "https://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null
   fi
 }
 
@@ -783,25 +804,14 @@ rgb_bar() {
     "$bar_fill" "$bar_empty" "$pct" "$label"
 }
 
-# ── ฟังก์ชัน detect webBasePath จาก sqlite3 + fallback ──────
+# ── ฟังก์ชัน detect webBasePath จาก sqlite3 ──────────────────
 detect_xui_basepath() {
   local db_path="/etc/x-ui/x-ui.db"
   local bp=""
-  # วิธีที่ 1: sqlite3
   if command -v sqlite3 &>/dev/null && [[ -f "$db_path" ]]; then
     bp=$(sqlite3 "$db_path" "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;" 2>/dev/null || echo "")
   fi
-  # วิธีที่ 2: fallback อ่านจาก install log
-  if [[ -z "$bp" || "$bp" == "/" ]]; then
-    bp=$(grep -oP 'webBasePath[^:]*:\s*\K\S+' /var/log/chaiya-xui-install.log 2>/dev/null | tail -1 || echo "")
-  fi
-  # วิธีที่ 3: fallback อ่าน x-ui setting output
-  if [[ -z "$bp" || "$bp" == "/" ]]; then
-    bp=$(/usr/local/x-ui/x-ui setting 2>/dev/null | grep -oP 'webBasePath.*?:\s*\K\S+' | head -1 || echo "")
-  fi
   [[ -z "$bp" ]] && bp="/"
-  # normalize: ต้องขึ้นต้นด้วย /
-  [[ "$bp" != /* ]] && bp="/$bp"
   echo "$bp"
 }
 
@@ -867,15 +877,10 @@ menu_1() {
   /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" 2>/dev/null || \
     x-ui setting -username "$_u" -password "$_pw" 2>/dev/null || true
   systemctl restart x-ui 2>/dev/null || true
-  sleep 10
+  sleep 3
 
-  # detect basePath — รอจน basepath ไม่ว่าง (สูงสุด 40 วิ)
-  local _basepath="/"
-  for _bw in $(seq 1 20); do
-    _basepath=$(detect_xui_basepath)
-    [[ -n "$_basepath" && "$_basepath" != "/" ]] && break
-    sleep 2
-  done
+  # detect basePath + port
+  local _basepath; _basepath=$(detect_xui_basepath)
   echo "$_basepath" > /etc/chaiya/xui-basepath.conf
   local _xp
   _xp=$(/usr/local/x-ui/x-ui setting 2>/dev/null | grep -oP 'port.*?:\s*\K\d+' | head -1)
@@ -885,60 +890,17 @@ menu_1() {
   # ── 55% รอ port ──
   rgb_bar 55 "รอ port ${_panel_port}..."
   local _ok=0
-  for _i in $(seq 1 15); do
-    if curl -s --max-time 3 "http://127.0.0.1:${_panel_port}/" &>/dev/null; then
+  for _i in $(seq 1 10); do
+    if curl -sk --max-time 2 "https://127.0.0.1:${_panel_port}/" &>/dev/null; then
       _ok=1; break
     fi
-    sleep 2
+    sleep 1
   done
-  if [[ "$_ok" == "0" ]]; then
-    systemctl restart x-ui 2>/dev/null || true
-    sleep 6
-  fi
 
-  # ── 80% login API — detect basepath ใหม่ก่อนเสมอ ──
+  # ── 80% login API ──
   rgb_bar 80 "Login API..."
-
-  # รอให้ DB พร้อม + detect basepath จนได้ค่าจริง (สูงสุด 40 วิ)
-  local _bp_new="/"
-  for _bw2 in $(seq 1 20); do
-    _bp_new=$(detect_xui_basepath)
-    [[ -n "$_bp_new" && "$_bp_new" != "/" ]] && break
-    sleep 2
-  done
-  [[ -n "$_bp_new" ]] && echo "$_bp_new" > /etc/chaiya/xui-basepath.conf
-
-  # detect port จาก x-ui setting
-  local _xp2
-  _xp2=$(/usr/local/x-ui/x-ui setting 2>/dev/null | grep -oP 'port.*?:\s*\K\d+' | head -1)
-  [[ -n "$_xp2" ]] && echo "$_xp2" > /etc/chaiya/xui-port.conf
-
   local _login_ok=0
-  for _li in $(seq 1 20); do
-    if xui_login 2>/dev/null; then
-      _login_ok=1; break
-    fi
-    # ทุก 5 ครั้ง detect basepath ใหม่
-    if (( _li % 5 == 0 )); then
-      _bp_new=$(detect_xui_basepath)
-      [[ -n "$_bp_new" ]] && echo "$_bp_new" > /etc/chaiya/xui-basepath.conf
-    fi
-    sleep 2
-  done
-
-  # ยังไม่ได้ — restart แล้วลองอีกรอบ
-  if [[ "$_login_ok" == "0" ]]; then
-    systemctl restart x-ui 2>/dev/null || true
-    sleep 15
-    _bp_new=$(detect_xui_basepath)
-    [[ -n "$_bp_new" ]] && echo "$_bp_new" > /etc/chaiya/xui-basepath.conf
-    for _li in $(seq 1 10); do
-      if xui_login 2>/dev/null; then
-        _login_ok=1; break
-      fi
-      sleep 2
-    done
-  fi
+  xui_login 2>/dev/null && _login_ok=1
 
   # ── 85–95% สร้าง inbounds ──
   local _inbounds=(
