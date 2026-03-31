@@ -663,22 +663,35 @@ xui_login() {
   local p u pw bp
   p=$(xui_port); u=$(xui_user); pw=$(xui_pass)
   bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
-  # ลบ cookie เก่าก่อนเสมอ
-  rm -f "$XUI_COOKIE"
+  local _cookie="/etc/chaiya/xui-cookie.jar"
+  rm -f "$_cookie"
+
   local _r
-  _r=$(curl -s -c "$XUI_COOKIE" \
-    -X POST "http://127.0.0.1:${p}${bp}/login" \
-    -d "username=${u}&password=${pw}" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    --max-time 10 2>/dev/null)
-  echo "$_r" | grep -q '"success":true' && return 0
+  # ลอง with basepath ก่อน
+  if [[ -n "$bp" && "$bp" != "/" ]]; then
+    _r=$(curl -s -c "$_cookie" \
+      -X POST "http://127.0.0.1:${p}${bp}/login" \
+      -d "username=${u}&password=${pw}" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --max-time 10 2>/dev/null)
+    if echo "$_r" | grep -q '"success":true'; then
+      [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
+      return 0
+    fi
+    rm -f "$_cookie"
+  fi
+
   # fallback ไม่มี basepath
-  rm -f "$XUI_COOKIE"
-  curl -s -c "$XUI_COOKIE" \
+  _r=$(curl -s -c "$_cookie" \
     -X POST "http://127.0.0.1:${p}/login" \
     -d "username=${u}&password=${pw}" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    --max-time 10 2>/dev/null | grep -q '"success":true'
+    --max-time 10 2>/dev/null)
+  if echo "$_r" | grep -q '"success":true'; then
+    [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
+    return 0
+  fi
+  return 1
 }
 
 xui_api() {
@@ -686,14 +699,16 @@ xui_api() {
   local p bp
   p=$(xui_port)
   bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
-  # login ใหม่ทุกครั้ง ไม่ใช้ cookie เก่า
+  local _cookie="/etc/chaiya/xui-cookie.jar"
+
   xui_login 2>/dev/null || true
+
   if [[ -n "$data" ]]; then
-    curl -s -b "$XUI_COOKIE" \
+    curl -s -b "$_cookie" \
       -X "$method" "http://127.0.0.1:${p}${bp}${endpoint}" \
       -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null
   else
-    curl -s -b "$XUI_COOKIE" \
+    curl -s -b "$_cookie" \
       -X "$method" "http://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null
   fi
 }
@@ -854,36 +869,54 @@ menu_1() {
   # ── 55% รอ port ──
   rgb_bar 55 "รอ port ${_panel_port}..."
   local _ok=0
-  for _i in $(seq 1 10); do
+  for _i in $(seq 1 15); do
     if curl -s --max-time 3 "http://127.0.0.1:${_panel_port}/" &>/dev/null; then
       _ok=1; break
     fi
-    sleep 3
+    sleep 2
   done
   if [[ "$_ok" == "0" ]]; then
     systemctl restart x-ui 2>/dev/null || true
-    sleep 5
+    sleep 6
   fi
 
-  # ── 80% login API — retry จนกว่าจะสำเร็จ ──
+  # ── 80% login API — detect basepath ใหม่ก่อนเสมอ ──
   rgb_bar 80 "Login API..."
+
+  # รอให้ DB พร้อมแล้วค่อย detect basepath
+  sleep 3
+  local _bp_new; _bp_new=$(detect_xui_basepath)
+  [[ -n "$_bp_new" ]] && echo "$_bp_new" > /etc/chaiya/xui-basepath.conf
+
+  # detect port จาก x-ui setting
+  local _xp2
+  _xp2=$(/usr/local/x-ui/x-ui setting 2>/dev/null | grep -oP 'port.*?:\s*\K\d+' | head -1)
+  [[ -n "$_xp2" ]] && echo "$_xp2" > /etc/chaiya/xui-port.conf
+
   local _login_ok=0
-  for _li in $(seq 1 15); do
+  for _li in $(seq 1 20); do
     if xui_login 2>/dev/null; then
       _login_ok=1; break
     fi
-    sleep 4
+    # ทุก 5 ครั้ง detect basepath ใหม่
+    if (( _li % 5 == 0 )); then
+      _bp_new=$(detect_xui_basepath)
+      [[ -n "$_bp_new" ]] && echo "$_bp_new" > /etc/chaiya/xui-basepath.conf
+    fi
+    sleep 2
   done
 
-  # ถ้า login ไม่ได้เลย ลอง restart x-ui แล้ว retry
+  # ยังไม่ได้ — restart แล้วลองอีกรอบ
   if [[ "$_login_ok" == "0" ]]; then
     systemctl restart x-ui 2>/dev/null || true
-    sleep 6
+    sleep 8
+    _bp_new=$(detect_xui_basepath)
+    [[ -n "$_bp_new" ]] && echo "$_bp_new" > /etc/chaiya/xui-basepath.conf
     for _li in $(seq 1 10); do
       if xui_login 2>/dev/null; then
         _login_ok=1; break
       fi
-      sleep 4
+      sleep 2
     done
   fi
 
