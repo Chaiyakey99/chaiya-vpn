@@ -1000,25 +1000,37 @@ menu_1() {
   /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" 2>/dev/null || \
     x-ui setting -username "$_u" -password "$_pw" 2>/dev/null || true
   systemctl restart x-ui 2>/dev/null || true
-  sleep 3
 
-  # detect basePath + port
-  local _basepath; _basepath=$(detect_xui_basepath)
-  echo "$_basepath" > /etc/chaiya/xui-basepath.conf
+  # ── detect port จาก x-ui setting ก่อน (ไม่รอ db) ──
   local _xp
   _xp=$(/usr/local/x-ui/x-ui setting 2>/dev/null | grep -oP 'port.*?:\s*\K\d+' | head -1)
   [[ -n "$_xp" ]] && echo "$_xp" > /etc/chaiya/xui-port.conf
   local _panel_port; _panel_port=$(xui_port)
 
-  # ── 55% รอ port ──
+  # ── 55% รอ 3x-ui พร้อม (ลอง http ก่อน แล้วค่อย https) ──
+  # สาเหตุที่ลอง http ก่อน: 3x-ui ติดตั้งใหม่ยังไม่มี SSL certificate
   rgb_bar 55 "รอ port ${_panel_port}..."
   local _ok=0
-  for _i in $(seq 1 10); do
+  for _i in $(seq 1 20); do
+    if curl -s --max-time 2 "http://127.0.0.1:${_panel_port}/" &>/dev/null; then
+      _ok=1; break
+    fi
     if curl -sk --max-time 2 "https://127.0.0.1:${_panel_port}/" &>/dev/null; then
       _ok=1; break
     fi
-    sleep 1
+    sleep 2
   done
+
+  # ── detect basepath หลัง 3x-ui พร้อม (db เขียนเสร็จแน่นอนแล้ว) ──
+  # ต้องรอให้ service พร้อมก่อน ไม่งั้น sqlite3 จะอ่านได้แค่ "/" หรือ ""
+  local _basepath; _basepath=$(detect_xui_basepath)
+  local _bp_try=0
+  while [[ ( -z "$_basepath" || "$_basepath" == "/" ) && $_bp_try -lt 5 ]]; do
+    sleep 3
+    _basepath=$(detect_xui_basepath)
+    (( _bp_try++ ))
+  done
+  echo "$_basepath" > /etc/chaiya/xui-basepath.conf
 
   # ── 80% login API ──
   rgb_bar 80 "Login API..."
