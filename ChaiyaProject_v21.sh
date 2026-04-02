@@ -1178,13 +1178,12 @@ menu_2() {
   echo "$domain" > "$DOMAIN_FILE"
   apt-get install -y certbot python3-certbot-nginx -qq 2>/dev/null || true
 
-  # ── หยุด services ที่ใช้ port 80 ก่อนขอ SSL ──────────────────
+  # หยุด services ที่ใช้ port 80 ก่อนขอ SSL
   printf "${YE}⟳ หยุด services บน port 80 ชั่วคราว...${RS}\n"
   systemctl stop nginx 2>/dev/null || true
   systemctl stop chaiya-sshws 2>/dev/null || true
   sleep 2
 
-  # ── ตรวจสอบว่า port 80 ว่างแล้ว ─────────────────────────────
   if ss -tlnp 2>/dev/null | grep -q ':80 '; then
     printf "${RD}✗ port 80 ยังถูกใช้งานอยู่ — กรุณาหยุด service ที่ใช้ port 80 ด้วยตนเอง${RS}\n"
     systemctl start nginx 2>/dev/null || true
