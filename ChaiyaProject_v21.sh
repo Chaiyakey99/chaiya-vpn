@@ -1386,11 +1386,7 @@ print(json.dumps(payload))
 
     # สร้าง link
     local VLESS_LINK
-    if [[ -f "$DOMAIN_FILE" ]]; then
-      VLESS_LINK="vless://${UUID}@${AUTO_HOST}:${_vport}?encryption=none&security=tls&type=ws&path=%2Fvless&sni=${_sni}&host=${_sni}#CHAIYA-${UNAME}-${_vport}"
-    else
-      VLESS_LINK="vless://${UUID}@${AUTO_HOST}:${_vport}?encryption=none&security=none&type=ws&path=%2Fvless&host=${_sni}#CHAIYA-${UNAME}-${_vport}"
-    fi
+    VLESS_LINK="vless://${UUID}@${AUTO_HOST}:${_vport}?path=%2Fvless&security=&encryption=none&host=${_sni}&type=ws#CHAIYA-${UNAME}-${_vport}"
 
     # บันทึก DB
     echo "$UNAME $DAYS $EXP $DATA_GB $UUID $_vport $_sni $AUTO_HOST" >> "$DB"
