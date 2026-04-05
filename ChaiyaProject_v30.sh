@@ -573,7 +573,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <body>
 <div class="header">
   <h1 class="rgb-text">🚀 CHAIYA SSH MANAGER</h1>
-  <p id="server-ip">กำลังโหลด...</p>
+  <p id="server-ip" style="min-height:1.2em"></p>
 </div>
 <div class="tabs">
   <div class="tab active" onclick="showTab('dashboard')">📊 Dashboard</div>
@@ -737,7 +737,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <div id="toast"></div>
 <script>
 const API='';
-const TOKEN=new URLSearchParams(location.search).get('token')||document.cookie.match(/token=([^;]+)/)?.[1]||'';
+const _urlTok=new URLSearchParams(location.search).get('token');if(_urlTok){document.cookie='token='+_urlTok+';path=/;max-age=86400';}const TOKEN=_urlTok||document.cookie.match(/token=([^;]+)/)?.[1]||'';
 function toast(msg,ok=true){const t=document.getElementById('toast');t.textContent=(ok?'✅ ':'❌ ')+msg;t.style.borderColor=ok?'#00ff6044':'#ff004044';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
 async function api(method,path,body=null){const opts={method,headers:{'Content-Type':'application/json','X-Token':TOKEN}};if(body)opts.body=JSON.stringify(body);try{const r=await fetch('/sshws-api'+path,opts);return await r.json();}catch(e){return{error:e.message};}}
 function showTab(name){document.querySelectorAll('.tab').forEach((t,i)=>{const pages=['dashboard','users','online','banned','backup','services'];t.classList.toggle('active',pages[i]===name);});document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));document.getElementById('page-'+name).classList.add('active');if(name==='dashboard')loadDashboard();if(name==='users')loadUsers();if(name==='online')loadOnline();if(name==='banned')loadBanned();if(name==='services')loadServices();}
@@ -745,7 +745,7 @@ function showAlert(id,msg,ok=true){const el=document.getElementById(id);el.textC
 function svcBadge(a){return a?'<span class="badge badge-green">● RUNNING</span>':'<span class="badge badge-red">● STOPPED</span>';}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
-async function loadDashboard(){const s=await api('GET','/api/status');if(!s.error){const sv=s.services||{};document.getElementById('svc-sshws').innerHTML=svcBadge(sv.sshws);document.getElementById('svc-dropbear').innerHTML=svcBadge(sv.dropbear);document.getElementById('svc-nginx').innerHTML=svcBadge(sv.nginx);document.getElementById('svc-badvpn').innerHTML=svcBadge(sv.badvpn);document.getElementById('svc-tunnel').innerHTML=svcBadge(sv.tunnel);document.getElementById('svc-uptime').textContent=sv.started||'N/A';document.getElementById('stat-conns').textContent=s.connections??'-';document.getElementById('stat-online').textContent=s.online_count??'-';document.getElementById('stat-users').textContent=s.total_users??'-';}const info=await api('GET','/api/info');if(!info.error){document.getElementById('server-ip').textContent=info.host||'';document.getElementById('conn-info').innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem"><div><span style="color:var(--muted)">🌍 Host:</span> <b>${info.host}</b></div><div><span style="color:var(--muted)">🔌 Port:</span> <b>${info.ws_port}</b></div><div><span style="color:var(--muted)">🐻 Dropbear:</span> <b>${info.dropbear_port}/${info.dropbear_port2}</b></div><div><span style="color:var(--muted)">🎮 UDPGW:</span> <b>127.0.0.1:${info.udpgw_port}</b></div></div><div style="margin-top:.8rem;background:var(--card2);padding:.6rem .8rem;border-radius:.5rem;font-family:monospace;font-size:.8rem;color:#00dcff">POST / HTTP/1.1<br>Host: ${info.host}<br>Upgrade: websocket<br>Connection: Upgrade</div>`;}}
+async function loadDashboard(){const s=await api('GET','/api/status');if(!s.error){const sv=s.services||{};document.getElementById('svc-sshws').innerHTML=svcBadge(sv.sshws);document.getElementById('svc-dropbear').innerHTML=svcBadge(sv.dropbear);document.getElementById('svc-nginx').innerHTML=svcBadge(sv.nginx);document.getElementById('svc-badvpn').innerHTML=svcBadge(sv.badvpn);document.getElementById('svc-tunnel').innerHTML=svcBadge(sv.tunnel);document.getElementById('svc-uptime').textContent=sv.started||'N/A';document.getElementById('stat-conns').textContent=s.connections??'-';document.getElementById('stat-online').textContent=s.online_count??'-';document.getElementById('stat-users').textContent=s.total_users??'-';}const info=await api('GET','/api/info');if(!info.error){const _host=info.host||'';const _proto=info.proto||'http';document.getElementById('server-ip').textContent=_host;document.getElementById('conn-info').innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem"><div><span style="color:var(--muted)">🌍 Host:</span> <b>${_host}</b></div><div><span style="color:var(--muted)">🔌 Port:</span> <b>${info.ws_port}</b></div><div><span style="color:var(--muted)">🐻 Dropbear:</span> <b>${info.dropbear_port}/${info.dropbear_port2}</b></div><div><span style="color:var(--muted)">🎮 UDPGW:</span> <b>127.0.0.1:${info.udpgw_port}</b></div></div><div style="margin-top:.8rem;background:var(--card2);padding:.6rem .8rem;border-radius:.5rem;font-family:monospace;font-size:.8rem;color:#00dcff">POST / HTTP/1.1\nHost: ${_host}\nUpgrade: websocket\nConnection: Upgrade</div>`;}}
 async function svcAction(action){const r=await api('POST','/api/service',{action});toast(r.result||r.error,!r.error);setTimeout(loadDashboard,1500);setTimeout(loadServices,1500);}
 async function svc1(svc,action){const r=await api('POST','/api/service1',{service:svc,action});toast(r.result||r.error,!r.error);setTimeout(loadServices,1200);}
 async function restartUdpgw(){const r=await api('POST','/api/udpgw',{action:'restart'});toast(r.result||r.error,!r.error);setTimeout(loadDashboard,1500);}
@@ -973,9 +973,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             domain = ""
             if os.path.exists("/etc/chaiya/domain.conf"):
                 domain = open("/etc/chaiya/domain.conf").read().strip()
-            host = domain or my_ip
+            host = domain or my_ip.strip()
+            proto = "https" if os.path.exists(f"/etc/letsencrypt/live/{host}/fullchain.pem") else "http"
             return self.send_json(200, {
                 "host": host,
+                "proto": proto,
                 "ws_port": int(cfg.get("WS_PORT","80")),
                 "dropbear_port": int(cfg.get("DROPBEAR_PORT","143")),
                 "dropbear_port2": int(cfg.get("DROPBEAR_PORT2","109")),
@@ -3959,16 +3961,18 @@ menu_18() {
   _m18_status
 
   local _H; [[ -f "$DOMAIN_FILE" ]] && _H=$(cat "$DOMAIN_FILE") || _H=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-  local _TOK; _TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null || echo "ไม่พบ token")
+  local _TOK; _TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
+  local _PROTO="http"
+  [[ -f "/etc/letsencrypt/live/${_H}/fullchain.pem" ]] && _PROTO="https"
+  local _URL="${_PROTO}://${_H}:81/sshws/sshws.html?token=${_TOK}"
 
   printf "\n${R2}╔══════════════════════════════════════════════════════════╗${RS}\n"
   printf "${R2}║${RS}  🌐 ${WH}SSH WebSocket Dashboard${RS}                            ${R2}║${RS}\n"
   printf "${R2}╠══════════════════════════════════════════════════════════╣${RS}\n"
-  printf "${R2}║${RS}  ${YE}🔗 URL   :${RS} ${GR}http://%s:81/sshws/sshws.html${RS}\n" "$_H"
-  printf "${R2}║${RS}  ${YE}🔑 Token :${RS} ${CY}%s${RS}\n" "$_TOK"
-  printf "${R2}║${RS}  ${YE}📎 ลิงค์พร้อม token:${RS}\n"
-  printf "${R2}║${RS}  ${WH}http://%s:81/sshws/sshws.html?token=%s${RS}\n" "$_H" "$_TOK"
+  printf "${R2}║${RS}  ${YE}🔗 URL   :${RS} ${GR}%s${RS}\n" "$_URL"
   printf "${R2}╚══════════════════════════════════════════════════════════╝${RS}\n"
+  printf "\n${GR}✅ คัดลอก URL แล้วเปิดใน browser ได้เลย${RS}\n"
+  printf "${CY}%s${RS}\n" "$_URL"
 
   printf "\n${OR}┌─[ ⚙️  จัดการด่วน ]──────────────────────────────────────┐${RS}\n"
   printf "${OR}│${RS}  ${GR}1.${RS}  🔄 Restart ทุก service                           ${OR}│${RS}\n"
