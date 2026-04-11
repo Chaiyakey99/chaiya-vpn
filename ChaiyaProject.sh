@@ -1134,7 +1134,7 @@ async function api(method, path, body=null) {
     headers['X-Auth-Token'] = tok;
     // Authorization header: ต้องเป็น ISO-8859-1 เท่านั้น
     // ตรวจสอบก่อนใส่ — ถ้ามี non-ASCII ข้าม
-    const isAsciiOnly = /^[\x20-\x7e]+$/.test('Bearer ' + tok);
+    const isAsciiOnly = /^[ -]*$/.test('Bearer ' + tok);
     if (isAsciiOnly) {
       headers['Authorization'] = 'Bearer ' + tok;
     }
@@ -1149,21 +1149,7 @@ async function api(method, path, body=null) {
   try {
     const r = await fetch(url, opts);
     if (!r.ok && r.status === 401) {
-      // [FIX] ถ้า 401 ลอง refresh token แล้ว retry
-      TOKEN = '';
-      const _newTok = await ensureToken();
-      if (_newTok && _newTok !== rawTok) {
-        headers['X-Token'] = _newTok; headers['X-Auth-Token'] = _newTok;
-        const _url2 = '/sshws-api' + path + '?token=' + encodeURIComponent(_newTok);
-        try {
-          const _r2 = await fetch(_url2, {method, headers, body: body ? JSON.stringify(body) : undefined});
-          const _ct2 = _r2.headers.get('content-type') || '';
-          if (_ct2.includes('application/json')) return await _r2.json();
-          const _t2 = await _r2.text();
-          try { return JSON.parse(_t2); } catch(e) { return {error:'invalid json'}; }
-        } catch(e2) { return {error: e2.message}; }
-      }
-      toast('Token ไม่ถูกต้อง — โปรด refresh หน้า', false);
+      toast('Token ไม่ถูกต้อง', false);
       return {error: 'unauthorized'};
     }
     const ct = r.headers.get('content-type') || '';
@@ -1172,9 +1158,6 @@ async function api(method, path, body=null) {
     try { return JSON.parse(text); } catch(e) { return {error: 'invalid json', raw: text.slice(0,200)}; }
   } catch(e) {
     console.error('API error:', path, e.message);
-    if (e.message && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError') || e.message.includes('fetch'))) {
-      return {error: 'API ไม่ตอบสนอง — ตรวจสอบ chaiya-sshws-api service'};
-    }
     return {error: e.message};
   }
 }
@@ -2374,27 +2357,7 @@ PYEOF
 chmod +x /usr/local/bin/chaiya-sshws-api
 
 python3 /usr/local/bin/chaiya-sshws-api install || true
-sleep 3
-
-# ── [FIX] ตรวจสอบว่า chaiya-sshws-api ขึ้นจริง และ retry ถ้าไม่ขึ้น ──
-_api_retry=0
-while [[ $_api_retry -lt 5 ]]; do
-  if systemctl is-active --quiet chaiya-sshws-api 2>/dev/null; then
-    echo "✅ chaiya-sshws-api กำลังรัน"
-    break
-  fi
-  echo "⏳ รอ chaiya-sshws-api... (${_api_retry}/5)"
-  systemctl start chaiya-sshws-api 2>/dev/null || true
-  sleep 2
-  _api_retry=$((_api_retry + 1))
-done
-if ! systemctl is-active --quiet chaiya-sshws-api 2>/dev/null; then
-  echo "⚠ chaiya-sshws-api ไม่ขึ้น — ลอง start ตรงๆ"
-  pkill -f chaiya-sshws-api 2>/dev/null || true
-  sleep 1
-  nohup python3 /usr/local/bin/chaiya-sshws-api >> /var/log/chaiya-sshws-api.log 2>&1 &
-  sleep 2
-fi
+sleep 2
 
 # ══════════════════════════════════════════════════════════════
 #  chaiya-data-tracker  (iptables byte accounting — ทุก 60 วิ)
@@ -2828,63 +2791,22 @@ LOGEOF
 echo "✅ logrotate ตั้งค่าแล้ว (rotate ทุกวัน เก็บ 7 วัน max 10MB)"
 
 # ══════════════════════════════════════════════════════════════
-#  [FIX] ฝัง token/host/proto ลง sshws.html พร้อม verify
+#  สร้าง sshws.html  (base64 decode + แทน token)
 # ══════════════════════════════════════════════════════════════
-
-# ── สร้าง token ถ้ายังไม่มีหรือว่าง ──────────────────────────
-_SSHWS_TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
-if [[ -z "$_SSHWS_TOK" ]] || [[ "$_SSHWS_TOK" == "N/A" ]]; then
-  _SSHWS_TOK=$(python3 -c "import hashlib,os; print(hashlib.sha256(os.urandom(32)).hexdigest()[:32])" 2>/dev/null \
-            || openssl rand -hex 16)
-  echo "$_SSHWS_TOK" > /etc/chaiya/sshws-token.conf
-  echo "✅ สร้าง token ใหม่: ${_SSHWS_TOK}"
-fi
-
-_SSHWS_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null \
-         || curl -s --max-time 5 api.ipify.org 2>/dev/null \
-         || hostname -I | awk '{print $1}')
+_SSHWS_TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]' || echo "N/A")
+_SSHWS_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 _SSHWS_HOST=$( [[ -f /etc/chaiya/domain.conf ]] && cat /etc/chaiya/domain.conf || echo "$_SSHWS_IP" )
 _SSHWS_PROTO="http"
 [[ -f "/etc/letsencrypt/live/${_SSHWS_HOST}/fullchain.pem" ]] && _SSHWS_PROTO="https"
 
-# ── [FIX] แทน placeholder ทุกจุดในไฟล์ HTML ─────────────────
-_HTML="/var/www/chaiya/sshws.html"
-if [[ -f "$_HTML" ]]; then
-  sed -i "s|%%BAKED_TOKEN%%|${_SSHWS_TOK}|g"  "$_HTML"
-  sed -i "s|%%TOKEN%%|${_SSHWS_TOK}|g"        "$_HTML"
-  sed -i "s|%%HOST%%|${_SSHWS_HOST}|g"        "$_HTML"
-  sed -i "s|%%PROTO%%|${_SSHWS_PROTO}|g"      "$_HTML"
+# ── ฝัง token/host/proto ลง sshws.html ตอน install ──────────
+sed -i "s|%%BAKED_TOKEN%%|${_SSHWS_TOK}|g"  /var/www/chaiya/sshws.html 2>/dev/null || true
+sed -i "s|%%TOKEN%%|${_SSHWS_TOK}|g"        /var/www/chaiya/sshws.html 2>/dev/null || true
+sed -i "s|%%HOST%%|${_SSHWS_HOST}|g"        /var/www/chaiya/sshws.html 2>/dev/null || true
+sed -i "s|%%PROTO%%|${_SSHWS_PROTO}|g"      /var/www/chaiya/sshws.html 2>/dev/null || true
+echo "✅ Token ฝังใน sshws.html แล้ว: ${_SSHWS_TOK}"
 
-  # [FIX] ตรวจว่า placeholder ยังเหลืออยู่ไหม
-  if grep -q "%%BAKED_TOKEN%%" "$_HTML" 2>/dev/null; then
-    echo "⚠ sed ล้มเหลว — ใช้ python3 แทน"
-    python3 -c "
-import re, sys
-with open('$_HTML','r') as f: html = f.read()
-html = html.replace('%%BAKED_TOKEN%%','${_SSHWS_TOK}')
-html = html.replace('%%TOKEN%%','${_SSHWS_TOK}')
-html = html.replace('%%HOST%%','${_SSHWS_HOST}')
-html = html.replace('%%PROTO%%','${_SSHWS_PROTO}')
-with open('$_HTML','w') as f: f.write(html)
-print('python3 replace done')
-" 2>/dev/null || true
-  fi
-
-  # [FIX] ตรวจอีกครั้ง
-  if grep -q "%%BAKED_TOKEN%%" "$_HTML" 2>/dev/null; then
-    echo "❌ ยังแทน token ไม่สำเร็จ — ตรวจสอบไฟล์ HTML"
-  else
-    echo "✅ Token ฝังใน sshws.html สำเร็จ: ${_SSHWS_TOK}"
-  fi
-else
-  echo "❌ ไม่พบ sshws.html ที่ $_HTML"
-fi
-
-# ── [FIX] สร้าง users.db ถ้าไม่มี ───────────────────────────
-_UDB="/etc/chaiya/sshws-users/users.db"
-[[ ! -f "$_UDB" ]] && touch "$_UDB" && echo "✅ สร้าง users.db แล้ว"
-
-echo "✅ sshws.html พร้อมใช้งาน"
+echo "✅ sshws.html สร้างพร้อมใช้งาน"
 
 # ══════════════════════════════════════════════════════════════
 #  chaiya  MAIN MENU SCRIPT  (เขียนตรงไม่ใช้ base64)
@@ -6451,6 +6373,116 @@ if ! grep -q "CHAIYA menu alias" /root/.bashrc 2>/dev/null; then
 fi
 
 # ── สรุปผลการติดตั้ง ─────────────────────────────────────────
+
+
+# ======================================================================
+#  [FIX] DASHBOARD SELF-HEALING — รันหลัง install เพื่อให้แน่ใจ 100%
+# ======================================================================
+
+echo -e "\n\033[1;36m[FIX] กำลังตรวจสอบและซ่อม Dashboard...\033[0m"
+
+# 1. สร้าง token ถ้าว่าง
+_FIX_TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
+if [[ -z "$_FIX_TOK" ]]; then
+  _FIX_TOK=$(openssl rand -hex 16)
+  echo "$_FIX_TOK" > /etc/chaiya/sshws-token.conf
+  echo "  ✅ สร้าง token ใหม่: $_FIX_TOK"
+fi
+
+# 2. ฝัง token เข้า HTML
+_FIX_HTML="/var/www/chaiya/sshws.html"
+if [[ -f "$_FIX_HTML" ]]; then
+  sed -i "s|%%BAKED_TOKEN%%|${_FIX_TOK}|g" "$_FIX_HTML" 2>/dev/null || true
+  sed -i "s|%%TOKEN%%|${_FIX_TOK}|g"       "$_FIX_HTML" 2>/dev/null || true
+  python3 << PYREPLACE
+import re
+path, tok = "$_FIX_HTML", "$_FIX_TOK"
+with open(path, 'r', errors='replace') as f: html = f.read()
+html2 = re.sub(r"(const _baked\s*=\s*')[^']*(')", r"\g<1>" + tok + r"\g<2>", html)
+if html2 != html:
+    with open(path, 'w') as f: f.write(html2)
+    print("  ✅ _baked token อัพเดตแล้ว: " + tok[:8] + "...")
+else:
+    print("  ✅ Token ใน HTML ถูกต้อง")
+PYREPLACE
+fi
+
+# 3. สร้าง users.db ถ้าไม่มี
+mkdir -p /etc/chaiya/sshws-users
+[[ ! -f /etc/chaiya/sshws-users/users.db ]] && touch /etc/chaiya/sshws-users/users.db && echo "  ✅ สร้าง users.db"
+
+# 4. ตรวจ chaiya-sshws-api — ถ้าไม่รันให้ start ใหม่
+_fix_api_up=0
+for _try in 1 2 3; do
+  if ss -tlnp 2>/dev/null | grep -q ":6789 "; then
+    _fix_api_up=1; break
+  fi
+  systemctl start chaiya-sshws-api 2>/dev/null || true
+  sleep 2
+done
+if [[ $_fix_api_up -eq 0 ]]; then
+  pkill -f chaiya-sshws-api 2>/dev/null || true
+  sleep 1
+  nohup python3 /usr/local/bin/chaiya-sshws-api >> /var/log/chaiya-sshws-api.log 2>&1 &
+  sleep 3
+  ss -tlnp 2>/dev/null | grep -q ":6789 " \
+    && echo "  ✅ chaiya-sshws-api start สำเร็จ" \
+    || echo "  ❌ start ไม่สำเร็จ — ดู: cat /var/log/chaiya-sshws-api.log"
+else
+  echo "  ✅ chaiya-sshws-api ทำงานอยู่บน port 6789"
+fi
+
+# 5. ตรวจ nginx config — ถ้าขาด sshws-api block ให้เขียนใหม่
+if ! grep -q "sshws-api" /etc/nginx/sites-available/chaiya 2>/dev/null; then
+  echo "  ⚠ nginx config ขาด sshws-api — เขียนใหม่"
+  cat > /etc/nginx/sites-available/chaiya << 'NGINXEOF'
+server {
+    listen 81;
+    server_name _;
+    root /var/www/chaiya;
+    location /config/ {
+        alias /var/www/chaiya/config/;
+        try_files $uri =404;
+        add_header Cache-Control "no-cache";
+    }
+    location /sshws/ {
+        alias /var/www/chaiya/;
+        index sshws.html;
+        try_files $uri $uri/ =404;
+    }
+    location /sshws-api/ {
+        proxy_pass http://127.0.0.1:6789/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
+    }
+}
+NGINXEOF
+  ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya 2>/dev/null || true
+fi
+nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null && echo "  ✅ nginx reload สำเร็จ"
+
+# 6. ทดสอบ API จริง
+sleep 1
+_api_test=$(curl -s --max-time 5 "http://127.0.0.1:6789/api/token" 2>/dev/null)
+if echo "$_api_test" | grep -q '"token"'; then
+  echo "  ✅ API ตอบสนองถูกต้อง"
+else
+  echo "  ❌ API ไม่ตอบสนอง: $_api_test"
+fi
+
+# 7. แสดง Dashboard URL
+_FIX_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+echo ""
+echo "  🌐 Dashboard URL:"
+echo "     http://${_FIX_IP}:81/sshws/sshws.html?token=${_FIX_TOK}"
+echo ""
 
 echo ""
 echo "╭══════════════════════════════════════════════════════════╮"
