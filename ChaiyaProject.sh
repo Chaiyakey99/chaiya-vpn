@@ -1087,9 +1087,18 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 // Token / API
 // ══════════════════════════════════════════════
 const _baked = '%%BAKED_TOKEN%%';
-let TOKEN = new URLSearchParams(location.search).get('token')
+// sanitize: เก็บเฉพาะ hex chars [0-9a-f] ป้องกัน non-ASCII ใน headers
+function _cleanToken(t) {
+  if (!t) return '';
+  // ลอง hex เท่านั้นก่อน (openssl rand -hex 16 ให้ hex เสมอ)
+  const hex = t.replace(/[^0-9a-zA-Z_\-]/g, '').trim();
+  return hex;
+}
+let TOKEN = _cleanToken(
+  new URLSearchParams(location.search).get('token')
   || (_baked && !_baked.startsWith('%%') ? _baked : '')
-  || document.cookie.match(/token=([^;]+)/)?.[1] || '';
+  || document.cookie.match(/token=([^;]+)/)?.[1] || ''
+);
 
 let _tokenPromise = null;
 async function ensureToken() {
@@ -1117,19 +1126,47 @@ async function ensureToken() {
   return _tokenPromise;
 }
 
+// sanitize token — เก็บเฉพาะ printable ASCII (hex token จาก openssl rand -hex 16)
+function _safeToken(t) {
+  if (!t) return '';
+  // กรองเอาเฉพาะ ASCII printable ป้องกัน non ISO-8859-1 error
+  return t.replace(/[^ -~]/g, '').trim();
+}
+
 async function api(method, path, body=null) {
-  const tok = await ensureToken();
+  const rawTok = await ensureToken();
+  const tok = _safeToken(rawTok);
+
   const headers = {'Content-Type': 'application/json'};
-  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+
+  if (tok) {
+    // X-Token: custom header — ไม่มีข้อจำกัด encoding
+    headers['X-Token'] = tok;
+    headers['X-Auth-Token'] = tok;
+    // Authorization header: ต้องเป็น ISO-8859-1 เท่านั้น
+    // ตรวจสอบก่อนใส่ — ถ้ามี non-ASCII ข้าม
+    const isAsciiOnly = /^[ -]*$/.test('Bearer ' + tok);
+    if (isAsciiOnly) {
+      headers['Authorization'] = 'Bearer ' + tok;
+    }
+  }
+
   const opts = {method, headers};
   if (body !== null) opts.body = JSON.stringify(body);
+
+  // เพิ่ม token ใน query string เป็น fallback สุดท้าย
+  const url = '/sshws-api' + path + (tok ? (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(tok) : '');
+
   try {
-    const r = await fetch('/sshws-api' + path, opts);
+    const r = await fetch(url, opts);
     if (!r.ok && r.status === 401) {
-      showToast('Token ไม่ถูกต้อง — เพิ่ม ?token=xxx ใน URL', false);
+      toast('Token ไม่ถูกต้อง', false);
       return {error: 'unauthorized'};
     }
-    return await r.json();
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('application/json')) return await r.json();
+    const text = await r.text();
+    try { return JSON.parse(text); } catch(e) { return {error: 'invalid json', raw: text.slice(0,200)}; }
   } catch(e) {
     console.error('API error:', path, e.message);
     return {error: e.message};
@@ -1807,7 +1844,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(body))
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Token,X-Auth-Token")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1815,12 +1852,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Token,X-Auth-Token")
         self.end_headers()
 
     def auth(self):
+        # 1. Authorization: Bearer <token>
         t = self.headers.get("Authorization","").replace("Bearer ","").strip()
-        return hmac.compare_digest(t, TOKEN)
+        if t and hmac.compare_digest(t, TOKEN):
+            return True
+        # 2. X-Token header (custom — ไม่มี ISO-8859-1 restriction จาก browser)
+        t2 = self.headers.get("X-Token","").strip()
+        if t2 and hmac.compare_digest(t2, TOKEN):
+            return True
+        # 3. X-Auth-Token header
+        t3 = self.headers.get("X-Auth-Token","").strip()
+        if t3 and hmac.compare_digest(t3, TOKEN):
+            return True
+        # 4. query string ?token=xxx (fallback สุดท้าย)
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        t4 = qs.get("token", [""])[0].strip()
+        if t4 and hmac.compare_digest(t4, TOKEN):
+            return True
+        return False
 
     def read_body(self):
         n = int(self.headers.get("Content-Length",0))
