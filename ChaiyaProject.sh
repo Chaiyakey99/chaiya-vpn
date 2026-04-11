@@ -634,898 +634,890 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🚀 Chaiya SSH Manager</title>
+<title>🚀 CHAIYA SSH MANAGER</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet">
 <style>
   :root {
+    --bg:#0a0d14;--bg2:#0f1520;--bg3:#141c2e;--panel:#111827;
+    --border:#1e2d45;--border2:#243552;
+    --green:#4dffa0;--cyan:#80ffdd;--purple:#b8a0ff;
+    --yellow:#ffe680;--red:#ff6b8a;--orange:#ffb347;
+    --text:#c8ddd0;--muted:#7a9aaa;
     --rgb1:#ff006e;--rgb2:#ff8c00;--rgb3:#ffe000;
     --rgb4:#00ff50;--rgb5:#00dcff;--rgb6:#b400ff;
-    --bg:#0a0a0f;--card:#12121a;--card2:#1a1a26;
-    --border:#2a2a40;--text:#e0e0ff;--muted:#6060a0;
   }
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;min-height:100vh;overflow-x:hidden;}
-  body::before{content:'';position:fixed;inset:0;z-index:-1;background:linear-gradient(135deg,rgba(255,0,110,.04) 0%,rgba(0,220,255,.04) 25%,rgba(180,0,255,.04) 50%,rgba(0,255,80,.04) 75%,rgba(255,140,0,.04) 100%);animation:bgwave 8s linear infinite;background-size:400% 400%;}
-  @keyframes bgwave{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+  body{font-family:'Exo 2',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(77,255,160,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(77,255,160,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+  body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.05) 2px,rgba(0,0,0,.05) 4px);pointer-events:none;z-index:0;}
+
   .rgb-text{background:linear-gradient(90deg,var(--rgb1),var(--rgb2),var(--rgb3),var(--rgb4),var(--rgb5),var(--rgb6),var(--rgb1));background-size:200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:rgbshift 4s linear infinite;}
   @keyframes rgbshift{0%{background-position:0%}100%{background-position:200%}}
-  .rgb-border{position:relative;}
-  .rgb-border::before{content:'';position:absolute;inset:-1px;z-index:-1;border-radius:inherit;background:linear-gradient(90deg,var(--rgb1),var(--rgb2),var(--rgb3),var(--rgb4),var(--rgb5),var(--rgb6),var(--rgb1));background-size:300%;animation:rgbshift 3s linear infinite;}
-  .header{text-align:center;padding:2rem 1rem 1rem;}
-  .header h1{font-size:2rem;font-weight:900;letter-spacing:2px;}
-  .header p{color:var(--muted);margin-top:.4rem;font-size:.9rem;}
-  .tabs{display:flex;gap:.5rem;padding:0 1rem 1rem;overflow-x:auto;justify-content:center;flex-wrap:wrap;}
-  .tab{padding:.5rem 1.2rem;border-radius:2rem;border:1px solid var(--border);background:var(--card);color:var(--muted);cursor:pointer;font-size:.85rem;transition:all .2s;white-space:nowrap;}
-  .tab:hover{border-color:var(--rgb5);color:var(--rgb5);}
-  .tab.active{background:linear-gradient(135deg,rgba(0,220,255,.2),rgba(180,0,255,.2));border-color:var(--rgb5);color:#fff;}
-  .page{display:none;padding:0 1rem 2rem;max-width:900px;margin:0 auto;}
-  .page.active{display:block;}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:1rem;padding:1.2rem;margin-bottom:1rem;}
-  .card-title{font-size:.8rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:.8rem;display:flex;align-items:center;gap:.5rem;}
-  .status-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.8rem;}
-  .status-item{background:var(--card2);border-radius:.8rem;padding:.8rem 1rem;border:1px solid var(--border);display:flex;align-items:center;gap:.6rem;}
-  .status-icon{font-size:1.4rem;}
-  .status-label{font-size:.75rem;color:var(--muted);}
-  .status-val{font-size:.9rem;font-weight:600;}
-  .big-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;margin-bottom:1rem;}
-  .stat-box{background:var(--card2);border-radius:1rem;padding:1rem;text-align:center;border:1px solid var(--border);}
-  .stat-box .num{font-size:2rem;font-weight:900;}
-  .stat-box .lbl{font-size:.75rem;color:var(--muted);margin-top:.2rem;}
-  .btn{padding:.5rem 1.2rem;border-radius:.5rem;border:none;cursor:pointer;font-size:.85rem;font-weight:600;transition:all .2s;}
-  .btn-green{background:#00ff6022;color:#00ff80;border:1px solid #00ff6044;}
-  .btn-red{background:#ff004022;color:#ff4060;border:1px solid #ff004044;}
-  .btn-blue{background:#0080ff22;color:#60c0ff;border:1px solid #0080ff44;}
-  .btn-purple{background:#8000ff22;color:#c080ff;border:1px solid #8000ff44;}
-  .btn-yellow{background:#ffaa0022;color:#ffcc44;border:1px solid #ffaa0044;}
-  .btn-rgb{background:linear-gradient(135deg,rgba(255,0,110,.3),rgba(0,220,255,.3));color:#fff;border:1px solid rgba(0,220,255,.4);}
-  .btn:hover{opacity:.8;transform:translateY(-1px);}
+
+  .wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 14px 48px;}
+
+  /* ─ Header ─ */
+  header{text-align:center;padding:24px 0 16px;}
+  .logo-icon{font-size:2.2rem;display:block;animation:pulse-icon 2s ease-in-out infinite;}
+  @keyframes pulse-icon{0%,100%{filter:drop-shadow(0 0 8px var(--green))}50%{filter:drop-shadow(0 0 18px var(--cyan));transform:scale(1.06)}}
+  .logo-title{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:1.9rem;letter-spacing:4px;margin-top:4px;}
+  .logo-sub{font-family:'Share Tech Mono',monospace;font-size:.65rem;color:var(--muted);letter-spacing:6px;text-transform:uppercase;margin-top:2px;}
+  .server-info{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--border);border-radius:20px;padding:3px 14px;font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--muted);margin-top:8px;}
+  .sdot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1.4s infinite;}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+  /* ─ Stats ─ */
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0;}
+  @media(max-width:540px){.stats{grid-template-columns:1fr 1fr;}}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 12px;position:relative;overflow:hidden;transition:transform .2s;}
+  .stat:hover{transform:translateY(-2px);}
+  .stat::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:10px 10px 0 0;}
+  .stat.g::before{background:linear-gradient(90deg,var(--green),transparent);}
+  .stat.c::before{background:linear-gradient(90deg,var(--cyan),transparent);}
+  .stat.p::before{background:linear-gradient(90deg,var(--purple),transparent);}
+  .stat.y::before{background:linear-gradient(90deg,var(--yellow),transparent);}
+  .stat.r::before{background:linear-gradient(90deg,var(--red),transparent);}
+  .stat.o::before{background:linear-gradient(90deg,var(--orange),transparent);}
+  .stat-num{font-family:'Share Tech Mono',monospace;font-size:1.8rem;font-weight:bold;line-height:1;}
+  .stat.g .stat-num{color:var(--green)}.stat.c .stat-num{color:var(--cyan)}
+  .stat.p .stat-num{color:var(--purple)}.stat.y .stat-num{color:var(--yellow)}
+  .stat.r .stat-num{color:var(--red)}.stat.o .stat-num{color:var(--orange)}
+  .stat-lbl{font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:4px;}
+  .stat-ico{font-size:1.2rem;margin-bottom:6px;}
+
+  /* ─ Tabs ─ */
+  .tabs{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;margin:14px 0 18px;}
+  .tab{display:flex;align-items:center;gap:5px;padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:var(--panel);color:var(--muted);font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.85rem;letter-spacing:1px;cursor:pointer;transition:all .2s;white-space:nowrap;}
+  .tab:hover{border-color:var(--cyan);color:var(--cyan);background:rgba(128,255,221,.06);}
+  .tab.active{background:rgba(128,255,221,.1);border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 10px rgba(128,255,221,.18);}
+
+  /* ─ Pages ─ */
+  .page{display:none;} .page.active{display:block;}
+
+  /* ─ Card ─ */
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:11px;margin-bottom:14px;overflow:hidden;}
+  .card-head{display:flex;align-items:center;justify-content:space-between;padding:11px 15px;border-bottom:1px solid var(--border);background:var(--bg3);}
+  .card-title{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.85rem;letter-spacing:2px;text-transform:uppercase;color:var(--cyan);display:flex;align-items:center;gap:7px;}
+  .card-body{padding:14px;}
+
+  /* ─ Service rows ─ */
+  .svc-list{display:flex;flex-direction:column;gap:7px;}
+  .svc-row{display:flex;align-items:center;gap:11px;padding:9px 13px;background:var(--bg2);border:1px solid var(--border);border-radius:7px;transition:border-color .2s;}
+  .svc-row:hover{border-color:var(--border2);}
+  .svc-ico{font-size:1.2rem;flex-shrink:0;}
+  .svc-info{flex:1;min-width:0;}
+  .svc-name{font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.9rem;}
+  .svc-desc{font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--muted);}
+  .svc-badge{display:flex;align-items:center;gap:4px;font-family:'Share Tech Mono',monospace;font-size:.62rem;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+  .svc-badge.on{background:rgba(77,255,160,.1);color:var(--green);border:1px solid rgba(77,255,160,.3);}
+  .svc-badge.off{background:rgba(255,107,138,.1);color:var(--red);border:1px solid rgba(255,107,138,.3);}
+  .svc-badge .bd{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+  .svc-badge.on .bd{background:var(--green);box-shadow:0 0 5px var(--green);animation:blink 1.4s infinite;}
+  .svc-badge.off .bd{background:var(--red);}
+
+  /* ─ Conn bars ─ */
+  .bar-wrap{margin-bottom:10px;}
+  .bar-lbl{display:flex;justify-content:space-between;font-family:'Share Tech Mono',monospace;font-size:.65rem;color:var(--muted);margin-bottom:3px;}
+  .bar{height:5px;background:var(--bg2);border-radius:3px;overflow:hidden;}
+  .bar-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--green),var(--cyan));box-shadow:0 0 6px rgba(77,255,160,.4);transition:width .8s ease;}
+
+  /* ─ Config box ─ */
+  .cfg-box{background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;}
+  .cfg-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(30,45,69,.5);font-family:'Share Tech Mono',monospace;font-size:.72rem;}
+  .cfg-row:last-child{border:none;}
+  .cfg-k{color:var(--muted);}
+  .cfg-v{color:var(--yellow);text-align:right;word-break:break-all;max-width:60%;}
+
+  /* ─ Forms ─ */
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media(max-width:500px){.form-grid{grid-template-columns:1fr;}}
+  .form-g{display:flex;flex-direction:column;gap:4px;}
+  .form-g label{font-family:'Rajdhani',sans-serif;font-weight:600;font-size:.72rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);}
+  input,select{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.8rem;outline:none;transition:border-color .2s,box-shadow .2s;width:100%;}
+  input:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(128,255,221,.1);}
+  select option{background:var(--bg2);}
+  .full{grid-column:1/-1;}
+  .inp-row{display:flex;gap:6px;}
+  .inp-row input{flex:1;}
+
+  /* ─ Buttons ─ */
+  .btn-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;}
+  .btn{display:inline-flex;align-items:center;gap:5px;padding:7px 16px;border-radius:6px;border:1px solid transparent;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.82rem;letter-spacing:1px;cursor:pointer;transition:all .2s;white-space:nowrap;}
+  .btn:hover{opacity:.85;transform:translateY(-1px);}
   .btn:active{transform:scale(.97);}
-  .btn-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem;}
-  .form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.8rem;}
-  .form-group label{display:block;font-size:.75rem;color:var(--muted);margin-bottom:.3rem;}
-  .form-group input,.form-group select{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:.5rem;padding:.5rem .8rem;color:var(--text);font-size:.9rem;outline:none;transition:border-color .2s;}
-  .form-group input:focus,.form-group select:focus{border-color:var(--rgb5);}
-  .form-group select option{background:#1a1a26;}
-  .table-wrap{overflow-x:auto;}
-  table{width:100%;border-collapse:collapse;font-size:.85rem;}
-  th{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--border);color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;}
-  td{padding:.6rem .8rem;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle;}
+  .btn-c{background:rgba(128,255,221,.1);border-color:var(--cyan);color:var(--cyan);}
+  .btn-g{background:rgba(77,255,160,.1);border-color:var(--green);color:var(--green);}
+  .btn-r{background:rgba(255,107,138,.1);border-color:var(--red);color:var(--red);}
+  .btn-y{background:rgba(255,230,128,.1);border-color:var(--yellow);color:var(--yellow);}
+  .btn-p{background:rgba(184,160,255,.1);border-color:var(--purple);color:var(--purple);}
+  .btn-sm{padding:4px 10px;font-size:.72rem;}
+
+  /* ─ Table ─ */
+  .tbl-wrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:.8rem;}
+  th{font-family:'Rajdhani',sans-serif;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-size:.68rem;color:var(--cyan);padding:8px 11px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg3);}
+  td{padding:8px 11px;border-bottom:1px solid rgba(30,45,69,.5);font-family:'Share Tech Mono',monospace;font-size:.72rem;vertical-align:middle;}
   tr:hover td{background:rgba(255,255,255,.02);}
-  .badge{display:inline-block;padding:.15rem .5rem;border-radius:1rem;font-size:.75rem;font-weight:600;}
-  .badge-green{background:#00ff6022;color:#00ff80;}
-  .badge-red{background:#ff004022;color:#ff4060;}
-  .badge-yellow{background:#ffaa0022;color:#ffcc44;}
-  .badge-purple{background:#8000ff22;color:#c080ff;}
-  .modal-bg{display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;}
+  .bdg{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.6rem;font-family:'Share Tech Mono',monospace;letter-spacing:1px;}
+  .bdg-g{background:rgba(77,255,160,.12);color:var(--green);border:1px solid rgba(77,255,160,.3);}
+  .bdg-r{background:rgba(255,107,138,.12);color:var(--red);border:1px solid rgba(255,107,138,.3);}
+  .bdg-y{background:rgba(255,230,128,.12);color:var(--yellow);border:1px solid rgba(255,230,128,.3);}
+  .bdg-p{background:rgba(184,160,255,.12);color:var(--purple);border:1px solid rgba(184,160,255,.3);}
+
+  /* ─ Log ─ */
+  .log-box{background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:11px 13px;font-family:'Share Tech Mono',monospace;font-size:.68rem;line-height:1.85;max-height:230px;overflow-y:auto;color:var(--muted);}
+  .log-box::-webkit-scrollbar{width:4px;}
+  .log-box::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
+  .log-ok{color:var(--green)}.log-err{color:var(--red)}.log-con{color:var(--cyan)}.log-w{color:var(--orange)}
+
+  /* ─ Modal ─ */
+  .modal-bg{display:none;position:fixed;inset:0;z-index:100;background:rgba(10,13,20,.85);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:14px;}
   .modal-bg.open{display:flex;}
-  .modal{background:var(--card);border:1px solid var(--border);border-radius:1.2rem;padding:1.5rem;width:90%;max-width:480px;position:relative;animation:popIn .2s ease;}
-  @keyframes popIn{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
-  .modal h3{margin-bottom:1rem;font-size:1.1rem;}
-  .modal-close{position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;}
-  .user-detail{background:var(--card2);border-radius:.8rem;padding:1rem;margin-top:.8rem;border:1px solid var(--border);display:none;}
-  .user-detail.show{display:block;}
-  .detail-row{display:flex;justify-content:space-between;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.85rem;}
-  .detail-row:last-child{border:none;}
-  .detail-key{color:var(--muted);}
-  .detail-val{font-weight:600;}
-  .alert{padding:.7rem 1rem;border-radius:.6rem;margin-bottom:.8rem;font-size:.85rem;display:none;}
+  .modal{background:var(--panel);border:1px solid var(--border2);border-radius:13px;width:100%;max-width:460px;animation:mIn .22s ease;}
+  @keyframes mIn{from{opacity:0;transform:scale(.92) translateY(18px)}to{opacity:1;transform:none}}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:13px 15px;border-bottom:1px solid var(--border);font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.9rem;letter-spacing:2px;color:var(--cyan);}
+  .modal-x{background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;padding:2px 6px;border-radius:4px;}
+  .modal-x:hover{color:var(--red);}
+  .modal-body{padding:14px;}
+
+  /* ─ Toast ─ */
+  #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(70px);background:var(--panel);border:1px solid var(--cyan);border-radius:7px;padding:8px 18px;font-family:'Share Tech Mono',monospace;font-size:.75rem;color:var(--cyan);box-shadow:0 0 16px rgba(128,255,221,.2);transition:transform .28s ease;z-index:999;white-space:nowrap;}
+  #toast.show{transform:translateX(-50%) translateY(0);}
+  #toast.err{border-color:var(--red);color:var(--red);}
+
+  /* ─ Svc ctrl row ─ */
+  .svc-ctrl{display:flex;align-items:center;justify-content:space-between;}
+
+  /* ─ Alert ─ */
+  .alert{padding:7px 11px;border-radius:6px;margin-bottom:8px;font-size:.8rem;display:none;}
   .alert.show{display:block;}
-  .alert-ok{background:#00ff6018;border:1px solid #00ff6044;color:#00ff80;}
-  .alert-err{background:#ff004018;border:1px solid #ff004044;color:#ff6080;}
-  .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:var(--rgb5);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:.4rem;}
+  .alert-ok{background:rgba(0,255,96,.1);border:1px solid rgba(0,255,96,.25);color:var(--green);}
+  .alert-err{background:rgba(255,0,64,.1);border:1px solid rgba(255,0,64,.25);color:var(--red);}
+
+  /* ─ Spin ─ */
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.15);border-top-color:var(--cyan);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:4px;}
   @keyframes spin{to{transform:rotate(360deg)}}
-  @keyframes rgbSlide{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
-  .progress{background:var(--border);border-radius:1rem;height:6px;overflow:hidden;}
-  .progress-bar{height:100%;border-radius:1rem;background:linear-gradient(90deg,var(--rgb5),var(--rgb6));transition:width .5s;}
-  .progress-bar-rgb{height:100%;border-radius:1rem;width:100%;
-    background:linear-gradient(270deg,#ff0080,#ff4000,#ffcc00,#00ff80,#00d4ff,#8000ff,#ff0080);
-    background-size:300% 300%;animation:rgbSlide 3s ease infinite;
-    box-shadow:0 0 8px #00d4ff44,0 0 16px #8000ff22;}
-  ::-webkit-scrollbar{width:6px;height:6px;}
-  ::-webkit-scrollbar-track{background:var(--bg);}
-  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
-  ::-webkit-scrollbar-thumb:hover{background:var(--muted);}
-  #toast{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;background:var(--card2);border:1px solid var(--border);border-radius:.8rem;padding:.7rem 1.2rem;font-size:.85rem;opacity:0;transform:translateY(10px);transition:all .3s;pointer-events:none;max-width:280px;}
-  #toast.show{opacity:1;transform:translateY(0);}
-  .dot-online{display:inline-block;width:8px;height:8px;border-radius:50%;background:#00ff80;box-shadow:0 0 6px #00ff80;animation:pulse 1.5s infinite;}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-  @media(max-width:500px){.big-stats{grid-template-columns:repeat(3,1fr)}.stat-box .num{font-size:1.4rem}.header h1{font-size:1.5rem}}
+
+  /* ─ App selector (NapsternetV / DarkTunnel) ─ */
+  .sel-lbl{font-size:.68rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin:.75rem 0 .4rem;display:flex;align-items:center;gap:.3rem;}
+  .pick-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.3rem;}
+  .pick-opt{padding:.6rem .4rem;border-radius:.65rem;border:1.5px solid var(--border);background:var(--bg2);cursor:pointer;text-align:center;user-select:none;transition:all .2s;}
+  .pick-opt .pi{font-size:1.15rem;margin-bottom:.15rem;}.pick-opt .pn{font-size:.75rem;font-weight:700;}.pick-opt .ps{font-size:.6rem;color:var(--muted);margin-top:.08rem;}
+  .pick-opt.a-dtac{border-color:#ff6600;background:rgba(255,102,0,.1);box-shadow:0 0 10px rgba(255,102,0,.18);}
+  .pick-opt.a-true{border-color:#00ccff;background:rgba(0,204,255,.1);box-shadow:0 0 10px rgba(0,204,255,.18);}
+  .pick-opt.a-npv{border-color:#00ccff;background:rgba(0,204,255,.1);box-shadow:0 0 10px rgba(0,204,255,.18);}
+  .pick-opt.a-dark{border-color:#9933ff;background:rgba(153,51,255,.1);box-shadow:0 0 10px rgba(153,51,255,.2);}
+  .c-dtac{color:#ff8833;}.c-true{color:#00ccff;}.c-npv{color:#00ccff;}.c-dark{color:#cc66ff;}
+
+  /* ─ Import link block ─ */
+  .imp-result{display:none;margin-top:.8rem;animation:fadeUp .3s ease;}
+  .imp-result.show{display:block;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .imp-badge{font-size:.65rem;font-weight:700;letter-spacing:1.5px;padding:.16rem .5rem;border-radius:99px;}
+  .imp-badge.npv{background:rgba(0,180,255,.15);color:#00ccff;border:1px solid rgba(0,180,255,.3);}
+  .imp-badge.dark{background:rgba(153,51,255,.15);color:#cc66ff;border:1px solid rgba(153,51,255,.3);}
+  .link-preview{background:#06060e;border-radius:.5rem;padding:.5rem .7rem;font-family:monospace;font-size:.56rem;color:#00aadd;word-break:break-all;line-height:1.6;margin:.4rem 0;max-height:50px;overflow:hidden;position:relative;border:1px solid rgba(0,150,255,.15);}
+  .link-preview.dark-lp{border-color:rgba(153,51,255,.22);color:#aa55ff;}
+  .link-preview::after{content:'';position:absolute;bottom:0;left:0;right:0;height:14px;background:linear-gradient(transparent,#06060e);}
+  .copy-link-btn{width:100%;padding:.5rem;border-radius:.45rem;font-size:.8rem;font-weight:700;cursor:pointer;transition:all .2s;font-family:inherit;border:1px solid;}
+  .copy-link-btn.npv{background:rgba(0,180,255,.08);border-color:rgba(0,180,255,.28);color:#00ccff;}
+  .copy-link-btn.dark{background:rgba(153,51,255,.08);border-color:rgba(153,51,255,.28);color:#cc66ff;}
+  .copy-link-btn:hover{opacity:.78;}
+
+  /* ─ Traf chart ─ */
+  #traf-chart{width:100%;display:block;border-radius:.4rem;height:140px;}
+  .traf-total{font-size:1rem;font-weight:900;color:#00e8ff;font-family:monospace;text-shadow:0 0 10px #00e8ff88}
+
+  @media(max-width:500px){.stats{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
-<div class="header">
-  <h1 class="rgb-text">🚀 CHAIYA SSH MANAGER</h1>
-  <p id="server-ip" style="min-height:1.2em"></p>
+<div class="wrap">
+
+<!-- Header -->
+<header>
+  <span class="logo-icon">🚀</span>
+  <div class="logo-title rgb-text">CHAIYA SSH MANAGER</div>
+  <div class="logo-sub">V2RAY PRO MAX · DASHBOARD</div>
+  <div class="server-info">
+    <span class="sdot"></span>
+    <span id="server-ip" style="min-height:1em">กำลังโหลด...</span>
+    &nbsp;·&nbsp;
+    <span id="clock-txt">--:--:--</span>
+  </div>
+</header>
+
+<!-- Stats -->
+<div class="stats">
+  <div class="stat c"><div class="stat-ico">👤</div><div class="stat-num" id="stat-users">-</div><div class="stat-lbl">Total Users</div></div>
+  <div class="stat g"><div class="stat-ico">🟢</div><div class="stat-num" id="stat-online">-</div><div class="stat-lbl">Online</div></div>
+  <div class="stat p"><div class="stat-ico">🔗</div><div class="stat-num" id="stat-conns">-</div><div class="stat-lbl">Connections</div></div>
+  <div class="stat r"><div class="stat-ico">🔒</div><div class="stat-num" id="stat-banned">0</div><div class="stat-lbl">Banned</div></div>
+  <div class="stat y"><div class="stat-ico">⚡</div><div class="stat-num" id="stat-vless">-</div><div class="stat-lbl">VLESS</div></div>
+  <div class="stat o"><div class="stat-ico">📡</div><div class="stat-num" id="stat-port">80</div><div class="stat-lbl">WS Port</div></div>
 </div>
+
+<!-- Tabs -->
 <div class="tabs">
-  <div class="tab active" onclick="showTab('dashboard')">📊 Dashboard</div>
-  <div class="tab" onclick="showTab('users')">👤 Users</div>
-  <div class="tab" onclick="showTab('online')">🌐 Online</div>
-  <div class="tab" onclick="showTab('banned')">🔒 Banned</div>
-  <div class="tab" onclick="showTab('backup')">💾 Backup</div>
-  <div class="tab" onclick="showTab('services')">⚙️ Services</div>
+  <div class="tab active" onclick="showTab('dashboard',this)">📊 Dashboard</div>
+  <div class="tab" onclick="showTab('users',this)">👤 Users</div>
+  <div class="tab" onclick="showTab('online',this)">🌐 Online</div>
+  <div class="tab" onclick="showTab('banned',this)">🔒 Banned</div>
+  <div class="tab" onclick="showTab('backup',this)">💾 Backup</div>
+  <div class="tab" onclick="showTab('services',this)">⚙️ Services</div>
 </div>
+
+<!-- ═══ DASHBOARD ═══ -->
 <div id="page-dashboard" class="page active">
-  <div class="big-stats">
-    <div class="stat-box rgb-border"><div class="num rgb-text" id="stat-users">-</div><div class="lbl">👤 Total Users</div></div>
-    <div class="stat-box rgb-border"><div class="num rgb-text" id="stat-online">-</div><div class="lbl">🟢 Online</div></div>
-    <div class="stat-box rgb-border"><div class="num rgb-text" id="stat-conns">-</div><div class="lbl">🔗 Connections</div></div>
-  </div>
   <div class="card">
-    <div class="card-title">📊 สถานะ Services</div>
-    <div class="status-grid" id="svc-grid">
-      <div class="status-item"><span class="status-icon">🚇</span><div><div class="status-label">chaiya-sshws</div><div class="status-val" id="svc-sshws">...</div></div></div>
-      <div class="status-item"><span class="status-icon">🐻</span><div><div class="status-label">Dropbear SSH</div><div class="status-val" id="svc-dropbear">...</div></div></div>
-      <div class="status-item"><span class="status-icon">🌐</span><div><div class="status-label">nginx</div><div class="status-val" id="svc-nginx">...</div></div></div>
-      <div class="status-item"><span class="status-icon">🎮</span><div><div class="status-label">badvpn-udpgw</div><div class="status-val" id="svc-badvpn">...</div></div></div>
-      <div class="status-item"><span class="status-icon">🔌</span><div><div class="status-label">Port 80 Tunnel</div><div class="status-val" id="svc-tunnel">...</div></div></div>
-      <div class="status-item"><span class="status-icon">⏱️</span><div><div class="status-label">Started</div><div class="status-val" id="svc-uptime" style="font-size:.75rem">...</div></div></div>
+    <div class="card-head">
+      <div class="card-title">📊 สถานะ Services</div>
+      <button class="btn btn-c btn-sm" onclick="loadDashboard()">🔄 Refresh</button>
     </div>
-    <div class="btn-row">
-      <button class="btn btn-green" onclick="svcAction('restart')">🔄 Restart All</button>
-      <button class="btn btn-red"   onclick="svcAction('stop')">⏹ Stop</button>
-      <button class="btn btn-blue"  onclick="svcAction('start')">▶️ Start</button>
-      <button class="btn btn-purple" onclick="restartUdpgw()">🎮 UDP</button>
-      <button class="btn btn-yellow" onclick="loadDashboard()">🔃 Refresh</button>
+    <div class="card-body">
+      <div class="svc-list">
+        <div class="svc-row"><span class="svc-ico">🚇</span><div class="svc-info"><div class="svc-name">chaiya-sshws</div><div class="svc-desc">SSH WebSocket Proxy · Port 80</div></div><div id="svc-sshws" class="svc-badge off"><span class="bd"></span>...</div></div>
+        <div class="svc-row"><span class="svc-ico">🐻</span><div class="svc-info"><div class="svc-name">Dropbear SSH</div><div class="svc-desc">SSH Daemon · Port 143 / 109</div></div><div id="svc-dropbear" class="svc-badge off"><span class="bd"></span>...</div></div>
+        <div class="svc-row"><span class="svc-ico">🌐</span><div class="svc-info"><div class="svc-name">nginx</div><div class="svc-desc">Web Server · Port 81 / 443</div></div><div id="svc-nginx" class="svc-badge off"><span class="bd"></span>...</div></div>
+        <div class="svc-row"><span class="svc-ico">🎮</span><div class="svc-info"><div class="svc-name">badvpn-udpgw</div><div class="svc-desc">UDP Gateway · 127.0.0.1:7300</div></div><div id="svc-badvpn" class="svc-badge off"><span class="bd"></span>...</div></div>
+        <div class="svc-row"><span class="svc-ico">🔌</span><div class="svc-info"><div class="svc-name">Port 80 Tunnel</div><div class="svc-desc">HTTP-CONNECT ws-stunnel</div></div><div id="svc-tunnel" class="svc-badge off"><span class="bd"></span>...</div></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-g" onclick="svcAction('restart')">🔄 Restart All</button>
+        <button class="btn btn-r" onclick="svcAction('stop')">⏹ Stop</button>
+        <button class="btn btn-c" onclick="svcAction('start')">▶️ Start</button>
+        <button class="btn btn-p" onclick="restartUdpgw()">🎮 UDP</button>
+      </div>
     </div>
   </div>
+
   <div class="card">
-    <div class="card-title">📱 Connection Config</div>
-    <div id="conn-info" style="font-size:.85rem;line-height:1.8">กำลังโหลด...</div>
+    <div class="card-head"><div class="card-title">🔗 Connections per Port</div></div>
+    <div class="card-body" id="conn-bars-wrap">
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 80 (WS Tunnel)</span><span id="b80">0</span></div><div class="bar"><div class="bar-fill" id="bf80" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 143 (Dropbear #1)</span><span id="b143">0</span></div><div class="bar"><div class="bar-fill" id="bf143" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 109 (Dropbear #2)</span><span id="b109">0</span></div><div class="bar"><div class="bar-fill" id="bf109" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 22 (OpenSSH)</span><span id="b22">0</span></div><div class="bar"><div class="bar-fill" id="bf22" style="width:0%"></div></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">📱 Connection Config</div>
+      <button class="btn btn-y btn-sm" onclick="genToken()">🎲 New Token</button>
+    </div>
+    <div class="card-body">
+      <div id="conn-info" class="cfg-box">กำลังโหลด...</div>
+      <!-- App selector -->
+      <div class="sel-lbl">🌐 เลือก ISP / Operator</div>
+      <div class="pick-grid">
+        <div id="pro-dtac" class="pick-opt a-dtac" onclick="selPro('dtac')"><div class="pi">🟠</div><div class="pn c-dtac">DTAC GAMING</div><div class="ps">dl.dir.freefiremobile.com</div></div>
+        <div id="pro-true" class="pick-opt" onclick="selPro('true')"><div class="pi">🔵</div><div class="pn c-true">TRUE TWITTER</div><div class="ps">help.x.com</div></div>
+      </div>
+      <div class="sel-lbl">📱 เลือก App</div>
+      <div class="pick-grid">
+        <div id="app-npv"  class="pick-opt a-npv"  onclick="selApp('npv')"><div class="pi">🌊</div><div class="pn c-npv">NapsternetV</div><div class="ps">npvt-ssh://</div></div>
+        <div id="app-dark" class="pick-opt" onclick="selApp('dark')"><div class="pi">🌑</div><div class="pn c-dark">DarkTunnel</div><div class="ps">darktunnel://</div></div>
+      </div>
+      <div class="btn-row"><button class="btn btn-c" onclick="genImportLink()">🔗 สร้าง Import Link</button></div>
+      <div class="imp-result" id="imp-result"></div>
+    </div>
   </div>
 </div>
-<style>
-/* ── RGB Pro/App Selector ───────────────────────────── */
-.sel-label{font-size:.72rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin:.8rem 0 .45rem;display:flex;align-items:center;gap:.35rem;}
-.pick-grid{display:grid;grid-template-columns:1fr 1fr;gap:.55rem;margin-bottom:.3rem;}
-.pick-opt{padding:.65rem .5rem;border-radius:.7rem;border:1.5px solid var(--border);background:var(--card2);cursor:pointer;text-align:center;user-select:none;transition:all .2s;}
-.pick-opt .pi{font-size:1.25rem;margin-bottom:.2rem;}
-.pick-opt .pn{font-size:.78rem;font-weight:700;letter-spacing:.3px;}
-.pick-opt .ps{font-size:.62rem;color:var(--muted);margin-top:.1rem;}
-/* Pro active states */
-.pick-opt.a-dtac{border-color:#ff6600;background:rgba(255,102,0,.12);box-shadow:0 0 12px rgba(255,102,0,.2);}
-.pick-opt.a-true{border-color:#00ccff;background:rgba(0,204,255,.12);box-shadow:0 0 12px rgba(0,204,255,.2);}
-.c-dtac{color:#ff8833;} .c-true{color:#00ccff;}
-/* App active states */
-.pick-opt.a-npv {border-color:#00ccff;background:rgba(0,204,255,.12);box-shadow:0 0 12px rgba(0,204,255,.2);}
-.pick-opt.a-dark{border-color:#9933ff;background:rgba(153,51,255,.12);box-shadow:0 0 12px rgba(153,51,255,.22);}
-.c-npv{color:#00ccff;} .c-dark{color:#cc66ff;}
 
-/* ── Import Link result block ───────────────────────── */
-.import-result{display:none;margin-top:.85rem;animation:fadeUp .3s ease;}
-.import-result.show{display:block;}
-@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.import-head{display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem;}
-.imp-badge{font-size:.68rem;font-weight:700;letter-spacing:1.5px;padding:.18rem .55rem;border-radius:99px;}
-.imp-badge.npv {background:rgba(0,180,255,.15);color:#00ccff;border:1px solid rgba(0,180,255,.3);}
-.imp-badge.dark{background:rgba(153,51,255,.15);color:#cc66ff;border:1px solid rgba(153,51,255,.3);}
-.imp-desc{font-size:.7rem;color:var(--muted);}
-.link-preview{background:#06060e;border-radius:.55rem;padding:.55rem .75rem;font-family:monospace;font-size:.58rem;color:#00aadd;word-break:break-all;line-height:1.6;margin-bottom:.5rem;max-height:52px;overflow:hidden;position:relative;border:1px solid rgba(0,150,255,.18);}
-.link-preview.dark-lp{border-color:rgba(153,51,255,.25);color:#aa55ff;}
-.link-preview::after{content:'';position:absolute;bottom:0;left:0;right:0;height:16px;background:linear-gradient(transparent,#06060e);}
-.copy-link-btn{width:100%;padding:.55rem;border-radius:.5rem;font-size:.83rem;font-weight:700;cursor:pointer;transition:all .2s;font-family:inherit;border:1px solid;}
-.copy-link-btn.npv {background:rgba(0,180,255,.1);border-color:rgba(0,180,255,.3);color:#00ccff;}
-.copy-link-btn.dark{background:rgba(153,51,255,.1);border-color:rgba(153,51,255,.3);color:#cc66ff;}
-.copy-link-btn:hover{opacity:.8;}
-.copy-link-btn:active{transform:scale(.98);}
-
-/* ── RGB particle glow on create button ─────────────── */
-@keyframes rgbPulse{
-  0%  {box-shadow:0 0 0 0 rgba(255,0,110,.5);}
-  25% {box-shadow:0 0 0 6px rgba(0,220,255,.4);}
-  50% {box-shadow:0 0 0 10px rgba(180,0,255,.3);}
-  75% {box-shadow:0 0 0 6px rgba(0,255,80,.3);}
-  100%{box-shadow:0 0 0 0 rgba(255,0,110,.0);}
-}
-.btn-rgb{animation:rgbPulse 3s ease infinite;}
-
-/* ── Shimmer on success detail ──────────────────────── */
-@keyframes shimmer{0%{background-position:-200% center}100%{background-position:200% center}}
-.success-shine{
-  background:linear-gradient(90deg,rgba(0,255,80,.05),rgba(0,255,80,.12),rgba(0,255,80,.05));
-  background-size:200%;animation:shimmer 2.5s linear infinite;
-  border:1px solid rgba(0,255,80,.2);border-radius:.6rem;
-  padding:.5rem .8rem;margin-bottom:.5rem;
-  font-size:.8rem;color:#00ff80;font-weight:700;
-}
-</style>
-
+<!-- ═══ USERS ═══ -->
 <div id="page-users" class="page">
-  <div class="card rgb-border">
-    <div class="card-title">➕ สร้าง SSH User</div>
-    <div id="alert-user" class="alert"></div>
-    <div class="form-grid">
-      <div class="form-group"><label>Username</label><input type="text" id="u-name" placeholder="เช่น john"></div>
-      <div class="form-group"><label>Password</label><input type="password" id="u-pass" placeholder="รหัสผ่าน"></div>
-      <div class="form-group"><label>วันหมดอายุ (วัน)</label><input type="number" id="u-days" value="30" min="1"></div>
-    </div>
-
-    <div class="sel-label">🎯 เลือกโปร</div>
-    <div class="pick-grid">
-      <div class="pick-opt a-dtac" id="pro-dtac" onclick="selPro('dtac')">
-        <div class="pi">🎮</div><div class="pn c-dtac">DTAC GAMING</div><div class="ps">ดีแทค เกมมิ่ง</div>
+  <div class="card">
+    <div class="card-head"><div class="card-title">➕ เพิ่ม SSH User</div></div>
+    <div class="card-body">
+      <div id="alert-create" class="alert"></div>
+      <div class="form-grid">
+        <div class="form-g"><label>Username</label><input type="text" id="new-user" placeholder="username"></div>
+        <div class="form-g"><label>Password</label><input type="password" id="new-pass" placeholder="password"></div>
+        <div class="form-g"><label>หมดอายุ (วัน)</label><input type="number" id="new-exp" value="30" min="1"></div>
+        <div class="form-g"><label>IP Limit</label><input type="number" id="new-iplimit" value="2" min="1"></div>
       </div>
-      <div class="pick-opt" id="pro-true" onclick="selPro('true')">
-        <div class="pi">🐦</div><div class="pn c-true">TRUE TWITTER</div><div class="ps">ทรู ทวิตเตอร์</div>
-      </div>
-    </div>
-
-    <div class="sel-label">📲 เลือกแอปที่จะใช้</div>
-    <div class="pick-grid">
-      <div class="pick-opt a-npv" id="app-npv" onclick="selApp('npv')">
-        <div class="pi">📱</div><div class="pn c-npv">Npv Tunnel</div><div class="ps">V2ray / SSH</div>
-      </div>
-      <div class="pick-opt" id="app-dark" onclick="selApp('dark')">
-        <div class="pi">🌑</div><div class="pn c-dark">DarkTunnel</div><div class="ps">SSH / DNSTT / V2Ray</div>
-      </div>
-    </div>
-
-    <div class="btn-row"><button class="btn btn-rgb" onclick="createUser()">✨ สร้าง User</button></div>
-
-    <div id="user-created-detail" class="user-detail">
-      <div class="success-shine">✅ สร้าง User สำเร็จ!</div>
-      <div class="detail-row"><span class="detail-key">Username</span><span class="detail-val" id="dc-user">-</span></div>
-      <div class="detail-row"><span class="detail-key">Password</span><span class="detail-val" id="dc-pass">-</span></div>
-      <div class="detail-row"><span class="detail-key">หมดอายุ</span><span class="detail-val" id="dc-exp">-</span></div>
-      <div class="detail-row"><span class="detail-key">Shell</span><span class="detail-val">/bin/false (tunnel only)</span></div>
-
-      <!-- Import link block -->
-      <div class="import-result" id="import-result-block">
-        <div class="import-head">
-          <span class="imp-badge" id="imp-badge-el">NPV</span>
-          <span class="imp-desc" id="imp-desc-el">Copy แล้วเปิดใน Npv Tunnel</span>
-        </div>
-        <div class="link-preview" id="imp-link-preview">-</div>
-        <button class="copy-link-btn" id="imp-copy-btn" onclick="copyImportLink()">📋 Copy Import Link</button>
+      <div class="btn-row">
+        <button class="btn btn-g" onclick="createUser()">➕ เพิ่ม User</button>
+        <button class="btn btn-p" onclick="openModal('modal-trial')">🎁 Trial User</button>
       </div>
     </div>
   </div>
   <div class="card">
-    <div class="card-title">👥 รายชื่อ Users ทั้งหมด
-      <button class="btn btn-blue" style="margin-left:auto;padding:.3rem .8rem;font-size:.75rem" onclick="loadUsers()">🔃</button>
+    <div class="card-head">
+      <div class="card-title">📋 รายชื่อ Users</div>
+      <div class="inp-row" style="max-width:180px">
+        <input type="text" id="search-u" placeholder="ค้นหา..." oninput="filterUsers()" style="padding:4px 9px;font-size:.72rem">
+      </div>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Username</th><th>หมดอายุ</th><th>สถานะ</th><th>Actions</th></tr></thead>
-        <tbody id="user-table-body"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</td></tr></tbody>
-      </table>
+    <div class="card-body" style="padding:0">
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Username</th><th>หมดอายุ</th><th>สถานะ</th><th>Action</th></tr></thead>
+          <tbody id="user-tbody"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
+
+<!-- ═══ ONLINE ═══ -->
 <div id="page-online" class="page">
   <div class="card">
-    <div class="card-title">👤 ลูกค้าที่ Online
-      <button class="btn btn-blue" style="margin-left:auto;padding:.3rem .8rem;font-size:.75rem" onclick="loadOnline()">🔃</button>
+    <div class="card-head">
+      <div class="card-title">👤 Online Users</div>
+      <button class="btn btn-c btn-sm" onclick="loadOnline()">🔄 Refresh</button>
     </div>
-    <div id="online-list"><div style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</div></div>
+    <div class="card-body" id="online-list"><div style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</div></div>
   </div>
-  <div class="card" style="background:var(--card);border:1px solid rgba(0,200,255,.13);border-radius:1rem;padding:1rem">
-    <div class="card-title" style="margin-bottom:.5rem">
-      <span>📶 Bandwidth โดยรวม</span>
-      <span id="traf-total" style="margin-left:auto;font-size:1rem;font-weight:900;color:#00e8ff;font-family:monospace;text-shadow:0 0 10px #00e8ff88">— MB</span>
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">📶 Bandwidth</div>
+      <span class="traf-total" id="traf-total">— MB</span>
     </div>
-    <canvas id="traf-chart" style="width:100%;display:block;border-radius:.4rem;height:160px"></canvas>
-    <div id="traf-updated" style="text-align:right;font-size:.68rem;color:rgba(0,180,220,.3);margin-top:.35rem;font-family:monospace"></div>
+    <div class="card-body">
+      <canvas id="traf-chart"></canvas>
+      <div id="traf-upd" style="text-align:right;font-size:.62rem;color:rgba(0,180,220,.3);margin-top:.3rem;font-family:monospace"></div>
+    </div>
   </div>
 </div>
+
+<!-- ═══ BANNED ═══ -->
 <div id="page-banned" class="page">
   <div class="card">
-    <div class="card-title">🔒 IP Limit: Max 2 IP / User — แบน 12 ชม.
-      <button class="btn btn-blue" style="margin-left:auto;padding:.3rem .8rem;font-size:.75rem" onclick="loadBanned()">🔃</button>
+    <div class="card-head">
+      <div class="card-title">🔒 Banned IPs / Users</div>
+      <button class="btn btn-c btn-sm" onclick="loadBanned()">🔄 Refresh</button>
     </div>
-    <div id="banned-list"><div style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</div></div>
+    <div class="card-body" id="banned-list"><div style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</div></div>
   </div>
 </div>
+
+<!-- ═══ BACKUP ═══ -->
 <div id="page-backup" class="page">
   <div class="card">
-    <div class="card-title">💾 Backup Users</div>
-    <p style="font-size:.85rem;color:var(--muted);margin-bottom:.8rem">Export ข้อมูล users เป็น JSON สำหรับย้าย VPS</p>
-    <button class="btn btn-green" onclick="backupUsers()">⬇️ Download Backup</button>
+    <div class="card-head"><div class="card-title">💾 Backup Users</div></div>
+    <div class="card-body">
+      <p style="font-size:.82rem;color:var(--muted);margin-bottom:.8rem">Export ข้อมูล users เป็น JSON</p>
+      <button class="btn btn-g" onclick="backupUsers()">⬇️ Download Backup</button>
+    </div>
   </div>
   <div class="card">
-    <div class="card-title">📥 Import Users</div>
-    <p style="font-size:.85rem;color:var(--muted);margin-bottom:.8rem">นำเข้า users จากไฟล์ backup JSON</p>
-    <div id="alert-import" class="alert"></div>
-    <div class="form-group" style="margin-bottom:.8rem"><label>เลือกไฟล์ JSON</label><input type="file" id="import-file" accept=".json" style="color:var(--text)"></div>
-    <button class="btn btn-purple" onclick="importUsers()">⬆️ Import Users</button>
-    <div id="import-result" style="margin-top:.8rem;font-size:.85rem;display:none"></div>
+    <div class="card-head"><div class="card-title">📥 Import Users</div></div>
+    <div class="card-body">
+      <div id="alert-import" class="alert"></div>
+      <div class="form-g" style="margin-bottom:.8rem"><label>เลือกไฟล์ JSON</label><input type="file" id="import-file" accept=".json" style="color:var(--text)"></div>
+      <button class="btn btn-p" onclick="importUsers()">⬆️ Import Users</button>
+      <div id="import-result" style="margin-top:.8rem;font-size:.82rem;display:none"></div>
+    </div>
   </div>
 </div>
+
+<!-- ═══ SERVICES ═══ -->
 <div id="page-services" class="page">
   <div class="card">
-    <div class="card-title">⚙️ จัดการ Services</div>
-    <div style="display:flex;flex-direction:column;gap:.8rem">
-      <div class="status-item" style="justify-content:space-between">
-        <div style="display:flex;gap:.6rem;align-items:center"><span style="font-size:1.4rem">🚇</span><div><div style="font-size:.75rem;color:var(--muted)">chaiya-sshws (ws-stunnel)</div><div id="s2-sshws" class="on">-</div></div></div>
-        <div class="btn-row" style="margin:0"><button class="btn btn-green" onclick="svc1('chaiya-sshws','start')">▶</button><button class="btn btn-red" onclick="svc1('chaiya-sshws','stop')">⏹</button><button class="btn btn-blue" onclick="svc1('chaiya-sshws','restart')">🔄</button></div>
+    <div class="card-head"><div class="card-title">⚙️ Service Control</div></div>
+    <div class="card-body">
+      <div class="svc-list">
+        <div class="svc-row svc-ctrl"><div style="display:flex;gap:.6rem;align-items:center"><span class="svc-ico">🚇</span><div><div class="svc-desc">chaiya-sshws</div><div id="s2-sshws" class="svc-name" style="font-size:.82rem">-</div></div></div><div class="btn-row" style="margin:0"><button class="btn btn-g btn-sm" onclick="svc1('chaiya-sshws','start')">▶</button><button class="btn btn-r btn-sm" onclick="svc1('chaiya-sshws','stop')">⏹</button><button class="btn btn-c btn-sm" onclick="svc1('chaiya-sshws','restart')">🔄</button></div></div>
+        <div class="svc-row svc-ctrl"><div style="display:flex;gap:.6rem;align-items:center"><span class="svc-ico">🐻</span><div><div class="svc-desc">Dropbear SSH :143/:109</div><div id="s2-dropbear" class="svc-name" style="font-size:.82rem">-</div></div></div><div class="btn-row" style="margin:0"><button class="btn btn-g btn-sm" onclick="svc1('dropbear','start')">▶</button><button class="btn btn-r btn-sm" onclick="svc1('dropbear','stop')">⏹</button><button class="btn btn-c btn-sm" onclick="svc1('dropbear','restart')">🔄</button></div></div>
+        <div class="svc-row svc-ctrl"><div style="display:flex;gap:.6rem;align-items:center"><span class="svc-ico">🌐</span><div><div class="svc-desc">nginx :80/:81/:443</div><div id="s2-nginx" class="svc-name" style="font-size:.82rem">-</div></div></div><div class="btn-row" style="margin:0"><button class="btn btn-g btn-sm" onclick="svc1('nginx','start')">▶</button><button class="btn btn-r btn-sm" onclick="svc1('nginx','stop')">⏹</button><button class="btn btn-c btn-sm" onclick="svc1('nginx','restart')">🔄</button></div></div>
+        <div class="svc-row svc-ctrl"><div style="display:flex;gap:.6rem;align-items:center"><span class="svc-ico">🎮</span><div><div class="svc-desc">badvpn-udpgw :7300</div><div id="s2-badvpn" class="svc-name" style="font-size:.82rem">-</div></div></div><div class="btn-row" style="margin:0"><button class="btn btn-g btn-sm" onclick="restartUdpgw()">🔄 Restart</button></div></div>
       </div>
-      <div class="status-item" style="justify-content:space-between">
-        <div style="display:flex;gap:.6rem;align-items:center"><span style="font-size:1.4rem">🐻</span><div><div style="font-size:.75rem;color:var(--muted)">Dropbear SSH (:143/:109)</div><div id="s2-dropbear" class="on">-</div></div></div>
-        <div class="btn-row" style="margin:0"><button class="btn btn-green" onclick="svc1('dropbear','start')">▶</button><button class="btn btn-red" onclick="svc1('dropbear','stop')">⏹</button><button class="btn btn-blue" onclick="svc1('dropbear','restart')">🔄</button></div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn btn-g" onclick="svcAction('start')">▶️ Start All</button>
+        <button class="btn btn-r" onclick="svcAction('stop')">⏹ Stop All</button>
+        <button class="btn btn-c" onclick="svcAction('restart')">🔄 Restart All</button>
       </div>
-      <div class="status-item" style="justify-content:space-between">
-        <div style="display:flex;gap:.6rem;align-items:center"><span style="font-size:1.4rem">🌐</span><div><div style="font-size:.75rem;color:var(--muted)">nginx</div><div id="s2-nginx" class="on">-</div></div></div>
-        <div class="btn-row" style="margin:0"><button class="btn btn-green" onclick="svc1('nginx','start')">▶</button><button class="btn btn-red" onclick="svc1('nginx','stop')">⏹</button><button class="btn btn-blue" onclick="svc1('nginx','restart')">🔄</button></div>
-      </div>
-      <div class="status-item" style="justify-content:space-between">
-        <div style="display:flex;gap:.6rem;align-items:center"><span style="font-size:1.4rem">🎮</span><div><div style="font-size:.75rem;color:var(--muted)">badvpn-udpgw (:7300)</div><div id="s2-badvpn" class="on">-</div></div></div>
-        <div class="btn-row" style="margin:0"><button class="btn btn-green" onclick="restartUdpgw()">🔄 Restart</button></div>
-      </div>
-    </div>
-    <div class="btn-row" style="margin-top:1rem">
-      <button class="btn btn-green" onclick="svcAction('start')">▶️ Start All</button>
-      <button class="btn btn-red"   onclick="svcAction('stop')">⏹ Stop All</button>
-      <button class="btn btn-blue"  onclick="svcAction('restart')">🔄 Restart All</button>
     </div>
   </div>
 </div>
+
+</div><!-- /wrap -->
+
+<!-- Modals -->
 <div id="modal-renew" class="modal-bg">
   <div class="modal">
-    <button class="modal-close" onclick="closeModal('modal-renew')">✕</button>
-    <h3 class="rgb-text">🔄 ต่ออายุ User</h3>
-    <input type="hidden" id="renew-username">
-    <div class="form-grid" style="margin-bottom:.8rem">
-      <div class="form-group"><label>Username</label><input type="text" id="renew-show" disabled></div>
-      <div class="form-group"><label>เพิ่มวัน</label><input type="number" id="renew-days" value="30" min="1"></div>
-      <div class="form-group"><label>Data (GB)</label><input type="number" id="renew-data" value="0" min="0" style="display:none"></div>
-    </div>
-    <div class="btn-row">
-      <button class="btn btn-green" onclick="doRenew()">✅ ต่ออายุ</button>
-      <button class="btn btn-red"   onclick="closeModal('modal-renew')">ยกเลิก</button>
+    <div class="modal-head">🔄 ต่ออายุ User <button class="modal-x" onclick="closeModal('modal-renew')">✕</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="renew-username">
+      <div class="form-grid">
+        <div class="form-g"><label>Username</label><input type="text" id="renew-show" disabled></div>
+        <div class="form-g"><label>เพิ่มวัน</label><input type="number" id="renew-days" value="30" min="1"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-g" onclick="doRenew()">✅ ต่ออายุ</button>
+        <button class="btn btn-r" onclick="closeModal('modal-renew')">ยกเลิก</button>
+      </div>
     </div>
   </div>
 </div>
 <div id="modal-del" class="modal-bg">
   <div class="modal">
-    <button class="modal-close" onclick="closeModal('modal-del')">✕</button>
-    <h3 style="color:#ff4060">🗑️ ยืนยันลบ User</h3>
-    <p style="margin:.8rem 0;color:var(--muted)">ต้องการลบ <strong id="del-username" style="color:#ff8080"></strong> ?</p>
-    <div class="btn-row">
-      <button class="btn btn-red"  onclick="doDelete()">🗑️ ลบเลย</button>
-      <button class="btn btn-blue" onclick="closeModal('modal-del')">ยกเลิก</button>
+    <div class="modal-head" style="color:var(--red)">🗑️ ยืนยันลบ <button class="modal-x" onclick="closeModal('modal-del')">✕</button></div>
+    <div class="modal-body">
+      <p style="margin:.5rem 0 1rem;color:var(--muted)">ต้องการลบ <strong id="del-username" style="color:var(--red)"></strong>?</p>
+      <div class="btn-row">
+        <button class="btn btn-r" onclick="doDelete()">🗑️ ลบเลย</button>
+        <button class="btn btn-c" onclick="closeModal('modal-del')">ยกเลิก</button>
+      </div>
     </div>
   </div>
 </div>
+<div id="modal-trial" class="modal-bg">
+  <div class="modal">
+    <div class="modal-head">🎁 Trial User <button class="modal-x" onclick="closeModal('modal-trial')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-g"><label>Username</label><input type="text" id="trial-user" placeholder="trial_xxx"></div>
+        <div class="form-g"><label>ชั่วโมง</label><input type="number" id="trial-hours" value="3" min="1"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-g" onclick="doTrial()">✅ สร้าง Trial</button>
+        <button class="btn btn-r" onclick="closeModal('modal-trial')">ยกเลิก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
+
 <script>
-// ── Token: URL param → baked → cookie → auto-fetch ───────────
+// ══════════════════════════════════════════════
+// Token / API
+// ══════════════════════════════════════════════
 const _baked = '%%BAKED_TOKEN%%';
 let TOKEN = new URLSearchParams(location.search).get('token')
   || (_baked && !_baked.startsWith('%%') ? _baked : '')
   || document.cookie.match(/token=([^;]+)/)?.[1] || '';
 
-// ── auto-fetch token ถ้ายังไม่มี ──────────────────────────────
 async function ensureToken() {
   if (TOKEN) return TOKEN;
   try {
     const r = await fetch('/sshws-api/api/token');
     if (r.ok) {
       const d = await r.json();
-      if (d.token) {
-        TOKEN = d.token;
-        document.cookie = 'token=' + TOKEN + ';path=/;max-age=86400';
-      }
+      if (d.token) { TOKEN = d.token; document.cookie = 'token='+TOKEN+';path=/;max-age=86400'; }
     }
   } catch(e) {}
   return TOKEN;
 }
 
-// ── API helper ────────────────────────────────────────────────
 async function api(method, path, body=null) {
   await ensureToken();
   const opts = {method, headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN}};
   if (body) opts.body = JSON.stringify(body);
   try {
-    const r = await fetch('/sshws-api' + path, opts);
-    if (!r.ok && r.status === 401) { showToast('❌ Token ไม่ถูกต้อง — เพิ่ม ?token=xxx ใน URL', false); return {error:'unauthorized'}; }
+    const r = await fetch('/sshws-api'+path, opts);
+    if (!r.ok && r.status===401) { toast('Token ไม่ถูกต้อง', false); return {error:'unauthorized'}; }
     return await r.json();
-  } catch(e) { return {error: e.message}; }
+  } catch(e) { return {error:e.message}; }
 }
 
-function showToast(msg, ok=true) {
+// ══════════════════════════════════════════════
+// Clock
+// ══════════════════════════════════════════════
+function updateClock() {
+  document.getElementById('clock-txt').textContent =
+    new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+}
+setInterval(updateClock, 1000);
+
+// ══════════════════════════════════════════════
+// Toast / Alert
+// ══════════════════════════════════════════════
+let _toastT;
+function toast(msg, ok=true) {
   const t = document.getElementById('toast');
-  t.textContent = (ok?'✅ ':'❌ ') + msg;
-  t.style.borderColor = ok ? '#00ff6044' : '#ff004044';
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
+  t.textContent = (ok ? '✅ ' : '❌ ') + msg;
+  t.className = 'show' + (ok ? '' : ' err');
+  clearTimeout(_toastT);
+  _toastT = setTimeout(() => t.classList.remove('show'), 2800);
 }
-// alias เดิม
-function toast(msg, ok=true) { showToast(msg, ok); }
-
 function showAlert(id, msg, ok=true) {
   const el = document.getElementById(id);
-  el.textContent = (ok?'✅ ':'❌ ') + msg;
-  el.className = 'alert show ' + (ok?'alert-ok':'alert-err');
+  el.textContent = (ok ? '✅ ' : '❌ ') + msg;
+  el.className = 'alert show ' + (ok ? 'alert-ok' : 'alert-err');
   setTimeout(() => el.classList.remove('show'), 4000);
 }
 
-function svcBadge(a) {
-  return a
-    ? '<span class="badge badge-green">● RUNNING</span>'
-    : '<span class="badge badge-red">● STOPPED</span>';
+// ══════════════════════════════════════════════
+// UI helpers
+// ══════════════════════════════════════════════
+function showTab(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  btn.classList.add('active');
+  if (name==='dashboard') loadDashboard();
+  else if (name==='users')    loadUsers();
+  else if (name==='online')   loadOnline();
+  else if (name==='banned')   loadBanned();
+  else if (name==='services') loadServices();
 }
-
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-bg').forEach(el =>
+  el.addEventListener('click', e => { if(e.target===el) el.classList.remove('open'); }));
 
-function showTab(name) {
-  const pages = ['dashboard','users','online','banned','backup','services'];
-  document.querySelectorAll('.tab').forEach((t,i) =>
-    t.classList.toggle('active', pages[i] === name));
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-'+name).classList.add('active');
-  if (name==='dashboard') loadDashboard();
-  if (name==='users')     loadUsers();
-  if (name==='online')    loadOnline();
-  if (name==='banned')    loadBanned();
-  if (name==='services')  loadServices();
+function svcBadge(active) {
+  const el = document.createElement('div');
+  el.className = 'svc-badge ' + (active ? 'on' : 'off');
+  el.innerHTML = '<span class="bd"></span>' + (active ? 'RUNNING' : 'STOPPED');
+  return el.outerHTML;
 }
 
-// ── Dashboard ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════
+// Dashboard
+// ══════════════════════════════════════════════
+let _serverHost = '';
+
 async function loadDashboard() {
-  const s = await api('GET','/api/status');
+  const s = await api('GET', '/api/status');
   if (!s.error) {
     const sv = s.services || {};
-    document.getElementById('svc-sshws').innerHTML    = svcBadge(sv.sshws);
-    document.getElementById('svc-dropbear').innerHTML = svcBadge(sv.dropbear);
-    document.getElementById('svc-nginx').innerHTML    = svcBadge(sv.nginx);
-    document.getElementById('svc-badvpn').innerHTML   = svcBadge(sv.badvpn);
-    document.getElementById('svc-tunnel').innerHTML   = svcBadge(sv.tunnel);
-    document.getElementById('svc-uptime').textContent = sv.started || 'N/A';
+    ['sshws','dropbear','nginx','badvpn','tunnel'].forEach(k => {
+      const el = document.getElementById('svc-'+k);
+      if (el) el.outerHTML = svcBadge(sv[k]);
+    });
     document.getElementById('stat-conns').textContent  = s.connections ?? '-';
     document.getElementById('stat-online').textContent = s.online_count ?? '-';
     document.getElementById('stat-users').textContent  = s.total_users ?? '-';
+    // conn bars
+    const ports = {80: s.conn_80||0, 143: s.conn_143||0, 109: s.conn_109||0, 22: s.conn_22||0};
+    const max = Math.max(...Object.values(ports), 1);
+    Object.entries({80:'80',143:'143',109:'109',22:'22'}).forEach(([p,id]) => {
+      const v = ports[p] || 0;
+      const bn = document.getElementById('b'+id);
+      const bf = document.getElementById('bf'+id);
+      if (bn) bn.textContent = v;
+      if (bf) bf.style.width = Math.round(v/max*100)+'%';
+    });
   }
-  const info = await api('GET','/api/info');
+  const info = await api('GET', '/api/info');
   if (!info.error) {
-    const h = info.host || '';
-    _serverHost = h;  // เซฟ host จริงไว้ใช้ใน buildDarkLink/buildNpvLink
-    document.getElementById('server-ip').textContent = h;
+    _serverHost = info.host || '';
+    document.getElementById('server-ip').textContent = _serverHost;
+    document.getElementById('stat-port').textContent = info.ws_port || '80';
     document.getElementById('conn-info').innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
-        <div><span style="color:var(--muted)">🌍 Host:</span> <b>${h}</b></div>
-        <div><span style="color:var(--muted)">🔌 WS Port:</span> <b>${info.ws_port}</b></div>
-        <div><span style="color:var(--muted)">🐻 Dropbear:</span> <b>${info.dropbear_port}/${info.dropbear_port2}</b></div>
-        <div><span style="color:var(--muted)">🎮 UDPGW:</span> <b>127.0.0.1:${info.udpgw_port}</b></div>
-      </div>
-      <div style="margin-top:.8rem;background:var(--card2);padding:.6rem .8rem;border-radius:.5rem;font-family:monospace;font-size:.8rem;color:#00dcff">
-        POST / HTTP/1.1<br>Host: ${h}<br>Upgrade: websocket<br>Connection: Upgrade
-      </div>`;
+      <div class="cfg-row"><span class="cfg-k">🌍 Host</span><span class="cfg-v">${info.host}</span></div>
+      <div class="cfg-row"><span class="cfg-k">🔌 WS Port</span><span class="cfg-v">${info.ws_port}</span></div>
+      <div class="cfg-row"><span class="cfg-k">🐻 Dropbear</span><span class="cfg-v">${info.dropbear_port} / ${info.dropbear_port2}</span></div>
+      <div class="cfg-row"><span class="cfg-k">🎮 UDPGW</span><span class="cfg-v">127.0.0.1:${info.udpgw_port}</span></div>
+      <div class="cfg-row"><span class="cfg-k">📡 Payload</span><span class="cfg-v" style="font-size:.58rem">GET / HTTP/1.1 · Host:${info.host} · Upgrade:websocket</span></div>`;
   }
 }
 
-// ── Services ──────────────────────────────────────────────────
 async function svcAction(action) {
-  const r = await api('POST','/api/service', {action});
+  toast('กำลัง '+action+'...');
+  const r = await api('POST', '/api/service', {action});
   toast(r.result || r.error, !r.error);
   setTimeout(loadDashboard, 1500);
   setTimeout(loadServices, 1500);
 }
 
 async function svc1(svc, action) {
-  const r = await api('POST','/api/service1', {service:svc, action});
+  const r = await api('POST', '/api/service1', {service:svc, action});
   toast(r.result || r.error, r.ok);
   setTimeout(loadServices, 1200);
+  setTimeout(loadDashboard, 1200);
 }
 
 async function restartUdpgw() {
-  const r = await api('POST','/api/udpgw', {action:'restart'});
+  const r = await api('POST', '/api/udpgw', {action:'restart'});
   toast(r.result || r.error, r.ok);
   setTimeout(loadDashboard, 1500);
 }
 
-async function loadServices() {
-  const s = await api('GET','/api/status');
-  if (s.error) return;
-  const sv = s.services || {};
-  ['sshws','dropbear','nginx','badvpn'].forEach(k => {
-    const el = document.getElementById('s2-'+k);
-    if (el) el.innerHTML = svcBadge(sv[k]);
-  });
+async function genToken() {
+  const r = await api('POST', '/api/token/regenerate', {});
+  if (r.token) { TOKEN = r.token; toast('Token ใหม่: ' + r.token.slice(0,8)+'...'); }
+  else toast('สร้าง Token ล้มเหลว', false);
 }
 
-// ── Users ─────────────────────────────────────────────────────
-async function loadUsers() {
-  const r = await api('GET','/api/users');
-  const tbody = document.getElementById('user-table-body');
-  // API คืน {"users":[...]}
-  if (r.error || !r.users) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem">${r.error||'ไม่มีข้อมูล'}</td></tr>`;
-    return;
-  }
-  const today = new Date().toISOString().split('T')[0];
-  tbody.innerHTML = r.users.map(u => {
-    const expired = u.exp && u.exp < today;
-    const badge = u.active && !expired
-      ? '<span class="badge badge-green">Active</span>'
-      : expired
-        ? '<span class="badge badge-red">Expired</span>'
-        : '<span class="badge badge-yellow">Inactive</span>';
-    return `<tr>
-      <td><b>${u.user}</b></td>
-      <td style="color:${expired?'#ff4060':'#00ff80'}">${u.exp||'N/A'}</td>
-      <td>${badge}</td>
-      <td>
-        <div class="btn-row" style="margin:0;gap:.3rem">
-          <button class="btn btn-blue"   style="padding:.25rem .6rem;font-size:.75rem" onclick="openRenew('${u.user}')">🔄</button>
-          <button class="btn btn-red"    style="padding:.25rem .6rem;font-size:.75rem" onclick="confirmDel('${u.user}')">🗑️</button>
-          <button class="btn btn-yellow" style="padding:.25rem .6rem;font-size:.75rem" onclick="kickUser('${u.user}')">⚡</button>
-        </div>
-      </td>
-    </tr>`;
-  }).join('') || `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem">ยังไม่มี Users</td></tr>`;
-}
-
-// ── Pro / App selector state ───────────────────────────────────
+// ══════════════════════════════════════════════
+// App Selector / Import Link
+// ══════════════════════════════════════════════
 const PROS = {
-  dtac: {
-    name:'DTAC GAMING', proxy:'104.18.63.124:80',
+  dtac: {name:'DTAC GAMING', proxy:'104.18.63.124:80',
     payload:'CONNECT /  HTTP/1.1 [crlf]Host: dl.dir.freefiremobile.com [crlf][crlf]PATCH / HTTP/1.1[crlf]Host:[host][crlf]Upgrade:User-Agent: [ua][crlf][crlf]',
-    darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80
-  },
-  true: {
-    name:'TRUE TWITTER', proxy:'104.18.39.24:80',
+    darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80},
+  true: {name:'TRUE TWITTER', proxy:'104.18.39.24:80',
     payload:'POST / HTTP/1.1[crlf]Host:help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection:Upgrade[crlf][crlf]',
-    darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80
-  }
+    darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80}
 };
-const NPV_HOST = 'www.project.godvpn.shop', NPV_PORT = 80;
-let _curPro = 'dtac', _curApp = 'npv', _importLink = '';
-let _serverHost = '';  // ดึงจาก /api/info ตอน loadDashboard
+const NPV_HOST='www.project.godvpn.shop', NPV_PORT=80;
+let _curPro='dtac', _curApp='npv';
 
 function selPro(p) {
   _curPro = p;
-  document.getElementById('pro-dtac').className = 'pick-opt' + (p==='dtac' ? ' a-dtac' : '');
-  document.getElementById('pro-true').className = 'pick-opt' + (p==='true' ? ' a-true' : '');
+  document.getElementById('pro-dtac').className='pick-opt'+(p==='dtac'?' a-dtac':'');
+  document.getElementById('pro-true').className='pick-opt'+(p==='true'?' a-true':'');
 }
-
 function selApp(a) {
   _curApp = a;
-  document.getElementById('app-npv').className  = 'pick-opt' + (a==='npv'  ? ' a-npv'  : '');
-  document.getElementById('app-dark').className = 'pick-opt' + (a==='dark' ? ' a-dark' : '');
+  document.getElementById('app-npv').className ='pick-opt'+(a==='npv' ?' a-npv' :'');
+  document.getElementById('app-dark').className='pick-opt'+(a==='dark'?' a-dark':'');
 }
 
 function buildNpvLink(name, pass, pro) {
-  const j = {sshConfigType:'SSH-Proxy-Payload', remarks:pro.name+'-'+name,
-    sshHost:NPV_HOST, sshPort:NPV_PORT, sshUsername:name, sshPassword:pass,
-    sni:'', tlsVersion:'DEFAULT', httpProxy:pro.proxy,
-    authenticateProxy:false, proxyUsername:'', proxyPassword:'',
-    payload:pro.payload, dnsMode:'UDP', dnsServer:'', nameserver:'',
-    publicKey:'', udpgwPort:7300, udpgwTransparentDNS:true};
-  return 'npvt-ssh://' + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
+  const j={sshConfigType:'SSH-Proxy-Payload',remarks:pro.name+'-'+name,sshHost:NPV_HOST,sshPort:NPV_PORT,sshUsername:name,sshPassword:pass,sni:'',tlsVersion:'DEFAULT',httpProxy:pro.proxy,authenticateProxy:false,proxyUsername:'',proxyPassword:'',payload:pro.payload,dnsMode:'UDP',dnsServer:'',nameserver:'',publicKey:'',udpgwPort:7300,udpgwTransparentDNS:true};
+  return 'npvt-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
-
 function buildDarkLink(name, pass, pro) {
-  const host = _serverHost || location.hostname;
-  const proxyParts = (pro.proxy || '').split(':');
-  const darkProxyHost = proxyParts[0] || pro.darkProxy;
-  const darkProxyPort = parseInt(proxyParts[1]) || pro.darkProxyPort || 80;
-  const j = {type:'SSH', name:pro.name+'-'+name,
-    sshTunnelConfig:{
-      sshConfig:{host:host, port:80, username:name, password:pass},
-      injectConfig:{mode:'PROXY', proxyHost:darkProxyHost, proxyPort:darkProxyPort, payload:pro.payload}
-    }};
-  return 'darktunnel://' + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
+  const host=_serverHost||location.hostname;
+  const pp=(pro.proxy||'').split(':'); const dh=pp[0]||pro.darkProxy;
+  const j={configType:'SSH-PROXY',remarks:pro.name+'-'+name,sshHost:host,sshPort:143,sshUser:name,sshPass:pass,payload:'GET / HTTP/1.1\r\nHost: '+host+'\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n',proxyHost:dh,proxyPort:80,udpgwAddr:'127.0.0.1',udpgwPort:7300,tlsEnabled:false};
+  return 'darktunnel-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
 
-function copyImportLink() {
-  if (!_importLink) return;
-  navigator.clipboard ? navigator.clipboard.writeText(_importLink).then(()=>toast('Copied!'))
-    : (()=>{const t=document.createElement('textarea');t.value=_importLink;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);toast('Copied!');})();
+async function genImportLink() {
+  const r = await api('GET', '/api/users');
+  if (r.error || !r.users || !r.users.length) { toast('ไม่มี users', false); return; }
+  const u = r.users[0];
+  const pro = PROS[_curPro] || PROS.dtac;
+  const link = _curApp==='npv' ? buildNpvLink(u.user, u.pass||'', pro) : buildDarkLink(u.user, u.pass||'', pro);
+  const isNpv = _curApp==='npv';
+  document.getElementById('imp-result').className='imp-result show';
+  document.getElementById('imp-result').innerHTML=`
+    <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
+      <span class="imp-badge ${_curApp}">${isNpv?'NapsternetV':'DarkTunnel'}</span>
+      <span style="font-size:.65rem;color:var(--muted)">${pro.name} · ${u.user}</span>
+    </div>
+    <div class="link-preview ${isNpv?'':'dark-lp'}">${link}</div>
+    <button class="copy-link-btn ${_curApp}" onclick="navigator.clipboard.writeText('${link.replace(/'/g,"\\'")}').then(()=>toast('คัดลอกแล้ว!'))">📋 คัดลอก Link</button>`;
+}
+
+// ══════════════════════════════════════════════
+// Users
+// ══════════════════════════════════════════════
+let _allUsers = [];
+
+async function loadUsers() {
+  const r = await api('GET', '/api/users');
+  if (r.error || !r.users) {
+    document.getElementById('user-tbody').innerHTML=`<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">${r.error||'ไม่มีข้อมูล'}</td></tr>`;
+    return;
+  }
+  _allUsers = r.users;
+  renderUserTable(_allUsers);
+  document.getElementById('stat-users').textContent = _allUsers.length;
+}
+
+function renderUserTable(users) {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('user-tbody').innerHTML = users.map((u,i) => {
+    const expired = u.exp && u.exp < today;
+    const badge = u.active && !expired ? '<span class="bdg bdg-g">ACTIVE</span>'
+      : expired ? '<span class="bdg bdg-r">EXPIRED</span>'
+      : '<span class="bdg bdg-y">INACTIVE</span>';
+    return `<tr><td>${i+1}</td><td><b>${u.user}</b></td><td style="color:${expired?'var(--red)':'var(--green)'}">${u.exp||'N/A'}</td><td>${badge}</td>
+      <td><div style="display:flex;gap:4px">
+        <button class="btn btn-c btn-sm" onclick="openRenew('${u.user}')">🔄</button>
+        <button class="btn btn-r btn-sm" onclick="confirmDel('${u.user}')">🗑️</button>
+        <button class="btn btn-y btn-sm" onclick="kickUser('${u.user}')">⚡</button>
+      </div></td></tr>`;
+  }).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">ยังไม่มี Users</td></tr>`;
+}
+
+function filterUsers() {
+  const q = document.getElementById('search-u').value.toLowerCase();
+  renderUserTable(_allUsers.filter(u => u.user.toLowerCase().includes(q)));
 }
 
 async function createUser() {
-  const name    = document.getElementById('u-name').value.trim();
-  const pass    = document.getElementById('u-pass').value.trim();
-  const days    = parseInt(document.getElementById('u-days').value) || 30;
-  if (!name || !pass) return showAlert('alert-user','กรุณาใส่ username และ password', false);
-  const r = await api('POST','/api/users', {user:name, password:pass, days});
-  if (r.error || !r.ok) return showAlert('alert-user', r.error||'สร้างไม่สำเร็จ', false);
-  const exp = new Date(); exp.setDate(exp.getDate()+days);
-  document.getElementById('dc-user').textContent = name;
-  document.getElementById('dc-pass').textContent = pass;
-  document.getElementById('dc-exp').textContent  = exp.toISOString().split('T')[0];
-
-  // ── สร้าง import link ──
-  const pro = PROS[_curPro];
-  const isNpv = _curApp === 'npv';
-  _importLink = isNpv ? buildNpvLink(name, pass, pro) : buildDarkLink(name, pass, pro);
-
-  const badge = document.getElementById('imp-badge-el');
-  const desc  = document.getElementById('imp-desc-el');
-  const prev  = document.getElementById('imp-link-preview');
-  const btn   = document.getElementById('imp-copy-btn');
-  const blk   = document.getElementById('import-result-block');
-
-  if (isNpv) {
-    badge.className = 'imp-badge npv'; badge.textContent = '📱 NPV';
-    desc.textContent = 'Copy แล้วเปิดใน Npv Tunnel';
-    prev.className = 'link-preview'; btn.className = 'copy-link-btn npv';
-    btn.textContent = '📋 Copy Npv Tunnel Link';
-  } else {
-    badge.className = 'imp-badge dark'; badge.textContent = '🌑 DARK';
-    desc.textContent = 'Copy แล้วเปิดใน DarkTunnel';
-    prev.className = 'link-preview dark-lp'; btn.className = 'copy-link-btn dark';
-    btn.textContent = '📋 Copy DarkTunnel Link';
-  }
-  prev.textContent = _importLink;
-  blk.className = 'import-result show';
-
-  document.getElementById('user-created-detail').classList.add('show');
-  showAlert('alert-user', `สร้าง User "${name}" สำเร็จ!`);
-  document.getElementById('u-name').value = '';
-  document.getElementById('u-pass').value = '';
-  loadUsers();
+  const user=document.getElementById('new-user').value.trim();
+  const pass=document.getElementById('new-pass').value.trim();
+  const exp =parseInt(document.getElementById('new-exp').value||30);
+  const ipl =parseInt(document.getElementById('new-iplimit').value||2);
+  if (!user||!pass) return showAlert('alert-create','กรอก username/password ด้วย',false);
+  const r = await api('POST','/api/create',{user,pass,exp_days:exp,ip_limit:ipl});
+  showAlert('alert-create', r.ok ? `สร้าง ${user} สำเร็จ` : (r.error||'ล้มเหลว'), r.ok);
+  if (r.ok) { document.getElementById('new-user').value=''; document.getElementById('new-pass').value=''; loadUsers(); }
 }
 
-function openRenew(user) {
-  document.getElementById('renew-username').value = user;
-  document.getElementById('renew-show').value     = user;
+function openRenew(u) {
+  document.getElementById('renew-username').value=u;
+  document.getElementById('renew-show').value=u;
   openModal('modal-renew');
 }
-
 async function doRenew() {
-  const user    = document.getElementById('renew-username').value;
-  const days    = parseInt(document.getElementById('renew-days').value) || 30;
-  const data_gb = parseInt(document.getElementById('renew-data').value) || 0;
-  const r = await api('POST','/api/renew', {user, days, data_gb});
-  closeModal('modal-renew');
-  toast(r.ok ? `ต่ออายุ ${user} สำเร็จ` : (r.error||'ล้มเหลว'), r.ok);
-  if (r.ok) loadUsers();
+  const u=document.getElementById('renew-username').value;
+  const d=parseInt(document.getElementById('renew-days').value||30);
+  const r=await api('POST','/api/renew',{user:u,days:d});
+  toast(r.ok?`ต่ออายุ ${u} +${d} วัน`:(r.error||'ล้มเหลว'), r.ok);
+  closeModal('modal-renew'); if(r.ok) loadUsers();
 }
 
-function confirmDel(user) {
-  document.getElementById('del-username').textContent    = user;
-  document.getElementById('del-username').dataset.user   = user;
+function confirmDel(u) {
+  document.getElementById('del-username').textContent=u;
+  document.getElementById('del-username').dataset.u=u;
   openModal('modal-del');
 }
-
 async function doDelete() {
-  const user = document.getElementById('del-username').dataset.user;
-  const r = await api('DELETE', `/api/users/${user}`);
-  closeModal('modal-del');
-  toast(r.ok ? `ลบ ${user} สำเร็จ` : (r.error||'ล้มเหลว'), r.ok);
-  if (r.ok) loadUsers();
+  const u=document.getElementById('del-username').dataset.u;
+  const r=await api('POST','/api/delete',{user:u});
+  toast(r.ok?`ลบ ${u} สำเร็จ`:(r.error||'ล้มเหลว'), r.ok);
+  closeModal('modal-del'); if(r.ok) loadUsers();
 }
 
-async function kickUser(user) {
-  const r = await api('POST','/api/kick', {user});
-  toast(r.ok ? `Kick ${user} แล้ว` : (r.error||'ล้มเหลว'), r.ok);
+async function kickUser(u) {
+  const r=await api('POST','/api/kick',{user:u});
+  toast(r.ok?`Kick ${u} แล้ว`:(r.error||'ล้มเหลว'), r.ok);
 }
 
-// ── Traffic Graph ─────────────────────────────────────────────
-const _traf = { labels:[], total:[], maxPts:30, prev:null, next:null, lerpT0:null };
-let _trafRaf = null;
-const LERP_MS = 900;
-
-function _fmtBytes(b) {
-  if (b >= 1073741824) return (b/1073741824).toFixed(2)+\' GB\';
-  if (b >= 1048576)    return (b/1048576).toFixed(2)+\' MB\';
-  if (b >= 1024)       return (b/1024).toFixed(1)+\' KB\';
-  return b+\' B\';
+async function doTrial() {
+  const user=(document.getElementById('trial-user').value.trim())||('trial_'+Math.random().toString(36).slice(2,6));
+  const hrs=parseInt(document.getElementById('trial-hours').value||3);
+  const r=await api('POST','/api/create',{user,pass:Math.random().toString(36).slice(2,10),exp_days:Math.ceil(hrs/24)||1,ip_limit:1});
+  toast(r.ok?`Trial "${user}" ${hrs}h สร้างแล้ว`:(r.error||'ล้มเหลว'), r.ok);
+  closeModal('modal-trial'); if(r.ok) loadUsers();
 }
-function _lerp(a,b,t){ return a+(b-a)*t; }
 
-function _drawTrafChart(pts) {
-  const canvas = document.getElementById(\'traf-chart\');
-  if (!canvas || pts.length < 2) return;
-  const dpr = window.devicePixelRatio||1;
-  const W = canvas.offsetWidth||320;
-  const H = canvas.offsetHeight||160;
-  if (canvas.width !== W*dpr || canvas.height !== H*dpr) {
-    canvas.width=W*dpr; canvas.height=H*dpr;
-  }
-  const ctx = canvas.getContext(\'2d\');
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.clearRect(0,0,W,H);
-  const P={t:14,r:12,b:26,l:48};
-  const gW=W-P.l-P.r, gH=H-P.t-P.b;
-  const n=pts.length;
-  const maxV=Math.max(...pts)*1.18||1;
-  const bg=ctx.createLinearGradient(0,0,0,H);
-  bg.addColorStop(0,\'#030d1a\'); bg.addColorStop(1,\'#04111f\');
-  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
-  const X=i=>P.l+(i/(n-1))*gW;
-  const Y=v=>P.t+gH-(v/maxV)*gH;
-  for(let i=0;i<=4;i++){
-    const y=P.t+(gH/4)*i;
-    ctx.beginPath(); ctx.moveTo(P.l,y); ctx.lineTo(P.l+gW,y);
-    ctx.strokeStyle=i===4?\'rgba(0,200,255,.14)\':\'rgba(0,200,255,.05)\';
-    ctx.lineWidth=1; ctx.setLineDash(i===4?[]:[3,6]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle=\'rgba(0,190,230,.32)\'; ctx.font=\'bold 8px monospace\'; ctx.textAlign=\'right\';
-    ctx.fillText(_fmtBytes(maxV*(1-i/4)), P.l-5, y+3.5);
-  }
-  const path=new Path2D();
-  path.moveTo(X(0),Y(pts[0]));
-  for(let i=1;i<n;i++){
-    const cx=(X(i-1)+X(i))/2;
-    path.bezierCurveTo(cx,Y(pts[i-1]),cx,Y(pts[i]),X(i),Y(pts[i]));
-  }
-  const fill=new Path2D(path);
-  fill.lineTo(X(n-1),P.t+gH); fill.lineTo(X(0),P.t+gH); fill.closePath();
-  const ag=ctx.createLinearGradient(0,P.t,0,P.t+gH);
-  ag.addColorStop(0,\'rgba(0,232,255,.28)\'); ag.addColorStop(1,\'rgba(0,100,180,.0)\');
-  ctx.fillStyle=ag; ctx.fill(fill);
-  ctx.save(); ctx.filter=\'blur(5px)\';
-  ctx.strokeStyle=\'rgba(0,220,255,.35)\'; ctx.lineWidth=9;
-  ctx.lineJoin=\'round\'; ctx.lineCap=\'round\'; ctx.stroke(path);
-  ctx.filter=\'none\'; ctx.restore();
-  ctx.save(); ctx.filter=\'blur(1.5px)\';
-  ctx.strokeStyle=\'rgba(0,232,255,.6)\'; ctx.lineWidth=3.5;
-  ctx.lineJoin=\'round\'; ctx.stroke(path); ctx.filter=\'none\'; ctx.restore();
-  ctx.strokeStyle=\'#00e8ff\'; ctx.lineWidth=2;
-  ctx.lineJoin=\'round\'; ctx.lineCap=\'round\'; ctx.stroke(path);
-  const ex=X(n-1), ey=Y(pts[n-1]);
-  ctx.save(); ctx.shadowColor=\'#00e8ff\'; ctx.shadowBlur=20;
-  ctx.beginPath(); ctx.arc(ex,ey,4.5,0,Math.PI*2); ctx.fillStyle=\'#fff\'; ctx.fill();
-  ctx.beginPath(); ctx.arc(ex,ey,3,0,Math.PI*2); ctx.fillStyle=\'#00e8ff\'; ctx.fill();
-  ctx.restore();
-  ctx.fillStyle=\'rgba(0,170,210,.28)\'; ctx.font=\'8px monospace\'; ctx.textAlign=\'center\';
-  const step=Math.max(1,Math.floor(n/5));
-  _traf.labels.forEach((l,i)=>{ if(i%step===0||i===n-1) ctx.fillText(l,X(i),H-4); });
-  ctx.beginPath(); ctx.moveTo(P.l,P.t); ctx.lineTo(P.l,P.t+gH); ctx.lineTo(P.l+gW,P.t+gH);
-  ctx.strokeStyle=\'rgba(0,200,255,.12)\'; ctx.lineWidth=1; ctx.stroke();
+// ══════════════════════════════════════════════
+// Online
+// ══════════════════════════════════════════════
+let _trafRaf=null;
+const _traf={labels:[],total:[],prev:[],next:null,lerpT0:null,maxPts:30};
+const LERP_MS=600;
+const _lerp=(a,b,t)=>a+(b-a)*t;
+const _fmtBytes=(b)=>{if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';if(b<1073741824)return (b/1048576).toFixed(2)+' MB';return (b/1073741824).toFixed(3)+' GB';};
+
+async function loadOnline() {
+  const r=await api('GET','/api/online');
+  const el=document.getElementById('online-list');
+  const now=new Date().toLocaleTimeString('th-TH');
+  if(r.error||!r.connections){el.innerHTML=`<div style="text-align:center;color:var(--muted);padding:2rem">${r.error||'ไม่มีข้อมูล'}</div>`;return;}
+  if(!r.connections.length){el.innerHTML=`<div style="text-align:center;color:var(--muted);padding:2rem">ไม่มี Online ขณะนี้<br><span style="font-size:.68rem;opacity:.4">อัพเดท ${now}</span></div>`;return;}
+  const ur=await api('GET','/api/users'); const uMap={};
+  if(!ur.error&&ur.users) ur.users.forEach(u=>{uMap[u.user]=u;});
+  el.innerHTML=`<div style="font-size:.68rem;color:var(--muted);text-align:right;margin-bottom:.4rem">🟢 ${r.connections.length} คน · ${now}</div>`+
+    `<div style="display:flex;flex-direction:column;gap:.35rem">`+
+    r.connections.map((c,i)=>{
+      const un=c.user||c.username||Object.keys(uMap)[i]||'—'; const u=uMap[un]||{};
+      const exp=u.exp&&u.exp<new Date().toISOString().split('T')[0];
+      return `<div style="display:flex;align-items:center;gap:.65rem;background:var(--bg2);border-radius:.55rem;padding:.5rem .75rem;border:1px solid rgba(77,255,160,.08)">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);flex-shrink:0;animation:blink 1.4s infinite"></span>
+        <span style="font-weight:700;font-size:.85rem;flex:1">${un}</span>
+        ${u.exp?`<span style="font-size:.68rem;color:${exp?'var(--red)':'rgba(0,220,100,.5)'}">${exp?'หมดอายุ':u.exp}</span>`:''}
+        <span class="bdg bdg-g" style="font-size:.62rem">${c.state||'ESTABLISHED'}</span>
+      </div>`;
+    }).join('')+`</div>`;
+  if(!_trafRaf) _trafLoop(); _updateTraf();
 }
 
 function _trafLoop() {
-  if(_traf.next && _traf.lerpT0!==null){
-    const e1=1-Math.pow(1-Math.min(1,(performance.now()-_traf.lerpT0)/LERP_MS),3);
-    const interp=_traf.prev.map((v,i)=>_lerp(v,_traf.next[i],e1));
-    _drawTrafChart(interp);
-    if(e1>=1){ _traf.total=[..._traf.next]; _traf.next=null; _traf.lerpT0=null; }
-  } else if(_traf.total.length>=2){
-    _drawTrafChart(_traf.total);
-  }
+  if(_traf.next&&_traf.lerpT0!==null){
+    const e=1-Math.pow(1-Math.min(1,(performance.now()-_traf.lerpT0)/LERP_MS),3);
+    _drawTraf(_traf.prev.map((v,i)=>_lerp(v,_traf.next[i],e)));
+    if(e>=1){_traf.total=[..._traf.next];_traf.next=null;_traf.lerpT0=null;}
+  } else if(_traf.total.length>=2) _drawTraf(_traf.total);
   _trafRaf=requestAnimationFrame(_trafLoop);
 }
 
-async function _updateTrafGraph() {
-  const r=await api(\'GET\',\'/api/status\');
-  if(r.error) return;
-  const total=(r.rx_bytes||r.traffic?.rx_bytes||0)+(r.tx_bytes||r.traffic?.tx_bytes||0);
-  const now=new Date().toLocaleTimeString(\'th-TH\',{hour:\'2-digit\',minute:\'2-digit\',second:\'2-digit\'});
-  _traf.labels.push(now); _traf.total.push(total);
-  if(_traf.labels.length>_traf.maxPts){ _traf.labels.shift(); _traf.total.shift(); }
-  if(_traf.total.length>=2){
-    const n2=_traf.total.length;
-    _traf.prev=Array(n2).fill(0).map((_,i)=>i<n2-1?_traf.total[i]:_traf.total[n2-2]);
-    _traf.next=[..._traf.total];
-    _traf.lerpT0=performance.now();
-  }
-  const el=document.getElementById(\'traf-total\');
-  if(el) el.textContent=_fmtBytes(total);
-  const upd=document.getElementById(\'traf-updated\');
-  if(upd) upd.textContent=\'อัพเดท \'+now+\' · \'+_traf.labels.length+\' จุด\';
+function _drawTraf(pts) {
+  const cv=document.getElementById('traf-chart'); if(!cv)return;
+  const ctx=cv.getContext('2d'); const W=cv.offsetWidth||300, H=140;
+  cv.width=W; cv.height=H;
+  const n=pts.length; if(n<2)return;
+  const mn=Math.min(...pts), mx=Math.max(...pts)||1;
+  const P={l:8,r:8,t:10,b:14}; const gW=W-P.l-P.r, gH=H-P.t-P.b;
+  const X=i=>P.l+i/(n-1)*gW, Y=v=>P.t+gH-(v-mn)/(mx-mn||1)*gH;
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,P.t,0,P.t+gH);
+  g.addColorStop(0,'rgba(0,232,255,.22)'); g.addColorStop(1,'rgba(0,232,255,.01)');
+  ctx.beginPath(); ctx.moveTo(X(0),Y(pts[0]));
+  for(let i=1;i<n;i++) ctx.lineTo(X(i),Y(pts[i]));
+  ctx.lineTo(X(n-1),P.t+gH); ctx.lineTo(X(0),P.t+gH); ctx.closePath();
+  ctx.fillStyle=g; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(X(0),Y(pts[0]));
+  for(let i=1;i<n;i++) ctx.lineTo(X(i),Y(pts[i]));
+  ctx.save(); ctx.shadowColor='#00e8ff'; ctx.shadowBlur=12;
+  ctx.strokeStyle='#00e8ff'; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.stroke(); ctx.restore();
 }
 
-// ── Online ────────────────────────────────────────────────────
-async function loadOnline() {
-  const r=await api(\'GET\',\'/api/online\');
-  const el=document.getElementById(\'online-list\');
-  const now=new Date().toLocaleTimeString(\'th-TH\');
-  if(r.error||!r.connections){
-    el.innerHTML=`<div style="text-align:center;color:var(--muted);padding:2rem">${r.error||\'ไม่มีข้อมูล\'}</div>`;
-  } else if(!r.connections.length){
-    el.innerHTML=`<div style="text-align:center;color:var(--muted);padding:2rem">ไม่มีลูกค้า online ขณะนี้<br><span style="font-size:.72rem;opacity:.4">อัพเดท ${now}</span></div>`;
-  } else {
-    const ur=await api(\'GET\',\'/api/users\');
-    const uMap={};
-    if(!ur.error&&ur.users) ur.users.forEach(u=>{uMap[u.user]=u;});
-    el.innerHTML=`
-      <div style="font-size:.72rem;color:var(--muted);text-align:right;margin-bottom:.5rem">
-        🟢 ${r.connections.length} คน · อัพเดท ${now}
-      </div>
-      <div style="display:flex;flex-direction:column;gap:.4rem">
-      ${r.connections.map((c,idx)=>{
-        const uname=c.user||c.username||Object.keys(uMap)[idx]||\'—\';
-        const u=uMap[uname]||{};
-        const expired=u.exp&&u.exp<new Date().toISOString().split(\'T\')[0];
-        return `<div style="display:flex;align-items:center;gap:.7rem;background:var(--card2);border-radius:.6rem;padding:.55rem .8rem;border:1px solid rgba(0,255,128,.08)">
-          <span style="width:8px;height:8px;border-radius:50%;background:#00ff80;box-shadow:0 0 8px #00ff80;flex-shrink:0;animation:pulse 1.5s infinite"></span>
-          <span style="font-weight:700;font-size:.88rem;flex:1">${uname}</span>
-          ${u.exp?`<span style="font-size:.72rem;color:${expired?\'#ff4060\':\'rgba(0,220,100,.5)\'}">${expired?\'หมดอายุ\':u.exp}</span>`:\'\'}
-          <span class="badge badge-green" style="font-size:.7rem">${c.state||\'ESTABLISHED\'}</span>
-        </div>`;
-      }).join(\'\')}
-      </div>`;
-  }
-  if(!_trafRaf) _trafLoop();
-  _updateTrafGraph();
+async function _updateTraf() {
+  const r=await api('GET','/api/status'); if(r.error)return;
+  const total=(r.rx_bytes||r.traffic?.rx_bytes||0)+(r.tx_bytes||r.traffic?.tx_bytes||0);
+  const now=new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  _traf.labels.push(now); _traf.total.push(total);
+  if(_traf.labels.length>_traf.maxPts){_traf.labels.shift();_traf.total.shift();}
+  if(_traf.total.length>=2){const n=_traf.total.length; _traf.prev=Array(n).fill(0).map((_,i)=>i<n-1?_traf.total[i]:_traf.total[n-2]); _traf.next=[..._traf.total]; _traf.lerpT0=performance.now();}
+  const el=document.getElementById('traf-total'); if(el) el.textContent=_fmtBytes(total);
+  const u=document.getElementById('traf-upd'); if(u) u.textContent='อัพเดท '+now;
 }
-// ── Banned ────────────────────────────────────────────────────
+
+// ══════════════════════════════════════════════
+// Banned
+// ══════════════════════════════════════════════
 async function loadBanned() {
-  const r  = await api('GET','/api/bans');
-  const el = document.getElementById('banned-list');
-  if (r.error) {
-    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:2rem">${r.error}</div>`;
-    return;
-  }
-  // API คืน {"bans":{...}}
-  const bans = r.bans || {};
-  const keys = Object.keys(bans);
-  if (!keys.length) {
-    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:2rem">ไม่มี IP ที่ถูกแบน ✅</div>`;
-    return;
-  }
-  el.innerHTML = `<div class="table-wrap"><table>
-    <thead><tr><th>User/IP</th><th>เหตุผล</th><th>หมดแบน</th><th></th></tr></thead>
-    <tbody>${keys.map(k => {
-      const b = bans[k];
-      return `<tr>
-        <td><b>${b.user||k}</b><br><span style="color:var(--muted);font-size:.8rem">${b.ip||b.ips?.join(', ')||k}</span></td>
-        <td><span class="badge badge-red">${b.reason||'IP limit'}</span></td>
-        <td style="font-size:.8rem">${b.until||'12h'}</td>
-        <td><button class="btn btn-green" style="padding:.25rem .6rem;font-size:.75rem" onclick="unban('${k}','${b.name||b.user||''}')">🔓</button></td>
-      </tr>`;
-    }).join('')}</tbody></table></div>`;
+  const r=await api('GET','/api/bans'); const el=document.getElementById('banned-list');
+  if(r.error){el.innerHTML=`<div style="text-align:center;color:var(--muted);padding:2rem">${r.error}</div>`;return;}
+  const bans=r.bans||{}; const keys=Object.keys(bans);
+  let count=keys.length; document.getElementById('stat-banned').textContent=count;
+  if(!keys.length){el.innerHTML=`<div style="text-align:center;color:var(--muted);padding:2rem">ไม่มี IP ที่ถูกแบน ✅</div>`;return;}
+  el.innerHTML=`<div class="tbl-wrap"><table><thead><tr><th>User/IP</th><th>เหตุผล</th><th>หมดแบน</th><th></th></tr></thead><tbody>`+
+    keys.map(k=>{const b=bans[k]; return `<tr><td><b>${b.user||k}</b><br><span style="color:var(--muted);font-size:.68rem">${b.ip||b.ips?.join(', ')||k}</span></td><td><span class="bdg bdg-r">${b.reason||'IP limit'}</span></td><td style="font-size:.72rem">${b.until||'12h'}</td><td><button class="btn btn-g btn-sm" onclick="unban('${k}','${b.name||b.user||''}')">🔓</button></td></tr>`;
+    }).join('')+`</tbody></table></div>`;
 }
 
 async function unban(uid, name) {
-  const r = await api('POST','/api/unban', {uid, name});
-  toast(r.ok ? 'ปลดแบนสำเร็จ' : (r.error||'ล้มเหลว'), r.ok);
-  if (r.ok) loadBanned();
+  const r=await api('POST','/api/unban',{uid,name});
+  toast(r.ok?'ปลดแบนสำเร็จ':(r.error||'ล้มเหลว'), r.ok);
+  if(r.ok) loadBanned();
 }
 
-// ── Backup / Import ───────────────────────────────────────────
+// ══════════════════════════════════════════════
+// Services
+// ══════════════════════════════════════════════
+async function loadServices() {
+  const s=await api('GET','/api/status'); if(s.error)return;
+  const sv=s.services||{};
+  ['sshws','dropbear','nginx','badvpn'].forEach(k=>{
+    const el=document.getElementById('s2-'+k);
+    if(el) el.innerHTML=(sv[k]?'<span class="bdg bdg-g">RUNNING</span>':'<span class="bdg bdg-r">STOPPED</span>');
+  });
+}
+
+// ══════════════════════════════════════════════
+// Backup / Import
+// ══════════════════════════════════════════════
 async function backupUsers() {
-  const r = await api('GET','/api/users');
-  if (r.error || !r.users) return toast('ไม่สามารถ backup ได้', false);
-  const blob = new Blob([JSON.stringify({users:r.users, backup_date:new Date().toISOString()},null,2)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `chaiya-backup-${new Date().toISOString().split('T')[0]}.json`;
-  a.click();
+  const r=await api('GET','/api/users'); if(r.error||!r.users) return toast('backup ล้มเหลว',false);
+  const blob=new Blob([JSON.stringify({users:r.users,backup_date:new Date().toISOString()},null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`chaiya-backup-${new Date().toISOString().split('T')[0]}.json`; a.click();
   toast('Backup สำเร็จ!');
 }
 
 async function importUsers() {
-  const file = document.getElementById('import-file').files[0];
-  if (!file) return showAlert('alert-import','กรุณาเลือกไฟล์', false);
+  const file=document.getElementById('import-file').files[0];
+  if(!file) return showAlert('alert-import','กรุณาเลือกไฟล์',false);
   try {
-    const text  = await file.text();
-    const data  = JSON.parse(text);
-    const users = data.users || (Array.isArray(data) ? data : null);
-    if (!users) return showAlert('alert-import','รูปแบบไฟล์ไม่ถูกต้อง', false);
-    const r = await api('POST','/api/import', {users});
-    if (r.error) return showAlert('alert-import', r.error, false);
-    showAlert('alert-import', `Import สำเร็จ: สร้าง ${r.created?.length||0} / อัพเดท ${r.updated?.length||0}`);
-    const res = document.getElementById('import-result');
-    res.style.display = 'block';
-    res.innerHTML = `<span style="color:#00ff80">สร้างใหม่: ${(r.created||[]).join(', ')||'-'}</span><br>
-                     <span style="color:#ffcc44">อัพเดท: ${(r.updated||[]).join(', ')||'-'}</span>`;
+    const data=JSON.parse(await file.text());
+    const users=data.users||(Array.isArray(data)?data:null);
+    if(!users) return showAlert('alert-import','รูปแบบไม่ถูกต้อง',false);
+    const r=await api('POST','/api/import',{users});
+    if(r.error) return showAlert('alert-import',r.error,false);
+    showAlert('alert-import',`Import สำเร็จ: สร้าง ${r.created?.length||0} / อัพเดท ${r.updated?.length||0}`);
+    document.getElementById('import-result').style.display='block';
+    document.getElementById('import-result').innerHTML=`<span style="color:var(--green)">สร้างใหม่: ${(r.created||[]).join(', ')||'-'}</span><br><span style="color:var(--yellow)">อัพเดท: ${(r.updated||[]).join(', ')||'-'}</span>`;
     loadUsers();
-  } catch(e) { showAlert('alert-import','ไฟล์ JSON ไม่ถูกต้อง', false); }
+  } catch(e){showAlert('alert-import','ไฟล์ JSON ไม่ถูกต้อง',false);}
 }
 
-// ── Init ──────────────────────────────────────────────────────
+// ══════════════════════════════════════════════
+// Init + Auto-refresh
+// ══════════════════════════════════════════════
 (async () => { await ensureToken(); loadDashboard(); })();
-// Realtime: dashboard ทุก 15 วิ, online ทุก 5 วิ
-setInterval(() => {
-  const active = document.querySelector('.page.active')?.id;
-  if (active === 'page-dashboard') loadDashboard();
-}, 15000);
-setInterval(() => {
-  const active = document.querySelector('.page.active')?.id;
-  if (active === 'page-online') {
-    loadOnline();
-    _updateTrafGraph();
-  }
-}, 5000);
+setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-dashboard') loadDashboard(); }, 15000);
+setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
 </script>
 <audio id="_r" autoplay loop preload="none" style="display:none">
   <source src="https://sc.requestradio.in.th/listen/request_radio/radio.mp3" type="audio/mpeg">
 </audio>
 <script>
-// autoplay ทันทีที่โหลดหน้า — browser บางตัวต้องรอ interaction ก่อน
-(function(){
-  var a=document.getElementById('_r');
-  if(!a)return;
-  var p=function(){a.play().catch(function(){});};
-  // ลอง play ทันที
-  p();
-  // fallback: ถ้า browser block autoplay รอ user แตะหน้าจอครั้งแรก
-  document.addEventListener('click',p,{once:true});
-  document.addEventListener('touchstart',p,{once:true});
-})();
+(function(){var a=document.getElementById('_r');if(!a)return;var p=function(){a.play().catch(function(){});};p();document.addEventListener('click',p,{once:true});document.addEventListener('touchstart',p,{once:true});})();
 </script>
 </body>
 </html>
@@ -5899,19 +5891,25 @@ menu_18() {
   local _UDPST; pgrep -f badvpn-udpgw &>/dev/null && _UDPST="active" || _UDPST="inactive"
   _sc18() { [[ "$1" == "active" ]] && printf "${GR}● RUNNING${RS}" || printf "${RD}○ STOPPED${RS}"; }
 
+  # ── สร้าง URL สำหรับ Web Dashboard ────────────────────────────
+  local _DASH_URL="http://${_H}:81/sshws/sshws.html"
+  local _DASH_URL_TOK="http://${_H}:81/sshws/sshws.html?token=${_TOK}"
+  $_CERT_OK && _DASH_URL="https://${_H}/sshws/sshws.html" || true
+  $_CERT_OK && _DASH_URL_TOK="https://${_H}/sshws/sshws.html?token=${_TOK}" || true
+
   printf "\n${R1}╔══════════════════════════════════════════════════════════╗${RS}\n"
   printf "${R1}║${RS}  🚇 ${WH}SSH WebSocket Manager${RS}  ${R1}[เมนู 18]${RS}                  ${R1}║${RS}\n"
   printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
   printf "${R1}║${RS}  ${YE}Host  ${WH}: %-49s${R1}║${RS}\n" "$_H"
   printf "${R1}║${RS}  ${YE}Port  ${WH}: %-10s  ${YE}Proto ${WH}: %-30s${R1}║${RS}\n" "$_WSPORT" "${_PROTO^^}"
   printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+  printf "${R1}║${RS}  🌐 ${YE}Web Dashboard (เปิดในมือถือ/เบราว์เซอร์):${RS}          ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${CY}  %-56s${R1}║${RS}\n" "$_DASH_URL"
+  printf "${R1}║${RS}  ${GR}  (พร้อม Token):${RS}                                      ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${MG}  %-56s${R1}║${RS}\n" "$_DASH_URL_TOK"
+  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
   printf "${R1}║${RS}  🚇 chaiya-sshws : $(_sc18 "$_WSST")    🐻 dropbear : $(_sc18 "$_DBST")        ${R1}║${RS}\n"
   printf "${R1}║${RS}  🌐 nginx        : $(_sc18 "$_NGST")    🎮 badvpn   : $(_sc18 "$_UDPST")        ${R1}║${RS}\n"
-  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-  local _DASHURL="http://${_H}:81/sshws.html?token=${_TOK}"
-  printf "${R1}║${RS}  ${GR}🌐 Dashboard URL :${RS}                                    ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${CY}http://${_H}:81/sshws.html${RS}                          ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${YE}?token=${_TOK}${RS}\n"
   printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
   printf "${R1}║${RS}  ${GR} 1.${RS}  ▶  เริ่ม / Restart Services ทั้งหมด              ${R1}║${RS}\n"
   printf "${R1}║${RS}  ${RD} 2.${RS}  ■  หยุด SSH WebSocket (chaiya-sshws)             ${R1}║${RS}\n"
@@ -5923,6 +5921,7 @@ menu_18() {
   printf "${R1}║${RS}  ${OR} 8.${RS}  📋  ดู Log (chaiya-sshws 30 บรรทัดล่าสุด)       ${R1}║${RS}\n"
   printf "${R1}║${RS}  ${MG} 9.${RS}  🔑  Generate Token ใหม่                         ${R1}║${RS}\n"
   printf "${R1}║${RS}  ${WH}10.${RS}  🔄  ติดตั้ง / ซ่อมแซม ws-stunnel + nginx        ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${CY}11.${RS}  🌐  แสดงลิงค์เข้า Web Dashboard                 ${R1}║${RS}\n"
   printf "${R1}║${RS}  ${WH} 0.${RS}  ↩  ย้อนกลับ                                      ${R1}║${RS}\n"
   printf "${R1}╚══════════════════════════════════════════════════════════╝${RS}\n"
   read -rp "$(printf "\n${YE}เลือก: ${RS}")" _sub18
@@ -6100,6 +6099,44 @@ menu_18() {
       else
         printf "${YE}↩ ยกเลิก${RS}\n"
       fi
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+
+    11)
+      # ── แสดงลิงค์เข้า Web Dashboard ──────────────────────────
+      clear
+      printf "${CY}╔══════════════════════════════════════════════════════╗${RS}\n"
+      printf "${CY}║${RS}  🌐 ${WH}Web Dashboard — ลิงค์เข้าระบบ${RS}               ${CY}║${RS}\n"
+      printf "${CY}╚══════════════════════════════════════════════════════╝${RS}\n\n"
+      local _d_host; [[ -f "$DOMAIN_FILE" ]] && _d_host=$(cat "$DOMAIN_FILE") || _d_host=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+      local _d_tok; _d_tok=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
+      [[ -z "$_d_tok" ]] && { _d_tok=$(openssl rand -hex 16); echo "$_d_tok" > /etc/chaiya/sshws-token.conf; }
+      local _d_cert=false
+      [[ -f "/etc/letsencrypt/live/${_d_host}/fullchain.pem" ]] && _d_cert=true
+      local _d_base; $_d_cert && _d_base="https://${_d_host}" || _d_base="http://${_d_host}:81"
+      local _d_url="${_d_base}/sshws/sshws.html"
+      local _d_url_tok="${_d_base}/sshws/sshws.html?token=${_d_tok}"
+      local _d_api="${_d_base}/sshws-api/"
+      printf "${GR}┌─[ 🌐 URL เปิดในเบราว์เซอร์ / มือถือ ]──────────────────┐${RS}\n"
+      printf "${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}📌 URL ปกติ (ไม่มี Token):${RS}\n"
+      printf "${GR}│${RS}  ${CY}  %s${RS}\n" "$_d_url"
+      printf "${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}🔑 URL พร้อม Token (แนะนำ):${RS}\n"
+      printf "${GR}│${RS}  ${MG}  %s${RS}\n" "$_d_url_tok"
+      printf "${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}⚡ API Endpoint:${RS}\n"
+      printf "${GR}│${RS}  ${WH}  %s${RS}\n" "$_d_api"
+      printf "${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}🔐 Token: ${CY}%-42s${GR}│${RS}\n" "$_d_tok"
+      printf "${GR}│${RS}\n"
+      if command -v qrencode &>/dev/null; then
+        printf "${GR}│${RS}  ${YE}📷 QR Code (URL พร้อม Token):${RS}\n"
+        qrencode -t ANSIUTF8 "$_d_url_tok" 2>/dev/null | while IFS= read -r _qline; do
+          printf "${GR}│${RS}  %s\n" "$_qline"
+        done
+      fi
+      printf "${GR}└─────────────────────────────────────────────────────────┘${RS}\n\n"
+      printf "${WH}💡 เปิดลิงค์ URL พร้อม Token ในเบราว์เซอร์เพื่อจัดการ Users/Services${RS}\n\n"
       read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
 
     0) return ;;
