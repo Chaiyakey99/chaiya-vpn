@@ -1091,27 +1091,49 @@ let TOKEN = new URLSearchParams(location.search).get('token')
   || (_baked && !_baked.startsWith('%%') ? _baked : '')
   || document.cookie.match(/token=([^;]+)/)?.[1] || '';
 
+let _tokenPromise = null;
 async function ensureToken() {
   if (TOKEN) return TOKEN;
-  try {
-    const r = await fetch('/sshws-api/api/token');
-    if (r.ok) {
-      const d = await r.json();
-      if (d.token) { TOKEN = d.token; document.cookie = 'token='+TOKEN+';path=/;max-age=86400'; }
-    }
-  } catch(e) {}
-  return TOKEN;
+  // ป้องกัน race condition — fetch ครั้งเดียว
+  if (!_tokenPromise) {
+    _tokenPromise = (async () => {
+      try {
+        const r = await fetch('/sshws-api/api/token', {
+          method: 'GET',
+          headers: {'Accept': 'application/json'}
+        });
+        if (r.ok) {
+          const d = await r.json();
+          if (d && d.token) {
+            TOKEN = d.token;
+            try { document.cookie = 'token='+TOKEN+';path=/;max-age=86400'; } catch(e) {}
+          }
+        }
+      } catch(e) { console.warn('Token fetch failed:', e.message); }
+      _tokenPromise = null;
+      return TOKEN;
+    })();
+  }
+  return _tokenPromise;
 }
 
 async function api(method, path, body=null) {
-  await ensureToken();
-  const opts = {method, headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN}};
-  if (body) opts.body = JSON.stringify(body);
+  const tok = await ensureToken();
+  const headers = {'Content-Type': 'application/json'};
+  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  const opts = {method, headers};
+  if (body !== null) opts.body = JSON.stringify(body);
   try {
-    const r = await fetch('/sshws-api'+path, opts);
-    if (!r.ok && r.status===401) { toast('Token ไม่ถูกต้อง', false); return {error:'unauthorized'}; }
+    const r = await fetch('/sshws-api' + path, opts);
+    if (!r.ok && r.status === 401) {
+      showToast('Token ไม่ถูกต้อง — เพิ่ม ?token=xxx ใน URL', false);
+      return {error: 'unauthorized'};
+    }
     return await r.json();
-  } catch(e) { return {error:e.message}; }
+  } catch(e) {
+    console.error('API error:', path, e.message);
+    return {error: e.message};
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -1128,12 +1150,17 @@ setInterval(updateClock, 1000);
 // ══════════════════════════════════════════════
 let _toastT;
 function toast(msg, ok=true) {
-  const t = document.getElementById('toast');
-  t.textContent = (ok ? '✅ ' : '❌ ') + msg;
-  t.className = 'show' + (ok ? '' : ' err');
-  clearTimeout(_toastT);
-  _toastT = setTimeout(() => t.classList.remove('show'), 2800);
+  try {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = (ok ? '✅ ' : '❌ ') + msg;
+    t.className = 'show' + (ok ? '' : ' err');
+    clearTimeout(_toastT);
+    _toastT = setTimeout(() => { if(t) t.classList.remove('show'); }, 2800);
+  } catch(e) { console.log('toast:', msg); }
 }
+// alias
+function showToast(msg, ok=true) { toast(msg, ok); }
 function showAlert(id, msg, ok=true) {
   const el = document.getElementById(id);
   el.textContent = (ok ? '✅ ' : '❌ ') + msg;
@@ -1161,10 +1188,13 @@ document.querySelectorAll('.modal-bg').forEach(el =>
   el.addEventListener('click', e => { if(e.target===el) el.classList.remove('open'); }));
 
 function svcBadge(active) {
-  const el = document.createElement('div');
+  return '<span class="bd"></span>' + (active ? 'RUNNING' : 'STOPPED');
+}
+function setSvcBadge(id, active) {
+  const el = document.getElementById(id);
+  if (!el) return;
   el.className = 'svc-badge ' + (active ? 'on' : 'off');
-  el.innerHTML = '<span class="bd"></span>' + (active ? 'RUNNING' : 'STOPPED');
-  return el.outerHTML;
+  el.innerHTML = svcBadge(active);
 }
 
 // ══════════════════════════════════════════════
@@ -1177,34 +1207,56 @@ async function loadDashboard() {
   if (!s.error) {
     const sv = s.services || {};
     ['sshws','dropbear','nginx','badvpn','tunnel'].forEach(k => {
-      const el = document.getElementById('svc-'+k);
-      if (el) el.outerHTML = svcBadge(sv[k]);
+      setSvcBadge('svc-'+k, sv[k]);
     });
-    document.getElementById('stat-conns').textContent  = s.connections ?? '-';
-    document.getElementById('stat-online').textContent = s.online_count ?? '-';
-    document.getElementById('stat-users').textContent  = s.total_users ?? '-';
+    // รองรับ field name หลายรูปแบบที่ API อาจส่งมา
+    const conns  = s.connections  ?? s.conn_total  ?? s.total_connections ?? '-';
+    const online = s.online_count ?? s.online       ?? s.online_users     ?? '-';
+    const users  = s.total_users  ?? s.user_count   ?? s.users_count      ?? '-';
+    const setText = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+    setText('stat-conns',  conns);
+    setText('stat-online', online);
+    setText('stat-users',  users);
     // conn bars
-    const ports = {80: s.conn_80||0, 143: s.conn_143||0, 109: s.conn_109||0, 22: s.conn_22||0};
+    const ports = {
+      '80':  s.conn_80  ?? s.connections_80  ?? 0,
+      '143': s.conn_143 ?? s.connections_143 ?? 0,
+      '109': s.conn_109 ?? s.connections_109 ?? 0,
+      '22':  s.conn_22  ?? s.connections_22  ?? 0
+    };
     const max = Math.max(...Object.values(ports), 1);
-    Object.entries({80:'80',143:'143',109:'109',22:'22'}).forEach(([p,id]) => {
-      const v = ports[p] || 0;
-      const bn = document.getElementById('b'+id);
-      const bf = document.getElementById('bf'+id);
+    Object.entries(ports).forEach(([p, v]) => {
+      const bn = document.getElementById('b'+p);
+      const bf = document.getElementById('bf'+p);
       if (bn) bn.textContent = v;
       if (bf) bf.style.width = Math.round(v/max*100)+'%';
     });
+  } else {
+    console.warn('Dashboard status error:', s.error);
   }
   const info = await api('GET', '/api/info');
   if (!info.error) {
-    _serverHost = info.host || '';
-    document.getElementById('server-ip').textContent = _serverHost;
-    document.getElementById('stat-port').textContent = info.ws_port || '80';
-    document.getElementById('conn-info').innerHTML = `
-      <div class="cfg-row"><span class="cfg-k">🌍 Host</span><span class="cfg-v">${info.host}</span></div>
-      <div class="cfg-row"><span class="cfg-k">🔌 WS Port</span><span class="cfg-v">${info.ws_port}</span></div>
-      <div class="cfg-row"><span class="cfg-k">🐻 Dropbear</span><span class="cfg-v">${info.dropbear_port} / ${info.dropbear_port2}</span></div>
-      <div class="cfg-row"><span class="cfg-k">🎮 UDPGW</span><span class="cfg-v">127.0.0.1:${info.udpgw_port}</span></div>
-      <div class="cfg-row"><span class="cfg-k">📡 Payload</span><span class="cfg-v" style="font-size:.58rem">GET / HTTP/1.1 · Host:${info.host} · Upgrade:websocket</span></div>`;
+    _serverHost = info.host || location.hostname;
+    const setText = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+    setText('server-ip',  _serverHost);
+    setText('stat-port',  info.ws_port || '80');
+    const host     = info.host        || location.hostname;
+    const wsPort   = info.ws_port     || '80';
+    const dbPort   = info.dropbear_port  || '143';
+    const dbPort2  = info.dropbear_port2 || '109';
+    const udpgwP   = info.udpgw_port  || '7300';
+    const connInfo = document.getElementById('conn-info');
+    if (connInfo) connInfo.innerHTML = `
+      <div class="cfg-row"><span class="cfg-k">🌍 Host</span><span class="cfg-v">${host}</span></div>
+      <div class="cfg-row"><span class="cfg-k">🔌 WS Port</span><span class="cfg-v">${wsPort}</span></div>
+      <div class="cfg-row"><span class="cfg-k">🐻 Dropbear</span><span class="cfg-v">${dbPort} / ${dbPort2}</span></div>
+      <div class="cfg-row"><span class="cfg-k">🎮 UDPGW</span><span class="cfg-v">127.0.0.1:${udpgwP}</span></div>
+      <div class="cfg-row"><span class="cfg-k">📡 Payload</span><span class="cfg-v" style="font-size:.58rem">GET / HTTP/1.1 · Host:${host} · Upgrade:websocket</span></div>`;
+  } else {
+    // Fallback: ดึง host จาก URL
+    _serverHost = location.hostname;
+    const si = document.getElementById('server-ip');
+    if (si && si.textContent === 'กำลังโหลด...') si.textContent = _serverHost;
   }
 }
 
@@ -1474,6 +1526,7 @@ async function loadServices() {
   const s=await api('GET','/api/status'); if(s.error)return;
   const sv=s.services||{};
   ['sshws','dropbear','nginx','badvpn'].forEach(k=>{
+    setSvcBadge('svc-'+k, sv[k]);
     const el=document.getElementById('s2-'+k);
     if(el) el.innerHTML=(sv[k]?'<span class="bdg bdg-g">RUNNING</span>':'<span class="bdg bdg-r">STOPPED</span>');
   });
@@ -1509,7 +1562,11 @@ async function importUsers() {
 // ══════════════════════════════════════════════
 // Init + Auto-refresh
 // ══════════════════════════════════════════════
-(async () => { await ensureToken(); loadDashboard(); })();
+document.addEventListener('DOMContentLoaded', async () => {
+  updateClock();
+  await ensureToken();
+  loadDashboard();
+});
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-dashboard') loadDashboard(); }, 15000);
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
 </script>
