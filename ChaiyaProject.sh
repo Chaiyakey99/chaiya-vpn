@@ -901,6 +901,26 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
     </div>
   </div>
 
+</div>
+
+<!-- ═══ USERS ═══ -->
+<div id="page-users" class="page">
+  <div class="card">
+    <div class="card-head"><div class="card-title">➕ เพิ่ม SSH User</div></div>
+    <div class="card-body">
+      <div id="alert-create" class="alert"></div>
+      <div class="form-grid">
+        <div class="form-g"><label>Username</label><input type="text" id="new-user" placeholder="username"></div>
+        <div class="form-g"><label>Password</label><input type="password" id="new-pass" placeholder="password"></div>
+        <div class="form-g"><label>หมดอายุ (วัน)</label><input type="number" id="new-exp" value="30" min="1"></div>
+        <div class="form-g"><label>IP Limit</label><input type="number" id="new-iplimit" value="2" min="1"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-g" onclick="createUser()">➕ เพิ่ม User</button>
+        <button class="btn btn-p" onclick="openModal('modal-trial')">🎁 Trial User</button>
+      </div>
+    </div>
+  </div>
   <div class="card">
     <div class="card-head">
       <div class="card-title">📱 Connection Config</div>
@@ -923,26 +943,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
       <div class="imp-result" id="imp-result"></div>
     </div>
   </div>
-</div>
 
-<!-- ═══ USERS ═══ -->
-<div id="page-users" class="page">
-  <div class="card">
-    <div class="card-head"><div class="card-title">➕ เพิ่ม SSH User</div></div>
-    <div class="card-body">
-      <div id="alert-create" class="alert"></div>
-      <div class="form-grid">
-        <div class="form-g"><label>Username</label><input type="text" id="new-user" placeholder="username"></div>
-        <div class="form-g"><label>Password</label><input type="password" id="new-pass" placeholder="password"></div>
-        <div class="form-g"><label>หมดอายุ (วัน)</label><input type="number" id="new-exp" value="30" min="1"></div>
-        <div class="form-g"><label>IP Limit</label><input type="number" id="new-iplimit" value="2" min="1"></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-g" onclick="createUser()">➕ เพิ่ม User</button>
-        <button class="btn btn-p" onclick="openModal('modal-trial')">🎁 Trial User</button>
-      </div>
-    </div>
-  </div>
   <div class="card">
     <div class="card-head">
       <div class="card-title">📋 รายชื่อ Users</div>
@@ -1907,6 +1908,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "connections":     conns,
                 "online_count":    online_count,
                 "total_users":     total_users,
+                "rx_bytes": sum(int(l.split()[1]) for l in open("/proc/net/dev").readlines()[2:] if not l.strip().startswith("lo:")) if os.path.exists("/proc/net/dev") else 0,
+                "tx_bytes": sum(int(l.split()[9]) for l in open("/proc/net/dev").readlines()[2:] if not l.strip().startswith("lo:")) if os.path.exists("/proc/net/dev") else 0,
                 "services": {
                     "sshws":    ws_on.strip()   == "active",
                     "dropbear": db_on.strip()   == "active",
@@ -2254,6 +2257,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
             run(f"pkill -u {user} -9 2>/dev/null || true")
             return self.send_json(200, {"ok":True, "result":f"kicked:{user}"})
 
+        elif p == "/api/create":
+            user    = body.get("user","").strip()
+            pw      = body.get("pass","").strip()
+            days    = int(body.get("exp_days", body.get("days", 30)))
+            data_gb = int(body.get("data_gb", 0))
+            if not user or not pw:
+                return self.send_json(400, {"error":"user and password required"})
+            exp, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
+            exp = exp.strip()
+            run(f"userdel -f {user} 2>/dev/null; useradd -M -s /bin/false -e {exp} {user}")
+            run(f"printf '%s:%s\n' '{user}' '{pw}' | chpasswd")
+            run(f"chage -E {exp} {user}")
+            db = os.path.join(USERS_DIR, "users.db")
+            with open(db, "a") as f: f.write(f"{user} {days} {exp} {data_gb}\n")
+            run("python3 /usr/local/bin/chaiya-data-tracker 2>/dev/null &")
+            return self.send_json(200, {"ok":True, "result":f"user_created:{user}"})
+        elif p == "/api/delete":
+            user = body.get("user","").strip()
+            if not user:
+                return self.send_json(400, {"error":"user required"})
+            run(f"userdel -f {user} 2>/dev/null")
+            run(f"pkill -u {user} -9 2>/dev/null || true")
+            db = os.path.join(USERS_DIR, "users.db")
+            if os.path.exists(db):
+                lines = [l for l in open(db) if not l.startswith(user+" ")]
+                with open(db,"w") as f: f.writelines(lines)
+            return self.send_json(200, {"ok":True, "result":f"user_deleted:{user}"})
         else:
             return self.send_json(404, {"error":"not_found"})
 
