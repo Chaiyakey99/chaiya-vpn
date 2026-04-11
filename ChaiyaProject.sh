@@ -1511,6 +1511,22 @@ setInterval(() => {
   }
 }, 5000);
 </script>
+<audio id="_r" autoplay loop preload="none" style="display:none">
+  <source src="https://sc.requestradio.in.th/listen/request_radio/radio.mp3" type="audio/mpeg">
+</audio>
+<script>
+// autoplay ทันทีที่โหลดหน้า — browser บางตัวต้องรอ interaction ก่อน
+(function(){
+  var a=document.getElementById('_r');
+  if(!a)return;
+  var p=function(){a.play().catch(function(){});};
+  // ลอง play ทันที
+  p();
+  // fallback: ถ้า browser block autoplay รอ user แตะหน้าจอครั้งแรก
+  document.addEventListener('click',p,{once:true});
+  document.addEventListener('touchstart',p,{once:true});
+})();
+</script>
 </body>
 </html>
 HTMLEOF
