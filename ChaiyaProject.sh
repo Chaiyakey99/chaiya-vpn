@@ -910,40 +910,28 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
     <div class="card-body">
       <div id="alert-create" class="alert"></div>
       <div class="form-grid">
-        <div class="form-g"><label>Username</label><input type="text" id="new-user" placeholder="username"></div>
-        <div class="form-g"><label>Password</label><input type="password" id="new-pass" placeholder="password"></div>
-        <div class="form-g"><label>หมดอายุ (วัน)</label><input type="number" id="new-exp" value="30" min="1"></div>
-        <div class="form-g"><label>IP Limit</label><input type="number" id="new-iplimit" value="2" min="1"></div>
+        <div class="form-g"><label>ชื่อผู้ใช้</label><input type="text" id="new-user" placeholder="username" oninput="clearCreateLink()"></div>
+        <div class="form-g"><label>รหัสผ่าน</label><input type="password" id="new-pass" placeholder="password" oninput="clearCreateLink()"></div>
+        <div class="form-g"><label>จำนวนวัน</label><input type="number" id="new-exp" value="30" min="1"></div>
+        <div class="form-g"><label>ลิมิตไอพี</label><input type="number" id="new-iplimit" value="2" min="1"></div>
       </div>
-      <div class="btn-row">
-        <button class="btn btn-g" onclick="createUser()">➕ เพิ่ม User</button>
-        <button class="btn btn-p" onclick="openModal('modal-trial')">🎁 Trial User</button>
-      </div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-head">
-      <div class="card-title">📱 Connection Config</div>
-      <button class="btn btn-y btn-sm" onclick="genToken()">🎲 New Token</button>
-    </div>
-    <div class="card-body">
-      <div id="conn-info" class="cfg-box">กำลังโหลด...</div>
-      <!-- App selector -->
       <div class="sel-lbl">🌐 เลือก ISP / Operator</div>
       <div class="pick-grid">
-        <div id="pro-dtac" class="pick-opt a-dtac" onclick="selPro('dtac')"><div class="pi">🟠</div><div class="pn c-dtac">DTAC GAMING</div><div class="ps">dl.dir.freefiremobile.com</div></div>
-        <div id="pro-true" class="pick-opt" onclick="selPro('true')"><div class="pi">🔵</div><div class="pn c-true">TRUE TWITTER</div><div class="ps">help.x.com</div></div>
+        <div id="cu-pro-dtac" class="pick-opt a-dtac" onclick="cuSelPro('dtac')"><div class="pi">🟠</div><div class="pn c-dtac">DTAC GAMING</div><div class="ps">dl.dir.freefiremobile.com</div></div>
+        <div id="cu-pro-true" class="pick-opt" onclick="cuSelPro('true')"><div class="pi">🔵</div><div class="pn c-true">TRUE TWITTER</div><div class="ps">help.x.com</div></div>
       </div>
       <div class="sel-lbl">📱 เลือก App</div>
       <div class="pick-grid">
-        <div id="app-npv"  class="pick-opt a-npv"  onclick="selApp('npv')"><div class="pi">🌊</div><div class="pn c-npv">NapsternetV</div><div class="ps">npvt-ssh://</div></div>
-        <div id="app-dark" class="pick-opt" onclick="selApp('dark')"><div class="pi">🌑</div><div class="pn c-dark">DarkTunnel</div><div class="ps">darktunnel://</div></div>
+        <div id="cu-app-npv" class="pick-opt a-npv" onclick="cuSelApp('npv')"><div class="pi" style="width:38px;height:38px;border-radius:10px;background:#0d2a3a;display:flex;align-items:center;justify-content:center;margin:0 auto .18rem;font-family:monospace;font-weight:900;font-size:.85rem;color:#00ccff;letter-spacing:-1px;border:1.5px solid #00ccff44">nV</div><div class="pn c-npv">Npv Tunnel</div><div class="ps">npvt-ssh://</div></div>
+        <div id="cu-app-dark" class="pick-opt" onclick="cuSelApp('dark')"><div class="pi" style="width:38px;height:38px;border-radius:10px;background:#111;display:flex;align-items:center;justify-content:center;margin:0 auto .18rem;font-family:sans-serif;font-weight:900;font-size:.62rem;color:#fff;letter-spacing:.5px;border:1.5px solid #444">DARK</div><div class="pn c-dark">DarkTunnel</div><div class="ps">darktunnel://</div></div>
       </div>
-      <div class="btn-row"><button class="btn btn-c" onclick="genImportLink()">🔗 สร้าง Import Link</button></div>
-      <div class="imp-result" id="imp-result"></div>
+      <div class="btn-row" style="margin-top:.6rem">
+        <button class="btn btn-g" onclick="createUserAndLink()">➕ สร้าง User</button>
+        <button class="btn btn-p" onclick="openModal('modal-trial')">🎁 Trial</button>
+      </div>
+      <div class="imp-result" id="cu-link-result"></div>
     </div>
   </div>
-
   <div class="card">
     <div class="card-head">
       <div class="card-title">📋 รายชื่อ Users</div>
@@ -1371,7 +1359,7 @@ async function genImportLink() {
   document.getElementById('imp-result').className='imp-result show';
   document.getElementById('imp-result').innerHTML=`
     <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
-      <span class="imp-badge ${_curApp}">${isNpv?'NapsternetV':'DarkTunnel'}</span>
+      <span class="imp-badge ${_curApp}">${isNpv?'Npv Tunnel':'DarkTunnel'}</span>
       <span style="font-size:.65rem;color:var(--muted)">${pro.name} · ${u.user}</span>
     </div>
     <div class="link-preview ${isNpv?'':'dark-lp'}">${link}</div>
@@ -1415,6 +1403,49 @@ function filterUsers() {
   renderUserTable(_allUsers.filter(u => u.user.toLowerCase().includes(q)));
 }
 
+let _cuPro='dtac', _cuApp='npv';
+function cuSelPro(p) {
+  _cuPro=p;
+  document.getElementById('cu-pro-dtac').className='pick-opt'+(p==='dtac'?' a-dtac':'');
+  document.getElementById('cu-pro-true').className='pick-opt'+(p==='true'?' a-true':'');
+  clearCreateLink();
+}
+function cuSelApp(a) {
+  _cuApp=a;
+  document.getElementById('cu-app-npv').className='pick-opt'+(a==='npv'?' a-npv':'');
+  document.getElementById('cu-app-dark').className='pick-opt'+(a==='dark'?' a-dark':'');
+  clearCreateLink();
+}
+function clearCreateLink() {
+  const el=document.getElementById('cu-link-result');
+  if(el){el.className='imp-result';el.innerHTML='';}
+}
+async function createUserAndLink() {
+  const user=document.getElementById('new-user').value.trim();
+  const pass=document.getElementById('new-pass').value.trim();
+  const exp=parseInt(document.getElementById('new-exp').value||30);
+  const ipl=parseInt(document.getElementById('new-iplimit').value||2);
+  if(!user||!pass) return showAlert('alert-create','กรอก username/password ด้วย',false);
+  showAlert('alert-create','⏳ กำลังสร้าง...', true);
+  const r=await api('POST','/api/create',{user,pass,exp_days:exp,ip_limit:ipl});
+  if(!r.ok){showAlert('alert-create',r.error||'ล้มเหลว',false);return;}
+  showAlert('alert-create',`✅ สร้าง ${user} สำเร็จ`, true);
+  loadUsers();
+  const pro=PROS[_cuPro]||PROS.dtac;
+  const link=_cuApp==='npv'?buildNpvLink(user,pass,pro):buildDarkLink(user,pass,pro);
+  const isNpv=_cuApp==='npv';
+  const safeLink=link.replace(/`/g,'\\`');
+  const el=document.getElementById('cu-link-result');
+  el.className='imp-result show';
+  el.innerHTML=`
+    <div style='display:flex;align-items:center;gap:.4rem;margin:.7rem 0 .3rem'>
+      <span class='imp-badge ${_cuApp}'>${isNpv?'Npv Tunnel':'DarkTunnel'}</span>
+      <span style='font-size:.65rem;color:var(--muted)'>${pro.name} · ${user}</span>
+    </div>
+    <div class='link-preview ${isNpv?'':'dark-lp'}'>${link}</div>
+    <button class='copy-link-btn ${_cuApp}' onclick='navigator.clipboard.writeText(`${safeLink}`).then(()=>toast("📋 คัดลอกแล้ว!"))'>📋 คัดลอกลิงค์ใส่แอพ</button>
+  `;
+}
 async function createUser() {
   const user=document.getElementById('new-user').value.trim();
   const pass=document.getElementById('new-pass').value.trim();
