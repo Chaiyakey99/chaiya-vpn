@@ -1134,7 +1134,7 @@ async function api(method, path, body=null) {
     headers['X-Auth-Token'] = tok;
     // Authorization header: ต้องเป็น ISO-8859-1 เท่านั้น
     // ตรวจสอบก่อนใส่ — ถ้ามี non-ASCII ข้าม
-    const isAsciiOnly = /^[ -]*$/.test('Bearer ' + tok);
+    const isAsciiOnly = /^[\x20-\x7E]*$/.test('Bearer ' + tok);
     if (isAsciiOnly) {
       headers['Authorization'] = 'Bearer ' + tok;
     }
@@ -1198,6 +1198,7 @@ function showAlert(id, msg, ok=true) {
 // UI helpers
 // ══════════════════════════════════════════════
 function showTab(name, btn) {
+  if (name !== 'online' && _trafRaf) { cancelAnimationFrame(_trafRaf); _trafRaf = null; }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
@@ -1318,10 +1319,10 @@ async function genToken() {
 // ══════════════════════════════════════════════
 const PROS = {
   dtac: {name:'DTAC GAMING', proxy:'104.18.63.124:80',
-    payload:'CONNECT /  HTTP/1.1 [crlf]Host: dl.dir.freefiremobile.com [crlf][crlf]PATCH / HTTP/1.1[crlf]Host:[host][crlf]Upgrade:User-Agent: [ua][crlf][crlf]',
+    payload:'CONNECT / HTTP/1.1[crlf]Host: dl.dir.freefiremobile.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]User-Agent: [ua][crlf][crlf]',
     darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80},
   true: {name:'TRUE TWITTER', proxy:'104.18.39.24:80',
-    payload:'POST / HTTP/1.1[crlf]Host:help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection:Upgrade[crlf][crlf]',
+    payload:'POST / HTTP/1.1[crlf]Host: help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]',
     darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80}
 };
 const NPV_HOST='www.project.godvpn.shop', NPV_PORT=80;
@@ -1343,10 +1344,25 @@ function buildNpvLink(name, pass, pro) {
   return 'npvt-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
 function buildDarkLink(name, pass, pro) {
-  const host=_serverHost||location.hostname;
-  const pp=(pro.proxy||'').split(':'); const dh=pp[0]||pro.darkProxy;
-  const j={configType:'SSH-PROXY',remarks:pro.name+'-'+name,sshHost:host,sshPort:143,sshUser:name,sshPass:pass,payload:'GET / HTTP/1.1\r\nHost: '+host+'\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n',proxyHost:dh,proxyPort:80,udpgwAddr:'127.0.0.1',udpgwPort:7300,tlsEnabled:false};
-  return 'darktunnel-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(j))));
+  const host = _serverHost || location.hostname;
+  const proxyHost = pro.darkProxy || host;
+  const proxyPort = pro.darkProxyPort || 80;
+  const payload = 'GET / HTTP/1.1[crlf]Host: ' + host + '[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]';
+  const j = {
+    configType: 'SSH-WS',
+    remarks: pro.name + '-' + name,
+    server: host,
+    port: 143,
+    username: name,
+    password: pass,
+    payload: payload,
+    proxyServer: proxyHost,
+    proxyPort: proxyPort,
+    udpgwAddr: '127.0.0.1',
+    udpgwPort: 7300,
+    tlsEnabled: false
+  };
+  return 'darktunnel-ssh://' + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
 
 async function genImportLink() {
@@ -1356,6 +1372,7 @@ async function genImportLink() {
   const pro = PROS[_curPro] || PROS.dtac;
   const link = _curApp==='npv' ? buildNpvLink(u.user, u.pass||'', pro) : buildDarkLink(u.user, u.pass||'', pro);
   const isNpv = _curApp==='npv';
+  window._impLink = link;
   document.getElementById('imp-result').className='imp-result show';
   document.getElementById('imp-result').innerHTML=`
     <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
@@ -1363,7 +1380,7 @@ async function genImportLink() {
       <span style="font-size:.65rem;color:var(--muted)">${pro.name} · ${u.user}</span>
     </div>
     <div class="link-preview ${isNpv?'':'dark-lp'}">${link}</div>
-    <button class="copy-link-btn ${_curApp}" onclick="navigator.clipboard.writeText('${link.replace(/'/g,"\\'")}').then(()=>toast('คัดลอกแล้ว!'))">📋 คัดลอก Link</button>`;
+    <button class="copy-link-btn ${_curApp}" onclick="navigator.clipboard.writeText(window._impLink).then(()=>toast('📋 คัดลอกแล้ว!'))">📋 คัดลอก Link</button>`;
 }
 
 // ══════════════════════════════════════════════
@@ -1434,7 +1451,7 @@ async function createUserAndLink() {
   const pro=PROS[_cuPro]||PROS.dtac;
   const link=_cuApp==='npv'?buildNpvLink(user,pass,pro):buildDarkLink(user,pass,pro);
   const isNpv=_cuApp==='npv';
-  const safeLink=link.replace(/`/g,'\\`');
+  window._cuLink = link;
   const el=document.getElementById('cu-link-result');
   el.className='imp-result show';
   el.innerHTML=`
@@ -1443,18 +1460,8 @@ async function createUserAndLink() {
       <span style='font-size:.65rem;color:var(--muted)'>${pro.name} · ${user}</span>
     </div>
     <div class='link-preview ${isNpv?'':'dark-lp'}'>${link}</div>
-    <button class='copy-link-btn ${_cuApp}' onclick='navigator.clipboard.writeText(`${safeLink}`).then(()=>toast("📋 คัดลอกแล้ว!"))'>📋 คัดลอกลิงค์ใส่แอพ</button>
+    <button class='copy-link-btn ${_cuApp}' onclick='navigator.clipboard.writeText(window._cuLink).then(()=>toast("📋 คัดลอกแล้ว!"))'>📋 คัดลอกลิงค์ใส่แอพ</button>
   `;
-}
-async function createUser() {
-  const user=document.getElementById('new-user').value.trim();
-  const pass=document.getElementById('new-pass').value.trim();
-  const exp =parseInt(document.getElementById('new-exp').value||30);
-  const ipl =parseInt(document.getElementById('new-iplimit').value||2);
-  if (!user||!pass) return showAlert('alert-create','กรอก username/password ด้วย',false);
-  const r = await api('POST','/api/create',{user,pass,exp_days:exp,ip_limit:ipl});
-  showAlert('alert-create', r.ok ? `สร้าง ${user} สำเร็จ` : (r.error||'ล้มเหลว'), r.ok);
-  if (r.ok) { document.getElementById('new-user').value=''; document.getElementById('new-pass').value=''; loadUsers(); }
 }
 
 function openRenew(u) {
@@ -1490,7 +1497,7 @@ async function kickUser(u) {
 async function doTrial() {
   const user=(document.getElementById('trial-user').value.trim())||('trial_'+Math.random().toString(36).slice(2,6));
   const hrs=parseInt(document.getElementById('trial-hours').value||3);
-  const r=await api('POST','/api/create',{user,pass:Math.random().toString(36).slice(2,10),exp_days:Math.ceil(hrs/24)||1,ip_limit:1});
+  const r=await api('POST','/api/create',{user,pass:Math.random().toString(36).slice(2,10),exp_days:Math.max(1,Math.ceil(hrs/24)),ip_limit:1});
   toast(r.ok?`Trial "${user}" ${hrs}h สร้างแล้ว`:(r.error||'ล้มเหลว'), r.ok);
   closeModal('modal-trial'); if(r.ok) loadUsers();
 }
@@ -1515,11 +1522,11 @@ async function loadOnline() {
   el.innerHTML=`<div style="font-size:.68rem;color:var(--muted);text-align:right;margin-bottom:.4rem">🟢 ${r.connections.length} คน · ${now}</div>`+
     `<div style="display:flex;flex-direction:column;gap:.35rem">`+
     r.connections.map((c,i)=>{
-      const un=c.user||c.username||Object.keys(uMap)[i]||'—'; const u=uMap[un]||{};
+      const un=c.user||c.username||''; const u=(un&&uMap[un])||Object.values(uMap)[i]||{}; const _un=un||u.user||'—';
       const exp=u.exp&&u.exp<new Date().toISOString().split('T')[0];
       return `<div style="display:flex;align-items:center;gap:.65rem;background:var(--bg2);border-radius:.55rem;padding:.5rem .75rem;border:1px solid rgba(77,255,160,.08)">
         <span style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);flex-shrink:0;animation:blink 1.4s infinite"></span>
-        <span style="font-weight:700;font-size:.85rem;flex:1">${un}</span>
+        <span style="font-weight:700;font-size:.85rem;flex:1">${_un}</span>
         ${u.exp?`<span style="font-size:.68rem;color:${exp?'var(--red)':'rgba(0,220,100,.5)'}">${exp?'หมดอายุ':u.exp}</span>`:''}
         <span class="bdg bdg-g" style="font-size:.62rem">${c.state||'ESTABLISHED'}</span>
       </div>`;
@@ -1577,8 +1584,12 @@ async function loadBanned() {
   const bans=r.bans||{}; const keys=Object.keys(bans);
   let count=keys.length; document.getElementById('stat-banned').textContent=count;
   if(!keys.length){el.innerHTML=`<div style="text-align:center;color:var(--muted);padding:2rem">ไม่มี IP ที่ถูกแบน ✅</div>`;return;}
+  const _esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   el.innerHTML=`<div class="tbl-wrap"><table><thead><tr><th>User/IP</th><th>เหตุผล</th><th>หมดแบน</th><th></th></tr></thead><tbody>`+
-    keys.map(k=>{const b=bans[k]; return `<tr><td><b>${b.user||k}</b><br><span style="color:var(--muted);font-size:.68rem">${b.ip||b.ips?.join(', ')||k}</span></td><td><span class="bdg bdg-r">${b.reason||'IP limit'}</span></td><td style="font-size:.72rem">${b.until||'12h'}</td><td><button class="btn btn-g btn-sm" onclick="unban('${k}','${b.name||b.user||''}')">🔓</button></td></tr>`;
+    keys.map(k=>{const b=bans[k];
+      const safeK=_esc(k), safeUser=_esc(b.user||k), safeIp=_esc(b.ip||( b.ips?b.ips.join(', '):k)), safeReason=_esc(b.reason||'IP limit'), safeUntil=_esc(b.until||'12h');
+      const safeKAttr=encodeURIComponent(k), safeNameAttr=encodeURIComponent(b.name||b.user||'');
+      return `<tr><td><b>${safeUser}</b><br><span style="color:var(--muted);font-size:.68rem">${safeIp}</span></td><td><span class="bdg bdg-r">${safeReason}</span></td><td style="font-size:.72rem">${safeUntil}</td><td><button class="btn btn-g btn-sm" onclick="unban(decodeURIComponent('${safeKAttr}'),decodeURIComponent('${safeNameAttr}'))">&#x1f513;</button></td></tr>`;
     }).join('')+`</tbody></table></div>`;
 }
 
@@ -1639,7 +1650,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-dashboard') loadDashboard(); }, 15000);
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
 </script>
-<audio id="_r" autoplay loop preload="none" style="display:none">
+<audio id="_r" loop preload="none" style="display:none">
   <source src="https://sc.requestradio.in.th/listen/request_radio/radio.mp3" type="audio/mpeg">
 </audio>
 <script>
@@ -1828,15 +1839,26 @@ def list_users():
     return result
 
 def get_connections():
-    """นับ active connections บน port 80 (ws-dropbear) และ dropbear ports"""
+    """นับ active connections แยกตาม port"""
     cfg = load_conf()
-    ports = [cfg.get("WS_PORT","80"), cfg.get("DROPBEAR_PORT","143"), cfg.get("DROPBEAR_PORT2","109")]
+    port_map = {
+        "80":  cfg.get("WS_PORT","80"),
+        "143": cfg.get("DROPBEAR_PORT","143"),
+        "109": cfg.get("DROPBEAR_PORT2","109"),
+        "22":  "22"
+    }
+    counts = {}
     total = 0
-    for p in ports:
+    for label, p in port_map.items():
         out, _ = run(f"ss -tn state established 2>/dev/null | grep -c ':{p} ' || echo 0")
-        try: total += int(out.strip())
-        except: pass
-    return total
+        try:
+            n = int(out.strip())
+        except:
+            n = 0
+        counts[label] = n
+        total += n
+    counts["total"] = total
+    return counts
 
 def get_online_connections():
     """ดึง list ของ active connections พร้อม remote IP จริง"""
@@ -1936,7 +1958,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             online_count = len(online_list)
             return self.send_json(200, {
                 "enabled":         int(cfg.get("ENABLED","1")),
-                "connections":     conns,
+                "connections":     conns.get("total", 0),
+                "conn_80":         conns.get("80", 0),
+                "conn_143":        conns.get("143", 0),
+                "conn_109":        conns.get("109", 0),
+                "conn_22":         conns.get("22", 0),
                 "online_count":    online_count,
                 "total_users":     total_users,
                 "rx_bytes": sum(int(l.split()[1]) for l in open("/proc/net/dev").readlines()[2:] if not l.strip().startswith("lo:")) if os.path.exists("/proc/net/dev") else 0,
