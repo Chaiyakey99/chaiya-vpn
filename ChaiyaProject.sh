@@ -850,15 +850,9 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   .traf-summary-item .ts-val{font-size:1rem;font-weight:700}
   .traf-summary-item.up .ts-val{color:#00e8ff;text-shadow:0 0 12px rgba(0,232,255,.4)}
   .traf-summary-item.dn .ts-val{color:var(--teal);text-shadow:0 0 12px rgba(79,209,197,.4);text-align:right}
-  .chart-wrap{display:flex;align-items:flex-end;gap:3px;height:110px;padding:0 2px}
-  .chart-bar{
-    flex:1;border-radius:3px 3px 0 0;
-    background:linear-gradient(180deg,rgba(0,232,255,.85),rgba(0,232,255,.25));
-    box-shadow:0 0 6px rgba(0,232,255,.35);
-    transition:height .55s cubic-bezier(.4,0,.2,1);
-    min-height:3px;
-  }
-  .chart-time{display:flex;justify-content:space-between;font-size:.52rem;color:var(--muted);font-family:monospace;margin-top:4px;padding:0 2px}
+  .chart-wrap{width:100%;height:90px;position:relative;overflow:hidden}
+  .chart-wrap canvas{width:100%!important;height:100%!important;display:block}
+  .chart-time{display:flex;justify-content:space-between;font-size:.5rem;color:rgba(0,180,220,.45);font-family:monospace;margin-top:3px;padding:0 2px}
 
   @media(max-width:500px){.stats{grid-template-columns:1fr 1fr}}
 
@@ -1040,7 +1034,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
           <div class="ts-val" id="traf-dn">—</div>
         </div>
       </div>
-      <div class="chart-wrap" id="traf-bars"></div>
+      <div class="chart-wrap"><canvas id="traf-canvas"></canvas></div>
       <div class="chart-time" id="traf-time-labels"></div>
       <div id="traf-upd" style="text-align:right;font-size:.62rem;color:rgba(0,180,220,.3);margin-top:.3rem;font-family:monospace"></div>
     </div>
@@ -1613,31 +1607,97 @@ function _trafLoop() {
   // rendering happens directly in _drawTraf on data update
 }
 
+// ── canvas bar chart renderer ──────────────────────────
+let _trafAnimReq = null;
+let _trafCurrent = [];   // ค่าที่กำลังแสดงอยู่ (lerp target)
+let _trafDisplayed = []; // ค่าที่ animate ไปแล้ว
+const _LERP_SPEED = 0.12; // 0-1 ยิ่งต่ำยิ่ง smooth
+
+function _lerp(a, b, t) { return a + (b - a) * t; }
+
 function _drawTraf(pts) {
-  const wrap = document.getElementById('traf-bars'); if(!wrap) return;
-  const mn = Math.min(...pts), mx = Math.max(...pts) || 1;
-  const range = (mx - mn) || 1;
-  // keep 12 bars max
-  const slice = pts.slice(-12);
-  const sliceMn = Math.min(...slice), sliceMx = Math.max(...slice) || 1;
-  const sliceRange = (sliceMx - sliceMn) || 1;
-  // build bars
-  let bars = wrap.querySelectorAll('.chart-bar');
-  if(bars.length !== slice.length) {
-    wrap.innerHTML = slice.map(() => '<div class="chart-bar"></div>').join('');
-    bars = wrap.querySelectorAll('.chart-bar');
+  if (!pts || pts.length < 1) return;
+  const MAX = 20; // จำนวนแท่งสูงสุด
+  _trafCurrent = pts.slice(-MAX);
+  // init displayed ถ้ายังไม่มี
+  if (_trafDisplayed.length !== _trafCurrent.length) {
+    _trafDisplayed = _trafCurrent.map(() => 0);
   }
-  slice.forEach((v, i) => {
-    const pct = Math.max(4, Math.round((v - sliceMn) / sliceRange * 96));
-    bars[i].style.height = pct + '%';
-  });
-  // time labels — show 5 evenly spaced
+  // เริ่ม animation loop ถ้ายังไม่รัน
+  if (!_trafAnimReq) _trafAnimFrame();
+  // อัพเดท time labels
   const lblEl = document.getElementById('traf-time-labels');
-  if(lblEl && _traf.labels.length) {
-    const lblSlice = _traf.labels.slice(-12);
-    const idxs = [0, Math.floor(lblSlice.length*0.25), Math.floor(lblSlice.length*0.5), Math.floor(lblSlice.length*0.75), lblSlice.length-1];
-    lblEl.innerHTML = idxs.map(i => `<span>${lblSlice[i]||''}</span>`).join('');
+  if (lblEl && _traf.labels.length) {
+    const sl = _traf.labels.slice(-MAX);
+    const step = Math.max(1, Math.floor(sl.length / 4));
+    const idxs = [];
+    for (let i = 0; i < sl.length; i += step) idxs.push(i);
+    if (idxs[idxs.length-1] !== sl.length-1) idxs.push(sl.length-1);
+    lblEl.innerHTML = idxs.map(i => `<span>${sl[i]||''}</span>`).join('');
   }
+}
+
+function _trafAnimFrame() {
+  const cv = document.getElementById('traf-canvas');
+  if (!cv) { _trafAnimReq = null; return; }
+
+  // lerp displayed → current
+  let allDone = true;
+  for (let i = 0; i < _trafCurrent.length; i++) {
+    const target = _trafCurrent[i] || 0;
+    const cur = _trafDisplayed[i] || 0;
+    const next = _lerp(cur, target, _LERP_SPEED);
+    _trafDisplayed[i] = next;
+    if (Math.abs(next - target) > target * 0.002 + 1) allDone = false;
+  }
+
+  // วาด
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.parentElement.offsetWidth || 300;
+  const H = cv.parentElement.offsetHeight || 90;
+  cv.width = W * dpr; cv.height = H * dpr;
+  cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  const pts = _trafDisplayed;
+  const n = pts.length;
+  if (n < 1) { _trafAnimReq = allDone ? null : requestAnimationFrame(_trafAnimFrame); return; }
+
+  // scale — ใช้ค่า current จริง (ไม่ใช่ displayed) เพื่อกัน bar เกิน
+  const mx = Math.max(..._trafCurrent) || 1;
+  const PAD_T = 6, PAD_B = 2, PAD_LR = 2;
+  const gW = W - PAD_LR * 2;
+  const gH = H - PAD_T - PAD_B;
+  const barW = Math.max(3, Math.floor((gW - (n-1)*5) / n / 2));
+  const gap = n > 1 ? (gW - barW * n) / (n - 1) : 0;
+
+  pts.forEach((v, i) => {
+    const ratio = Math.min(1, (v || 0) / mx);
+    const bH = Math.max(2, ratio * gH);
+    const x = PAD_LR + i * (barW + gap);
+    const y = PAD_T + gH - bH;
+
+    // gradient fill
+    const grad = ctx.createLinearGradient(0, y, 0, y + bH);
+    grad.addColorStop(0, 'rgba(0,232,255,0.9)');
+    grad.addColorStop(1, 'rgba(0,180,220,0.15)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(x, y, barW, bH, [3, 3, 0, 0]);
+    ctx.fill();
+
+    // glow top edge
+    ctx.save();
+    ctx.shadowColor = '#00e8ff';
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = 'rgba(0,232,255,0.95)';
+    ctx.fillRect(x, y, barW, 2);
+    ctx.restore();
+  });
+
+  _trafAnimReq = allDone ? null : requestAnimationFrame(_trafAnimFrame);
 }
 
 async function _updateTraf() {
