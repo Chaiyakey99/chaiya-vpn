@@ -228,7 +228,14 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Token $http_x_token;
+        proxy_set_header X-Auth-Token $http_x_auth_token;
+        proxy_set_header Authorization $http_authorization;
         proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
     }
     # xui-traffic: proxy ไปยัง 3x-ui local API (realtime traffic)
     location /xui-traffic/ {
@@ -952,6 +959,13 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   </div>
 
   <div class="card">
+    <div class="card-head"><div class="card-title">🌍 <span class="rgb-label">Server Info</span></div></div>
+    <div class="card-body cfg-box" id="conn-info">
+      <div class="cfg-row"><span class="cfg-k">🌍 Host</span><span class="cfg-v" id="server-ip-info">กำลังโหลด...</span></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-head"><div class="card-title">🔗 <span class="rgb-label">Connections per Port</span></div></div>
     <div class="card-body" id="conn-bars-wrap">
       <div class="bar-wrap"><div class="bar-lbl"><span>Port 80 (WS Tunnel)</span><span style="display:flex;align-items:center;gap:4px"><span id="b80">0</span><span id="bl80" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf80" style="width:0%"></div></div></div>
@@ -1253,7 +1267,7 @@ function showAlert(id, msg, ok=true) {
 // UI helpers
 // ══════════════════════════════════════════════
 function showTab(name, btn) {
-  if (name !== 'online' && _trafRaf) { cancelAnimationFrame(_trafRaf); _trafRaf = null; }
+  if (name !== 'online' && _trafAnimReq) { cancelAnimationFrame(_trafAnimReq); _trafAnimReq = null; }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
@@ -1299,6 +1313,7 @@ async function loadDashboard() {
     setText('stat-conns',  conns);
     setText('stat-online', online);
     setText('stat-users',  users);
+    setText('stat-vless',  s.vless_count ?? '-');
     // conn bars
     const ports = {
       '80':  s.conn_80  ?? s.connections_80  ?? 0,
@@ -1346,7 +1361,7 @@ async function loadDashboard() {
     // Fallback: ดึง host จาก URL
     _serverHost = location.hostname;
     const si = document.getElementById('server-ip');
-    if (si && si.textContent === 'กำลังโหลด...') si.textContent = _serverHost;
+    if (si) si.textContent = _serverHost;
   }
 }
 
@@ -1402,13 +1417,13 @@ let _curPro='dtac', _curApp='npv';
 
 function selPro(p) {
   _curPro = p;
-  document.getElementById('pro-dtac').className='pick-opt'+(p==='dtac'?' a-dtac':'');
-  document.getElementById('pro-true').className='pick-opt'+(p==='true'?' a-true':'');
+  document.getElementById('cu-pro-dtac').className='pick-opt'+(p==='dtac'?' a-dtac':'');
+  document.getElementById('cu-pro-true').className='pick-opt'+(p==='true'?' a-true':'');
 }
 function selApp(a) {
   _curApp = a;
-  document.getElementById('app-npv').className ='pick-opt'+(a==='npv' ?' a-npv' :'');
-  document.getElementById('app-dark').className='pick-opt'+(a==='dark'?' a-dark':'');
+  document.getElementById('cu-app-npv').className='pick-opt'+(a==='npv'?' a-npv':'');
+  document.getElementById('cu-app-dark').className='pick-opt'+(a==='dark'?' a-dark':'');
 }
 
 function buildNpvLink(name, pass, pro) {
@@ -1448,8 +1463,8 @@ async function genImportLink() {
   const link = _curApp==='npv' ? buildNpvLink(u.user, u.pass||'', pro) : buildDarkLink(u.user, u.pass||'', pro);
   const isNpv = _curApp==='npv';
   window._impLink = link;
-  document.getElementById('imp-result').className='imp-result show';
-  document.getElementById('imp-result').innerHTML=`
+  document.getElementById('cu-link-result').className='imp-result show';
+  document.getElementById('cu-link-result').innerHTML=`
     <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
       <span class="imp-badge ${_curApp}">${isNpv?'Npv Tunnel':'DarkTunnel'}</span>
       <span style="font-size:.65rem;color:var(--muted)">${pro.name} · ${u.user}</span>
@@ -1573,7 +1588,6 @@ async function kickUser(u) {
 // ══════════════════════════════════════════════
 // Online
 // ══════════════════════════════════════════════
-let _trafRaf=null;
 const _traf={labels:[],total:[],prev:[],next:null,lerpT0:null,maxPts:30};
 const LERP_MS=600;
 const _lerp=(a,b,t)=>a+(b-a)*t;
@@ -1589,17 +1603,18 @@ async function loadOnline() {
   if(!ur.error&&ur.users) ur.users.forEach(u=>{uMap[u.user]=u;});
   el.innerHTML=`<div style="font-size:.68rem;color:var(--muted);text-align:right;margin-bottom:.4rem">🟢 ${r.connections.length} คน · ${now}</div>`+
     `<div style="display:flex;flex-direction:column;gap:.35rem">`+
-    r.connections.map((c,i)=>{
-      const un=c.user||c.username||''; const u=(un&&uMap[un])||Object.values(uMap)[i]||{}; const _un=un||u.user||'—';
+    r.connections.map((c)=>{
+      const un=c.user||''; const u=uMap[un]||{}; const _un=un||'—';
       const exp=u.exp&&u.exp<new Date().toISOString().split('T')[0];
       return `<div style="display:flex;align-items:center;gap:.65rem;background:var(--bg2);border-radius:.55rem;padding:.5rem .75rem;border:1px solid rgba(77,255,160,.08)">
         <span style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);flex-shrink:0;animation:blink 1.4s infinite"></span>
         <span style="font-weight:700;font-size:.85rem;flex:1">${_un}</span>
+        <span style="font-size:.65rem;color:var(--muted);font-family:monospace">${c.remote||''}</span>
         ${u.exp?`<span style="font-size:.68rem;color:${exp?'var(--red)':'rgba(0,220,100,.5)'}">${exp?'หมดอายุ':u.exp}</span>`:''}
-        <span class="bdg bdg-g" style="font-size:.62rem">${c.state||'ESTABLISHED'}</span>
+        <span class="bdg bdg-g" style="font-size:.62rem">:${c.port||'—'}</span>
       </div>`;
     }).join('')+`</div>`;
-  if(!_trafRaf) _trafLoop(); _updateTraf();
+  if(!_trafAnimReq) _trafLoop(); _updateTraf();
 }
 
 function _trafLoop() {
@@ -1612,8 +1627,6 @@ let _trafAnimReq = null;
 let _trafCurrent = [];   // ค่าที่กำลังแสดงอยู่ (lerp target)
 let _trafDisplayed = []; // ค่าที่ animate ไปแล้ว
 const _LERP_SPEED = 0.12; // 0-1 ยิ่งต่ำยิ่ง smooth
-
-function _lerp(a, b, t) { return a + (b - a) * t; }
 
 function _drawTraf(pts) {
   if (!pts || pts.length < 1) return;
@@ -1928,7 +1941,8 @@ def list_users():
         parts = line.strip().split()
         if len(parts) >= 3:
             user, days, exp = parts[0], parts[1], parts[2]
-            data_gb = int(parts[3]) if len(parts) > 3 else 0
+            data_gb  = int(parts[3]) if len(parts) > 3 else 0
+            ip_limit = int(parts[4]) if len(parts) > 4 else 2
             active = sp.run(f"id {user}", shell=True, capture_output=True).returncode == 0
             try:
                 exp_dt = datetime.strptime(exp, "%Y-%m-%d")
@@ -1969,7 +1983,8 @@ def list_users():
                 "active": active and not is_exp,
                 "data_gb": data_gb,
                 "used_gb": used_gb,
-                "pct": pct
+                "pct": pct,
+                "ip_limit": ip_limit
             })
     return result
 
@@ -1996,33 +2011,49 @@ def get_connections():
     return counts
 
 def get_online_connections():
-    """ดึง list ของ active connections พร้อม remote IP จริง"""
+    """ดึง list ของ active connections พร้อม remote IP และ username"""
     import re
     cfg = load_conf()
-    wp = cfg.get("WS_PORT","80")
-    # ดึงจากหลาย port (WS + Dropbear)
-    ports = [wp, cfg.get("DROPBEAR_PORT","143"), cfg.get("DROPBEAR_PORT2","109")]
+    ports = [cfg.get("WS_PORT","80"), cfg.get("DROPBEAR_PORT","143"), cfg.get("DROPBEAR_PORT2","109"), "22"]
     conns = []
     seen = set()
+    # map IP -> username จาก who
+    user_ip_map = {}
+    who_out, _ = run("who 2>/dev/null || echo ''")
+    for wline in who_out.splitlines():
+        m_ip = re.search(r'\(([0-9a-fA-F.:]+)\)', wline)
+        if m_ip:
+            wparts = wline.split()
+            if wparts: user_ip_map.setdefault(m_ip.group(1), wparts[0])
     for port in ports:
         out, _ = run(f"ss -tnp state established 2>/dev/null | grep ':{port}[^0-9]'")
         for line in out.splitlines():
-            # ss format: State Recv-Q Send-Q Local:Port Peer:Port [Process]
-            # ดึง Peer address (column 4) ด้วย regex เพื่อกันผิด column
-            m = re.search(r'\s([\d\.]+|\[[^\]]+\]):(\d+)\s+users:', line)
-            if not m:
-                # fallback: ดึง column ที่ 4 แล้วตรวจว่าเป็น IP จริง
-                parts = line.split()
-                peer = parts[4] if len(parts) >= 5 else ""
-                if not re.match(r'^[\d\.\[\]:]+:\d+$', peer):
-                    continue
-                ip = peer.rsplit(":", 1)[0].strip("[]")
-            else:
-                ip = m.group(1).strip("[]")
-            if ip and ip not in seen:
-                seen.add(ip)
-                conns.append({"remote": ip, "state": "ESTAB"})
+            parts = line.split()
+            peer = parts[4] if len(parts) >= 5 else ""
+            if not re.match(r'^[\d\.\[\]:]+:\d+$', peer): continue
+            ip = peer.rsplit(":", 1)[0].strip("[]")
+            if not ip or ip in seen: continue
+            seen.add(ip)
+            username = user_ip_map.get(ip, "")
+            if not username:
+                pid_m = re.search(r'pid=(\d+)', line)
+                if pid_m:
+                    u_out, _ = run(f"ps -o user= -p {pid_m.group(1)} 2>/dev/null")
+                    username = u_out.strip()
+            conns.append({"remote": ip, "user": username, "state": "ESTAB", "port": port})
     return conns
+
+def _safe_net_stat(col):
+    try:
+        total = 0
+        for l in open("/proc/net/dev").readlines()[2:]:
+            l = l.replace(":", ": ")
+            parts = l.split()
+            if not parts or parts[0] in ("lo", "lo:"): continue
+            try: total += int(parts[col])
+            except: pass
+        return total
+    except: return 0
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -2111,8 +2142,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "conn_22":         conns.get("22", 0),
                 "online_count":    online_count,
                 "total_users":     total_users,
-                "rx_bytes": sum(int(l.split()[1]) for l in open("/proc/net/dev").readlines()[2:] if not l.strip().startswith("lo:")) if os.path.exists("/proc/net/dev") else 0,
-                "tx_bytes": sum(int(l.split()[9]) for l in open("/proc/net/dev").readlines()[2:] if not l.strip().startswith("lo:")) if os.path.exists("/proc/net/dev") else 0,
+                "rx_bytes": _safe_net_stat(1),
+                "tx_bytes": _safe_net_stat(9),
+                "vless_count": 0,
                 "services": {
                     "sshws":    ws_on.strip()   == "active",
                     "dropbear": db_on.strip()   == "active",
@@ -2141,11 +2173,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif p == "/api/info":
             cfg = load_conf()
-            my_ip, _ = run("curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}'")
+            ip_cache = "/etc/chaiya/my_ip.conf"
+            my_ip = ""
+            try:
+                if os.path.exists(ip_cache): my_ip = open(ip_cache).read().strip()
+            except: pass
+            if not my_ip:
+                my_ip, _ = run("curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}'")
+                my_ip = my_ip.strip()
+                if my_ip:
+                    try: open(ip_cache, "w").write(my_ip)
+                    except: pass
             domain = ""
             if os.path.exists("/etc/chaiya/domain.conf"):
                 domain = open("/etc/chaiya/domain.conf").read().strip()
-            host = domain or my_ip.strip()
+            host = domain or my_ip
             proto = "https" if os.path.exists(f"/etc/letsencrypt/live/{host}/fullchain.pem") else "http"
             return self.send_json(200, {
                 "host": host,
@@ -2461,10 +2503,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(200, {"ok":True, "result":f"kicked:{user}"})
 
         elif p == "/api/create":
-            user    = body.get("user","").strip()
-            pw      = body.get("pass","").strip()
-            days    = int(body.get("exp_days", body.get("days", 30)))
-            data_gb = int(body.get("data_gb", 0))
+            user     = body.get("user","").strip()
+            pw       = body.get("pass","").strip()
+            days     = int(body.get("exp_days", body.get("days", 30)))
+            data_gb  = int(body.get("data_gb", 0))
+            ip_limit = int(body.get("ip_limit", 2))
             if not user or not pw:
                 return self.send_json(400, {"error":"user and password required"})
             exp, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
@@ -2473,7 +2516,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             run(f"printf '%s:%s\n' '{user}' '{pw}' | chpasswd")
             run(f"chage -E {exp} {user}")
             db = os.path.join(USERS_DIR, "users.db")
-            with open(db, "a") as f: f.write(f"{user} {days} {exp} {data_gb}\n")
+            with open(db, "a") as f: f.write(f"{user} {days} {exp} {data_gb} {ip_limit}\n")
             run("python3 /usr/local/bin/chaiya-data-tracker 2>/dev/null &")
             return self.send_json(200, {"ok":True, "result":f"user_created:{user}"})
         elif p == "/api/delete":
