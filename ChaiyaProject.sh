@@ -239,6 +239,19 @@ server {
         proxy_set_header Cookie $http_cookie;
         proxy_read_timeout 30s;
     }
+    # radio proxy — stream ผ่าน nginx แก้ปัญหา CORS
+    location /radio/ {
+        proxy_pass https://sc.requestradio.in.th/listen/request_radio/radio.mp3;
+        proxy_set_header Host sc.requestradio.in.th;
+        proxy_set_header Referer https://www.requestradio.in.th/;
+        proxy_set_header User-Agent "Mozilla/5.0";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_connect_timeout 10s;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Cache-Control "no-cache" always;
+    }
 }
 # หมายเหตุ: port 80 ถูกจัดการโดย ws-stunnel (HTTP CONNECT tunnel)
 # ไม่ใช้ nginx จัดการ port 80 เพราะจะชนกับ tunnel
@@ -1675,7 +1688,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-dashboard') loadDashboard(); }, 15000);
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
 </script>
-<audio id="_r" preload="none" style="display:none"><source src="https://sc.requestradio.in.th/listen/request_radio/radio.mp3" type="audio/mpeg"></audio>
+<audio id="_r" preload="none" style="display:none"><source src="/radio/" type="audio/mpeg"></audio>
 <script>
 (function(){
   var cv=document.getElementById('snow-canvas');
@@ -6549,6 +6562,18 @@ server {
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
+    }
+    location /radio/ {
+        proxy_pass https://sc.requestradio.in.th/listen/request_radio/radio.mp3;
+        proxy_set_header Host sc.requestradio.in.th;
+        proxy_set_header Referer https://www.requestradio.in.th/;
+        proxy_set_header User-Agent "Mozilla/5.0";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_connect_timeout 10s;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Cache-Control "no-cache" always;
     }
 }
 NGINXEOF
