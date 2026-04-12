@@ -843,9 +843,22 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   .copy-link-btn.dark{background:rgba(153,51,255,.08);border-color:rgba(153,51,255,.28);color:#cc66ff;}
   .copy-link-btn:hover{opacity:.78;}
 
-  /* ─ Traf chart ─ */
-  #traf-chart{width:100%;display:block;border-radius:.4rem;height:140px;}
+  /* ─ Traf chart (bar style) ─ */
   .traf-total{font-size:1rem;font-weight:900;color:#00e8ff;font-family:monospace;text-shadow:0 0 10px #00e8ff88}
+  .traf-summary{display:flex;justify-content:space-between;margin-bottom:.65rem}
+  .traf-summary-item .ts-lbl{font-size:.58rem;color:var(--muted);font-family:monospace;letter-spacing:1px;text-transform:uppercase}
+  .traf-summary-item .ts-val{font-size:1rem;font-weight:700}
+  .traf-summary-item.up .ts-val{color:#00e8ff;text-shadow:0 0 12px rgba(0,232,255,.4)}
+  .traf-summary-item.dn .ts-val{color:var(--teal);text-shadow:0 0 12px rgba(79,209,197,.4);text-align:right}
+  .chart-wrap{display:flex;align-items:flex-end;gap:3px;height:110px;padding:0 2px}
+  .chart-bar{
+    flex:1;border-radius:3px 3px 0 0;
+    background:linear-gradient(180deg,rgba(0,232,255,.85),rgba(0,232,255,.25));
+    box-shadow:0 0 6px rgba(0,232,255,.35);
+    transition:height .55s cubic-bezier(.4,0,.2,1);
+    min-height:3px;
+  }
+  .chart-time{display:flex;justify-content:space-between;font-size:.52rem;color:var(--muted);font-family:monospace;margin-top:4px;padding:0 2px}
 
   @media(max-width:500px){.stats{grid-template-columns:1fr 1fr}}
 
@@ -1017,7 +1030,18 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
       <span class="traf-total" id="traf-total">— MB</span>
     </div>
     <div class="card-body">
-      <canvas id="traf-chart"></canvas>
+      <div class="traf-summary">
+        <div class="traf-summary-item up">
+          <div class="ts-lbl">UPLOAD</div>
+          <div class="ts-val" id="traf-up">—</div>
+        </div>
+        <div class="traf-summary-item dn">
+          <div class="ts-lbl">DOWNLOAD</div>
+          <div class="ts-val" id="traf-dn">—</div>
+        </div>
+      </div>
+      <div class="chart-wrap" id="traf-bars"></div>
+      <div class="chart-time" id="traf-time-labels"></div>
       <div id="traf-upd" style="text-align:right;font-size:.62rem;color:rgba(0,180,220,.3);margin-top:.3rem;font-family:monospace"></div>
     </div>
   </div>
@@ -1576,44 +1600,50 @@ async function loadOnline() {
 }
 
 function _trafLoop() {
-  if(_traf.next&&_traf.lerpT0!==null){
-    const e=1-Math.pow(1-Math.min(1,(performance.now()-_traf.lerpT0)/LERP_MS),3);
-    _drawTraf(_traf.prev.map((v,i)=>_lerp(v,_traf.next[i],e)));
-    if(e>=1){_traf.total=[..._traf.next];_traf.next=null;_traf.lerpT0=null;}
-  } else if(_traf.total.length>=2) _drawTraf(_traf.total);
-  _trafRaf=requestAnimationFrame(_trafLoop);
+  // div-based bar chart — no animation frame loop needed
+  // rendering happens directly in _drawTraf on data update
 }
 
 function _drawTraf(pts) {
-  const cv=document.getElementById('traf-chart'); if(!cv)return;
-  const ctx=cv.getContext('2d'); const W=cv.offsetWidth||300, H=140;
-  cv.width=W; cv.height=H;
-  const n=pts.length; if(n<2)return;
-  const mn=Math.min(...pts), mx=Math.max(...pts)||1;
-  const P={l:8,r:8,t:10,b:14}; const gW=W-P.l-P.r, gH=H-P.t-P.b;
-  const X=i=>P.l+i/(n-1)*gW, Y=v=>P.t+gH-(v-mn)/(mx-mn||1)*gH;
-  ctx.clearRect(0,0,W,H);
-  const g=ctx.createLinearGradient(0,P.t,0,P.t+gH);
-  g.addColorStop(0,'rgba(0,232,255,.22)'); g.addColorStop(1,'rgba(0,232,255,.01)');
-  ctx.beginPath(); ctx.moveTo(X(0),Y(pts[0]));
-  for(let i=1;i<n;i++) ctx.lineTo(X(i),Y(pts[i]));
-  ctx.lineTo(X(n-1),P.t+gH); ctx.lineTo(X(0),P.t+gH); ctx.closePath();
-  ctx.fillStyle=g; ctx.fill();
-  ctx.beginPath(); ctx.moveTo(X(0),Y(pts[0]));
-  for(let i=1;i<n;i++) ctx.lineTo(X(i),Y(pts[i]));
-  ctx.save(); ctx.shadowColor='#00e8ff'; ctx.shadowBlur=12;
-  ctx.strokeStyle='#00e8ff'; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.stroke(); ctx.restore();
+  const wrap = document.getElementById('traf-bars'); if(!wrap) return;
+  const mn = Math.min(...pts), mx = Math.max(...pts) || 1;
+  const range = (mx - mn) || 1;
+  // keep 12 bars max
+  const slice = pts.slice(-12);
+  const sliceMn = Math.min(...slice), sliceMx = Math.max(...slice) || 1;
+  const sliceRange = (sliceMx - sliceMn) || 1;
+  // build bars
+  let bars = wrap.querySelectorAll('.chart-bar');
+  if(bars.length !== slice.length) {
+    wrap.innerHTML = slice.map(() => '<div class="chart-bar"></div>').join('');
+    bars = wrap.querySelectorAll('.chart-bar');
+  }
+  slice.forEach((v, i) => {
+    const pct = Math.max(4, Math.round((v - sliceMn) / sliceRange * 96));
+    bars[i].style.height = pct + '%';
+  });
+  // time labels — show 5 evenly spaced
+  const lblEl = document.getElementById('traf-time-labels');
+  if(lblEl && _traf.labels.length) {
+    const lblSlice = _traf.labels.slice(-12);
+    const idxs = [0, Math.floor(lblSlice.length*0.25), Math.floor(lblSlice.length*0.5), Math.floor(lblSlice.length*0.75), lblSlice.length-1];
+    lblEl.innerHTML = idxs.map(i => `<span>${lblSlice[i]||''}</span>`).join('');
+  }
 }
 
 async function _updateTraf() {
   const r=await api('GET','/api/status'); if(r.error)return;
-  const total=(r.rx_bytes||r.traffic?.rx_bytes||0)+(r.tx_bytes||r.traffic?.tx_bytes||0);
+  const rx=(r.rx_bytes||r.traffic?.rx_bytes||0);
+  const tx=(r.tx_bytes||r.traffic?.tx_bytes||0);
+  const total=rx+tx;
   const now=new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   _traf.labels.push(now); _traf.total.push(total);
   if(_traf.labels.length>_traf.maxPts){_traf.labels.shift();_traf.total.shift();}
-  if(_traf.total.length>=2){const n=_traf.total.length; _traf.prev=Array(n).fill(0).map((_,i)=>i<n-1?_traf.total[i]:_traf.total[n-2]); _traf.next=[..._traf.total]; _traf.lerpT0=performance.now();}
+  const elUp=document.getElementById('traf-up'); if(elUp) elUp.textContent=_fmtBytes(tx);
+  const elDn=document.getElementById('traf-dn'); if(elDn) elDn.textContent=_fmtBytes(rx);
   const el=document.getElementById('traf-total'); if(el) el.textContent=_fmtBytes(total);
   const u=document.getElementById('traf-upd'); if(u) u.textContent='อัพเดท '+now;
+  if(_traf.total.length>=1) _drawTraf(_traf.total);
 }
 
 // ══════════════════════════════════════════════
@@ -6215,8 +6245,8 @@ menu_18() {
       local _NEWTOK; _NEWTOK=$(openssl rand -hex 16)
       echo "$_NEWTOK" > /etc/chaiya/sshws-token.conf
       # ฝัง token ใหม่เข้า HTML ทันที
-      python3 -c "
-import re, sys
+      python3 << PYEOF 2>/dev/null || true
+import re
 path='/var/www/chaiya/sshws.html'
 tok='${_NEWTOK}'
 try:
@@ -6224,7 +6254,7 @@ try:
   h2=re.sub(r"(const _baked\s*=\s*')[^']*(')",r"\g<1>"+tok+r"\g<2>",h)
   with open(path,'w') as f: f.write(h2)
 except: pass
-" 2>/dev/null || true
+PYEOF
       # reopen nginx เพื่อให้ token ใหม่ใช้งานได้ทันที
       _TOK="$_NEWTOK"
       local _NEW_URL_TOK
