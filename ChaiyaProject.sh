@@ -1985,22 +1985,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def auth(self):
+        # อ่าน token จากไฟล์ทุกครั้ง เพื่อให้ regenerate มีผลทันทีโดยไม่ต้อง restart
+        try:
+            live_tok = open(TOKEN_FILE).read().strip()
+        except Exception:
+            live_tok = TOKEN
+        if not live_tok:
+            live_tok = TOKEN
         # 1. Authorization: Bearer <token>
         t = self.headers.get("Authorization","").replace("Bearer ","").strip()
-        if t and hmac.compare_digest(t, TOKEN):
+        if t and hmac.compare_digest(t, live_tok):
             return True
         # 2. X-Token header (custom — ไม่มี ISO-8859-1 restriction จาก browser)
         t2 = self.headers.get("X-Token","").strip()
-        if t2 and hmac.compare_digest(t2, TOKEN):
+        if t2 and hmac.compare_digest(t2, live_tok):
             return True
         # 3. X-Auth-Token header
         t3 = self.headers.get("X-Auth-Token","").strip()
-        if t3 and hmac.compare_digest(t3, TOKEN):
+        if t3 and hmac.compare_digest(t3, live_tok):
             return True
         # 4. query string ?token=xxx (fallback สุดท้าย)
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         t4 = qs.get("token", [""])[0].strip()
-        if t4 and hmac.compare_digest(t4, TOKEN):
+        if t4 and hmac.compare_digest(t4, live_tok):
             return True
         return False
 
@@ -2013,7 +2020,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # ── public endpoints (ไม่ต้อง auth) ──────────────────────
         if p == "/api/token":
-            return self.send_json(200, {"token": TOKEN})
+            try:
+                live_tok = open(TOKEN_FILE).read().strip() or TOKEN
+            except Exception:
+                live_tok = TOKEN
+            return self.send_json(200, {"token": live_tok})
 
         if not self.auth(): return self.send_json(401, {"error":"unauthorized"})
 
@@ -2419,14 +2430,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # ── Token regenerate ──
         elif p == "/api/token/regenerate":
-            global TOKEN
             import secrets, re as _re
             new_tok = secrets.token_hex(16)
-            # บันทึกลงไฟล์
+            # บันทึกลงไฟล์ — auth() อ่านจากไฟล์ทุก request จึงมีผลทันที
             with open(TOKEN_FILE, "w") as f: f.write(new_tok)
-            # อัพเดต global TOKEN ใน process ปัจจุบัน
-            TOKEN = new_tok
-            # ฝัง token ใหม่เข้า sshws.html (แทนที่ _baked)
+            # ฝัง token ใหม่เข้า sshws.html (แทนที่ _baked) เพื่อ refresh page
             html_path = "/var/www/chaiya/sshws.html"
             try:
                 with open(html_path, "r", errors="replace") as f: h = f.read()
