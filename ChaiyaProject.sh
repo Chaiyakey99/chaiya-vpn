@@ -2607,7 +2607,12 @@ if [[ -z "$SSHWS_TOKEN" ]]; then
 fi
 
 SSHWS_HOST=""
-[[ -f /etc/chaiya/domain.conf ]] && SSHWS_HOST=$(cat /etc/chaiya/domain.conf)
+# ตรวจ domain ก่อนใช้
+SSHWS_HOST=""
+if [[ -f /etc/chaiya/domain.conf ]]; then
+  _d=$(cat /etc/chaiya/domain.conf 2>/dev/null | tr -d '[:space:]')
+  getent hosts "$_d" &>/dev/null && SSHWS_HOST="$_d" || SSHWS_HOST=""
+fi
 [[ -z "$SSHWS_HOST" ]] && SSHWS_HOST="$MY_IP"
 SSHWS_PROTO="http"
 [[ -f /etc/letsencrypt/live/$(cat /etc/chaiya/domain.conf 2>/dev/null)/fullchain.pem ]] && SSHWS_PROTO="https"
@@ -2857,7 +2862,14 @@ echo "✅ logrotate ตั้งค่าแล้ว (rotate ทุกวัน
 # ══════════════════════════════════════════════════════════════
 _SSHWS_TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]' || echo "N/A")
 _SSHWS_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-_SSHWS_HOST=$( [[ -f /etc/chaiya/domain.conf ]] && cat /etc/chaiya/domain.conf || echo "$_SSHWS_IP" )
+# ตรวจ domain ว่า resolve ได้จริงบนเครื่องนี้ก่อนใช้
+_SSHWS_HOST="$_SSHWS_IP"
+if [[ -f /etc/chaiya/domain.conf ]]; then
+  _dom_tmp=$(cat /etc/chaiya/domain.conf 2>/dev/null | tr -d '[:space:]')
+  if [[ -n "$_dom_tmp" ]] && getent hosts "$_dom_tmp" &>/dev/null; then
+    _SSHWS_HOST="$_dom_tmp"
+  fi
+fi
 _SSHWS_PROTO="http"
 [[ -f "/etc/letsencrypt/live/${_SSHWS_HOST}/fullchain.pem" ]] && _SSHWS_PROTO="https"
 
@@ -3817,10 +3829,12 @@ print(json.dumps(payload))
   local _proto; _proto=$(xui_proto)
   # ใช้โดเมนถ้ามี ไม่งั้นใช้ IP
   local _host_display
-  if [[ -f "$DOMAIN_FILE" ]] && [[ -n "$(cat "$DOMAIN_FILE" 2>/dev/null)" ]]; then
-    _host_display=$(cat "$DOMAIN_FILE")
-  else
-    _host_display="$MY_IP"
+  _host_display="$MY_IP"
+  if [[ -f "$DOMAIN_FILE" ]]; then
+    local _d_chk; _d_chk=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '[:space:]')
+    if [[ -n "$_d_chk" ]] && getent hosts "$_d_chk" &>/dev/null; then
+      _host_display="$_d_chk"
+    fi
   fi
   local _panel_url="${_proto}://${_host_display}:${_panel_port}${_bp_clean}/"
   local _api_url="${_proto}://${_host_display}:${_panel_port}${_bp_clean}/panel/api"
@@ -4408,12 +4422,20 @@ print(json.dumps(payload))
   local _xp; _xp=$(xui_port)
   local _bp; _bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
   local _proto; _proto=$(xui_proto)
-  local _panel_host; _panel_host=$(cat "$DOMAIN_FILE" 2>/dev/null || echo "$MY_IP")
+  local _panel_host; _panel_host="$MY_IP"
+  if [[ -f "$DOMAIN_FILE" ]]; then
+    local _ph; _ph=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '[:space:]')
+    getent hosts "$_ph" &>/dev/null && _panel_host="$_ph" || true
+  fi
 
   printf "${R4}│${RS}  ${YE}🔗 X-UI Panel:${RS}\n"
   printf "${R4}│${RS}  ${WH}%s://%s:%s%s/${RS}\n" "$_proto" "$_panel_host" "$_xp" "$_bp"
   printf "${R4}├──────────────────────────────────────────────────┤${RS}\n"
-  local _cfg_host; _cfg_host=$(cat "$DOMAIN_FILE" 2>/dev/null || echo "$MY_IP")
+  local _cfg_host; _cfg_host="$MY_IP"
+  if [[ -f "$DOMAIN_FILE" ]]; then
+    local _ch; _ch=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '[:space:]')
+    getent hosts "$_ch" &>/dev/null && _cfg_host="$_ch" || true
+  fi
   printf "${R4}│${RS}  ${CY}📥 Config HTML:${RS}\n"
   printf "${R4}│${RS}  ${WH}http://%s:81/config/%s.html${RS}\n" "$_cfg_host" "$UNAME"
   printf "${R4}└──────────────────────────────────────────────────┘${RS}\n\n"
@@ -6111,7 +6133,25 @@ _m18_del_ssh_user() {
 # ── Main menu_18 ─────────────────────────────────────────────
 menu_18() {
   clear
-  local _H; [[ -f "$DOMAIN_FILE" ]] && _H=$(cat "$DOMAIN_FILE") || _H=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+  # ── ดึง IP จริงของเครื่องนี้ ──────────────────────────────
+  local _MY_IP; _MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null     || curl -s --max-time 5 api.ipify.org 2>/dev/null     || hostname -I | awk '{print $1}')
+
+  # ── ตรวจสอบโดเมน: ใช้เฉพาะถ้า resolve ได้และ cert มีจริง ──
+  local _H="$_MY_IP"
+  if [[ -f "$DOMAIN_FILE" ]]; then
+    local _dom; _dom=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '[:space:]')
+    if [[ -n "$_dom" ]]; then
+      # ตรวจว่า domain resolve ได้จริงบนเครื่องนี้
+      local _dom_ip; _dom_ip=$(getent hosts "$_dom" 2>/dev/null | awk '{print $1}' | head -1)
+      if [[ -n "$_dom_ip" ]]; then
+        _H="$_dom"
+      else
+        # domain resolve ไม่ได้ — ใช้ IP แทน ไม่อ่าน domain ผิด
+        _H="$_MY_IP"
+      fi
+    fi
+  fi
+
   local _TOK; _TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
   [[ -z "$_TOK" ]] && { _TOK=$(openssl rand -hex 16); echo "$_TOK" > /etc/chaiya/sshws-token.conf; }
   local _CERT_OK=false
@@ -6124,253 +6164,177 @@ menu_18() {
   local _UDPST; pgrep -f badvpn-udpgw &>/dev/null && _UDPST="active" || _UDPST="inactive"
   _sc18() { [[ "$1" == "active" ]] && printf "${GR}● RUNNING${RS}" || printf "${RD}○ STOPPED${RS}"; }
 
-  # ── สร้าง URL สำหรับ Web Dashboard ────────────────────────────
+  # ── สร้าง URL สำหรับ Web Dashboard ──────────────────────────
   local _DASH_URL="http://${_H}:81/sshws/sshws.html"
   local _DASH_URL_TOK="http://${_H}:81/sshws/sshws.html?token=${_TOK}"
-  $_CERT_OK && _DASH_URL="https://${_H}/sshws/sshws.html" || true
+  $_CERT_OK && _DASH_URL="https://${_H}/sshws/sshws.html"     || true
   $_CERT_OK && _DASH_URL_TOK="https://${_H}/sshws/sshws.html?token=${_TOK}" || true
 
-  printf "\n${R1}╔══════════════════════════════════════════════════════════╗${RS}\n"
-  printf "${R1}║${RS}  🚇 ${WH}SSH WebSocket Manager${RS}  ${R1}[เมนู 18]${RS}                  ${R1}║${RS}\n"
-  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-  printf "${R1}║${RS}  ${YE}Host  ${WH}: %-49s${R1}║${RS}\n" "$_H"
-  printf "${R1}║${RS}  ${YE}Port  ${WH}: %-10s  ${YE}Proto ${WH}: %-30s${R1}║${RS}\n" "$_WSPORT" "${_PROTO^^}"
-  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-  printf "${R1}║${RS}  🌐 ${YE}Web Dashboard (เปิดในมือถือ/เบราว์เซอร์):${RS}          ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${CY}  %-56s${R1}║${RS}\n" "$_DASH_URL"
-  printf "${R1}║${RS}  ${GR}  (พร้อม Token):${RS}                                      ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${MG}  %-56s${R1}║${RS}\n" "$_DASH_URL_TOK"
-  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-  printf "${R1}║${RS}  🚇 chaiya-sshws : $(_sc18 "$_WSST")    🐻 dropbear : $(_sc18 "$_DBST")        ${R1}║${RS}\n"
-  printf "${R1}║${RS}  🌐 nginx        : $(_sc18 "$_NGST")    🎮 badvpn   : $(_sc18 "$_UDPST")        ${R1}║${RS}\n"
-  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-  printf "${R1}║${RS}  ${GR} 1.${RS}  ▶  เริ่ม / Restart Services ทั้งหมด              ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${RD} 2.${RS}  ■  หยุด SSH WebSocket (chaiya-sshws)             ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${YE} 3.${RS}  👁  ดูสถานะ + Connections ละเอียด               ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${CY} 4.${RS}  ➕  เพิ่ม SSH User                               ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${CY} 5.${RS}  📋  ดูรายชื่อ SSH Users ทั้งหมด                 ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${RD} 6.${RS}  🗑️   ลบ SSH User                                 ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${PU} 7.${RS}  📱  ดู Config สำหรับแอพ (NetMod/KPN/HTTP Injector)${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${OR} 8.${RS}  📋  ดู Log (chaiya-sshws 30 บรรทัดล่าสุด)       ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${MG} 9.${RS}  🔑  Generate Token ใหม่                         ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${WH}10.${RS}  🔄  ติดตั้ง / ซ่อมแซม ws-stunnel + nginx        ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${CY}11.${RS}  🌐  แสดงลิงค์เข้า Web Dashboard                 ${R1}║${RS}\n"
-  printf "${R1}║${RS}  ${WH} 0.${RS}  ↩  ย้อนกลับ                                      ${R1}║${RS}\n"
-  printf "${R1}╚══════════════════════════════════════════════════════════╝${RS}\n"
+  # ── แสดงหน้าหลัก menu_18 ─────────────────────────────────────
+  _show_menu18_main() {
+    clear
+    printf "\n${R1}╔══════════════════════════════════════════════════════════╗${RS}\n"
+    printf "${R1}║${RS}  🚇 ${WH}SSH WebSocket Manager${RS}  ${R1}[เมนู 18]${RS}                  ${R1}║${RS}\n"
+    printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+    printf "${R1}║${RS}  ${YE}Host  ${WH}: %-49s${R1}║${RS}\n" "$_H"
+    printf "${R1}║${RS}  ${YE}Port  ${WH}: %-10s  ${YE}Proto ${WH}: %-30s${R1}║${RS}\n" "$_WSPORT" "${_PROTO^^}"
+    printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+    printf "${R1}║${RS}  🌐 ${YE}Web Dashboard (เปิดในมือถือ/เบราว์เซอร์):${RS}          ${R1}║${RS}\n"
+    printf "${R1}║${RS}  ${CY}  %-56s${R1}║${RS}\n" "$_DASH_URL"
+    printf "${R1}║${RS}  ${GR}  (พร้อม Token):${RS}                                      ${R1}║${RS}\n"
+    printf "${R1}║${RS}  ${MG}  %-56s${R1}║${RS}\n" "$_DASH_URL_TOK"
+    printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+    printf "${R1}║${RS}  🚇 chaiya-sshws : $(_sc18 "$_WSST")    🐻 dropbear : $(_sc18 "$_DBST")        ${R1}║${RS}\n"
+    printf "${R1}║${RS}  🌐 nginx        : $(_sc18 "$_NGST")    🎮 badvpn   : $(_sc18 "$_UDPST")        ${R1}║${RS}\n"
+    printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+    printf "${R1}║${RS}  ${MG} 9.${RS}  🔑  เปลี่ยน Token ใหม่                          ${R1}║${RS}\n"
+    printf "${R1}║${RS}  ${WH}99.${RS}  🔧  ซ่อมบำรุง / แอดมิน  ${RD}[ต้องใส่รหัส]${RS}         ${R1}║${RS}\n"
+    printf "${R1}║${RS}  ${WH} 0.${RS}  ↩  ย้อนกลับ                                      ${R1}║${RS}\n"
+    printf "${R1}╚══════════════════════════════════════════════════════════╝${RS}\n"
+  }
+
+  _show_menu18_main
   read -rp "$(printf "\n${YE}เลือก: ${RS}")" _sub18
 
   case $_sub18 in
 
     1)
-      # ── Restart ทุก service ───────────────────────────────────
-      clear
-      printf "${GR}╔══════════════════════════════════════════════════════╗${RS}\n"
-      printf "${GR}║${RS}  ▶  ${WH}Restart SSH WebSocket Services${RS}                 ${GR}║${RS}\n"
-      printf "${GR}╚══════════════════════════════════════════════════════╝${RS}\n\n"
-      printf "${YE}⏳ กำลัง restart...${RS}\n\n"
-      for _svc in dropbear chaiya-sshws nginx chaiya-badvpn; do
-        if systemctl list-unit-files "${_svc}.service" &>/dev/null 2>&1 | grep -q "$_svc"; then
-          systemctl restart "$_svc" 2>/dev/null \
-            && printf "  ${GR}✅ %-22s restart สำเร็จ${RS}\n" "$_svc" \
-            || printf "  ${RD}❌ %-22s restart ล้มเหลว${RS}\n" "$_svc"
-        else
-          printf "  ${YE}⚠️  %-22s ไม่ได้ติดตั้ง — ข้าม${RS}\n" "$_svc"
-        fi
-      done
-      # ตรวจ port 80 หลัง restart
-      sleep 2
-      if ss -tlnp 2>/dev/null | grep -q ':80 '; then
-        printf "\n  ${GR}✅ Port 80 พร้อมรับ connection${RS}\n"
-      else
-        printf "\n  ${RD}⚠️  Port 80 ยังไม่ขึ้น — ตรวจสอบ: journalctl -u chaiya-sshws -n 20${RS}\n"
-      fi
-      printf "\n${GR}✅ เสร็จสมบูรณ์${RS}\n\n"
-      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+      # ── Restart ทุก service (admin only) ─────────────────────
+      menu_18 ;;
 
-    2)
-      # ── หยุด chaiya-sshws ─────────────────────────────────────
-      printf "\n${OR}⚠️  ยืนยันหยุด chaiya-sshws? (y/N): ${RS}"
-      read -r _cf
-      if [[ "$_cf" == "y" || "$_cf" == "Y" ]]; then
-        systemctl stop chaiya-sshws 2>/dev/null \
-          && printf "${GR}✅ หยุด chaiya-sshws สำเร็จ${RS}\n" \
-          || printf "${RD}❌ ล้มเหลว — service อาจไม่ได้ติดตั้ง${RS}\n"
-      else
-        printf "${YE}↩ ยกเลิก${RS}\n"
-      fi
-      sleep 1; menu_18 ;;
-
-    3)
-      # ── สถานะละเอียด ──────────────────────────────────────────
-      clear
-      _m18_status
-      local _CONNS80; _CONNS80=$(ss -tn state established 2>/dev/null | grep -c ':80 ' || echo "0")
-      local _CONNS22; _CONNS22=$(ss -tn state established 2>/dev/null | grep -c ':22 ' || echo "0")
-      local _CONNS143; _CONNS143=$(ss -tn state established 2>/dev/null | grep -c ':143 ' || echo "0")
-      local _CONNS109; _CONNS109=$(ss -tn state established 2>/dev/null | grep -c ':109 ' || echo "0")
-      printf "\n${CY}┌─[ 🔌 Active Connections (จาก ss) ]─────────────────────┐${RS}\n"
-      printf "${CY}│${RS}  Port  80 (HTTP-CONNECT/WS tunnel) : ${YE}%-6s${RS}             ${CY}│${RS}\n" "${_CONNS80}"
-      printf "${CY}│${RS}  Port  22 (OpenSSH)                : ${YE}%-6s${RS}             ${CY}│${RS}\n" "${_CONNS22}"
-      printf "${CY}│${RS}  Port 143 (Dropbear #1)            : ${YE}%-6s${RS}             ${CY}│${RS}\n" "${_CONNS143}"
-      printf "${CY}│${RS}  Port 109 (Dropbear #2)            : ${YE}%-6s${RS}             ${CY}│${RS}\n" "${_CONNS109}"
-      printf "${CY}└────────────────────────────────────────────────────────┘${RS}\n\n"
-      printf "${YE}📋 systemctl status chaiya-sshws:${RS}\n"
-      systemctl status chaiya-sshws --no-pager -n 5 2>/dev/null || printf "${RD}  service ไม่พบ${RS}\n"
-      printf "\n"
-      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
-
-    4)
-      # ── เพิ่ม SSH User ────────────────────────────────────────
-      clear
-      printf "${CY}╔══════════════════════════════════════════════════════╗${RS}\n"
-      printf "${CY}║${RS}  ➕ ${WH}เพิ่ม SSH User${RS}                                   ${CY}║${RS}\n"
-      printf "${CY}╚══════════════════════════════════════════════════════╝${RS}\n\n"
-      _m18_add_ssh_user
-      printf "\n"
-      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
-
-    5)
-      # ── รายชื่อ SSH Users ─────────────────────────────────────
-      clear
-      printf "${CY}╔══════════════════════════════════════════════════════╗${RS}\n"
-      printf "${CY}║${RS}  📋 ${WH}รายชื่อ SSH Users ทั้งหมด${RS}                        ${CY}║${RS}\n"
-      printf "${CY}╚══════════════════════════════════════════════════════╝${RS}\n"
-      _m18_list_users
-      # แสดง logged-in users ด้วย
-      local _who; _who=$(who 2>/dev/null | grep -v "^$" | head -10)
-      if [[ -n "$_who" ]]; then
-        printf "${GR}┌─[ 👤 Users ที่ Login อยู่ขณะนี้ ]─────────────────────┐${RS}\n"
-        echo "$_who" | while IFS= read -r line; do
-          printf "${GR}│${RS}  ${WH}%.62s${RS}\n" "$line"
-        done
-        printf "${GR}└────────────────────────────────────────────────────────┘${RS}\n\n"
-      fi
-      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
-
-    6)
-      # ── ลบ SSH User ───────────────────────────────────────────
-      clear
-      printf "${RD}╔══════════════════════════════════════════════════════╗${RS}\n"
-      printf "${RD}║${RS}  🗑️  ${WH}ลบ SSH User${RS}                                     ${RD}║${RS}\n"
-      printf "${RD}╚══════════════════════════════════════════════════════╝${RS}\n\n"
-      _m18_del_ssh_user
-      printf "\n"
-      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
-
-    7)
-      # ── Config สำหรับแอพ ──────────────────────────────────────
-      clear
-      _m18_show_appconfig
-      # แสดง QR Code ของ URL ถ้ามี qrencode
-      if command -v qrencode &>/dev/null; then
-        local _qr_url="${_PROTO}://${_H}:${_WSPORT}/"
-        printf "${YE}📷 QR Code URL:${RS}\n"
-        qrencode -t ANSIUTF8 "$_qr_url" 2>/dev/null || true
-      fi
-      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
-
-    8)
-      # ── Log chaiya-sshws ──────────────────────────────────────
-      clear
-      printf "${OR}╔══════════════════════════════════════════════════════╗${RS}\n"
-      printf "${OR}║${RS}  📋 ${WH}Log SSH WebSocket (30 บรรทัดล่าสุด)${RS}             ${OR}║${RS}\n"
-      printf "${OR}╚══════════════════════════════════════════════════════╝${RS}\n\n"
-      local _logfile="/var/log/chaiya-sshws.log"
-      if [[ -f "$_logfile" && -s "$_logfile" ]]; then
-        local _lsize; _lsize=$(wc -l < "$_logfile")
-        printf "${CY}📁 ไฟล์: ${WH}%s${RS}  ${CY}ขนาด: ${YE}%s${RS} บรรทัด\n\n" "$_logfile" "$_lsize"
-        tail -30 "$_logfile" | while IFS= read -r _line; do
-          # ไฮไลต์ connection / error
-          if echo "$_line" | grep -qi "error\|fail\|refused"; then
-            printf "  ${RD}%.72s${RS}\n" "$_line"
-          elif echo "$_line" | grep -qi "CONNECT\|connection"; then
-            printf "  ${GR}%.72s${RS}\n" "$_line"
-          else
-            printf "  ${WH}%.72s${RS}\n" "$_line"
-          fi
-        done
-        printf "\n${CY}─────────────────────────────────────────────────────────${RS}\n"
-        printf "${YE}💡 ดู live log: journalctl -u chaiya-sshws -f${RS}\n"
-      else
-        # ลอง journalctl แทน
-        printf "${OR}⚠️  ไม่พบ log file — ลอง journalctl...${RS}\n\n"
-        journalctl -u chaiya-sshws -n 30 --no-pager 2>/dev/null \
-          || printf "${RD}❌ ไม่มี log — service อาจไม่เคยรัน${RS}\n"
-      fi
-      printf "\n"
-      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+    2) menu_18 ;;
+    3) menu_18 ;;
+    4) menu_18 ;;
+    5) menu_18 ;;
+    6) menu_18 ;;
+    7) menu_18 ;;
+    8) menu_18 ;;
 
     9)
-      # ── Generate Token ใหม่ ───────────────────────────────────
+      # ── เปลี่ยน Token ใหม่ ────────────────────────────────────
       local _NEWTOK; _NEWTOK=$(openssl rand -hex 16)
       echo "$_NEWTOK" > /etc/chaiya/sshws-token.conf
-      sed -i "s|token=[a-f0-9]*|token=${_NEWTOK}|g" /var/www/chaiya/sshws.html 2>/dev/null || true
-      printf "\n${GR}┌──────────────────────────────────────────────────────┐${RS}\n"
-      printf "${GR}│${RS}  ✅ Generate Token ใหม่สำเร็จ!                       ${GR}│${RS}\n"
-      printf "${GR}│${RS}  ${YE}Token: ${CY}%-44s${GR}│${RS}\n" "$_NEWTOK"
-      printf "${GR}└──────────────────────────────────────────────────────┘${RS}\n\n"
-      sleep 1; menu_18 ;;
-
-    10)
-      # ── ติดตั้ง / ซ่อมแซม ws-stunnel + nginx ────────────────
+      # ฝัง token ใหม่เข้า HTML ทันที
+      python3 -c "
+import re, sys
+path='/var/www/chaiya/sshws.html'
+tok='${_NEWTOK}'
+try:
+  with open(path,'r',errors='replace') as f: h=f.read()
+  h2=re.sub(r"(const _baked\s*=\s*')[^']*(')",r"\g<1>"+tok+r"\g<2>",h)
+  with open(path,'w') as f: f.write(h2)
+except: pass
+" 2>/dev/null || true
+      # reopen nginx เพื่อให้ token ใหม่ใช้งานได้ทันที
+      _TOK="$_NEWTOK"
+      local _NEW_URL_TOK
+      $_CERT_OK && _NEW_URL_TOK="https://${_H}/sshws/sshws.html?token=${_NEWTOK}"                || _NEW_URL_TOK="http://${_H}:81/sshws/sshws.html?token=${_NEWTOK}"
       clear
-      printf "${MG}╔══════════════════════════════════════════════════════╗${RS}\n"
-      printf "${MG}║${RS}  🔄 ${WH}ซ่อมแซม / ติดตั้ง ws-stunnel + nginx${RS}          ${MG}║${RS}\n"
-      printf "${MG}╚══════════════════════════════════════════════════════╝${RS}\n\n"
-      printf "${OR}⚠️  จะ restart nginx และ chaiya-sshws ยืนยัน? (y/N): ${RS}"
-      read -r _cf2
-      if [[ "$_cf2" == "y" || "$_cf2" == "Y" ]]; then
-        printf "\n${YE}⏳ กำลังดำเนินการ...${RS}\n\n"
-        # ตรวจว่า ws-stunnel มีอยู่ ถ้าไม่มีสร้างใหม่
-        if [[ ! -f /usr/local/bin/ws-stunnel ]]; then
-          printf "${RD}❌ ไม่พบ /usr/local/bin/ws-stunnel — กรุณา reinstall จากสคริปต์หลัก${RS}\n"
-          read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18; return
-        fi
-        _m18_setup_systemd
-        _m18_setup_nginx_ws
-        printf "\n${GR}✅ ซ่อมแซมเสร็จสมบูรณ์${RS}\n\n"
-      else
-        printf "${YE}↩ ยกเลิก${RS}\n"
-      fi
+      printf "\n${GR}╔══════════════════════════════════════════════════════════╗${RS}\n"
+      printf "${GR}║${RS}  🔑 ${WH}เปลี่ยน Token ใหม่สำเร็จ!${RS}                          ${GR}║${RS}\n"
+      printf "${GR}╠══════════════════════════════════════════════════════════╣${RS}\n"
+      printf "${GR}║${RS}  ${YE}Token ใหม่:${RS}                                           ${GR}║${RS}\n"
+      printf "${GR}║${RS}  ${CY}  %-56s${GR}║${RS}\n" "$_NEWTOK"
+      printf "${GR}╠══════════════════════════════════════════════════════════╣${RS}\n"
+      printf "${GR}║${RS}  ${YE}URL พร้อม Token (ใช้งานได้ทันที):${RS}                    ${GR}║${RS}\n"
+      printf "${GR}║${RS}  ${MG}  %-56s${GR}║${RS}\n" "$_NEW_URL_TOK"
+      printf "${GR}╚══════════════════════════════════════════════════════════╝${RS}\n\n"
+      printf "${WH}💡 คัดลอก URL ด้านบนแล้วเปิดในเบราว์เซอร์ได้เลย${RS}\n\n"
       read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
 
-    11)
-      # ── แสดงลิงค์เข้า Web Dashboard ──────────────────────────
+    10) menu_18 ;;
+
+    11) menu_18 ;;
+
+    99)
+      # ── ซ่อมบำรุง / แอดมิน (ต้องใส่รหัส) ────────────────────
       clear
-      printf "${CY}╔══════════════════════════════════════════════════════╗${RS}\n"
-      printf "${CY}║${RS}  🌐 ${WH}Web Dashboard — ลิงค์เข้าระบบ${RS}               ${CY}║${RS}\n"
-      printf "${CY}╚══════════════════════════════════════════════════════╝${RS}\n\n"
-      local _d_host; [[ -f "$DOMAIN_FILE" ]] && _d_host=$(cat "$DOMAIN_FILE") || _d_host=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-      local _d_tok; _d_tok=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
-      [[ -z "$_d_tok" ]] && { _d_tok=$(openssl rand -hex 16); echo "$_d_tok" > /etc/chaiya/sshws-token.conf; }
-      local _d_cert=false
-      [[ -f "/etc/letsencrypt/live/${_d_host}/fullchain.pem" ]] && _d_cert=true
-      local _d_base; $_d_cert && _d_base="https://${_d_host}" || _d_base="http://${_d_host}:81"
-      local _d_url="${_d_base}/sshws/sshws.html"
-      local _d_url_tok="${_d_base}/sshws/sshws.html?token=${_d_tok}"
-      local _d_api="${_d_base}/sshws-api/"
-      printf "${GR}┌─[ 🌐 URL เปิดในเบราว์เซอร์ / มือถือ ]──────────────────┐${RS}\n"
-      printf "${GR}│${RS}\n"
-      printf "${GR}│${RS}  ${YE}📌 URL ปกติ (ไม่มี Token):${RS}\n"
-      printf "${GR}│${RS}  ${CY}  %s${RS}\n" "$_d_url"
-      printf "${GR}│${RS}\n"
-      printf "${GR}│${RS}  ${YE}🔑 URL พร้อม Token (แนะนำ):${RS}\n"
-      printf "${GR}│${RS}  ${MG}  %s${RS}\n" "$_d_url_tok"
-      printf "${GR}│${RS}\n"
-      printf "${GR}│${RS}  ${YE}⚡ API Endpoint:${RS}\n"
-      printf "${GR}│${RS}  ${WH}  %s${RS}\n" "$_d_api"
-      printf "${GR}│${RS}\n"
-      printf "${GR}│${RS}  ${YE}🔐 Token: ${CY}%-42s${GR}│${RS}\n" "$_d_tok"
-      printf "${GR}│${RS}\n"
-      if command -v qrencode &>/dev/null; then
-        printf "${GR}│${RS}  ${YE}📷 QR Code (URL พร้อม Token):${RS}\n"
-        qrencode -t ANSIUTF8 "$_d_url_tok" 2>/dev/null | while IFS= read -r _qline; do
-          printf "${GR}│${RS}  %s\n" "$_qline"
-        done
+      printf "\n${R1}╔══════════════════════════════════════════════════════════╗${RS}\n"
+      printf "${R1}║${RS}  🔧 ${WH}ซ่อมบำรุง / แอดมิน${RS}                                ${R1}║${RS}\n"
+      printf "${R1}╚══════════════════════════════════════════════════════════╝${RS}\n\n"
+      read -rsp "$(printf "${YE}🔐 รหัสผ่าน: ${RS}")" _adm_pass
+      printf "\n"
+      if [[ "$_adm_pass" != "Chaiya" ]]; then
+        printf "${RD}❌ รหัสผ่านไม่ถูกต้อง${RS}\n\n"
+        sleep 1; menu_18; return
       fi
-      printf "${GR}└─────────────────────────────────────────────────────────┘${RS}\n\n"
-      printf "${WH}💡 เปิดลิงค์ URL พร้อม Token ในเบราว์เซอร์เพื่อจัดการ Users/Services${RS}\n\n"
-      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+      # ── แสดงเมนูแอดมินเต็ม ────────────────────────────────────
+      while true; do
+        clear
+        printf "\n${MG}╔══════════════════════════════════════════════════════════╗${RS}\n"
+        printf "${MG}║${RS}  🔧 ${WH}ซ่อมบำรุง / แอดมิน${RS}  ${YE}[รหัสผ่านถูกต้อง ✅]${RS}         ${MG}║${RS}\n"
+        printf "${MG}╠══════════════════════════════════════════════════════════╣${RS}\n"
+        printf "${MG}║${RS}  ${GR} 1.${RS}  ▶  เริ่ม / Restart Services ทั้งหมด              ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${RD} 2.${RS}  ■  หยุด SSH WebSocket (chaiya-sshws)             ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${YE} 3.${RS}  👁  ดูสถานะ + Connections ละเอียด               ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${CY} 4.${RS}  ➕  เพิ่ม SSH User                               ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${CY} 5.${RS}  📋  ดูรายชื่อ SSH Users ทั้งหมด                 ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${RD} 6.${RS}  🗑️   ลบ SSH User                                 ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${PU} 7.${RS}  📱  ดู Config สำหรับแอพ                          ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${OR} 8.${RS}  📋  ดู Log (30 บรรทัดล่าสุด)                    ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${WH}10.${RS}  🔄  ติดตั้ง / ซ่อมแซม ws-stunnel + nginx        ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${CY}11.${RS}  🌐  แสดงลิงค์เข้า Web Dashboard                 ${MG}║${RS}\n"
+        printf "${MG}║${RS}  ${WH} 0.${RS}  ↩  ออกจากโหมดแอดมิน                             ${MG}║${RS}\n"
+        printf "${MG}╚══════════════════════════════════════════════════════════╝${RS}\n"
+        read -rp "$(printf "\n${YE}เลือก: ${RS}")" _adm_opt
+        case $_adm_opt in
+          1)
+            clear
+            printf "${GR}⏳ กำลัง restart...${RS}\n\n"
+            for _svc in dropbear chaiya-sshws nginx chaiya-badvpn; do
+              systemctl restart "$_svc" 2>/dev/null                 && printf "  ${GR}✅ %-22s OK${RS}\n" "$_svc"                 || printf "  ${RD}❌ %-22s fail${RS}\n" "$_svc"
+            done
+            sleep 2
+            ss -tlnp 2>/dev/null | grep -q ':80 '               && printf "\n  ${GR}✅ Port 80 OK${RS}\n"               || printf "\n  ${RD}⚠️  Port 80 ยังไม่ขึ้น${RS}\n"
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          2)
+            printf "\n${OR}ยืนยันหยุด chaiya-sshws? (y/N): ${RS}"
+            read -r _c2
+            [[ "$_c2" == "y" || "$_c2" == "Y" ]]               && systemctl stop chaiya-sshws 2>/dev/null && printf "${GR}✅ หยุดแล้ว${RS}\n"               || printf "${YE}↩ ยกเลิก${RS}\n"
+            sleep 1 ;;
+          3)
+            clear
+            _m18_status
+            local _c80; _c80=$(ss -tn state established 2>/dev/null | grep -c ':80 ' || echo 0)
+            local _c143; _c143=$(ss -tn state established 2>/dev/null | grep -c ':143 ' || echo 0)
+            printf "\n${CY}Port 80: ${YE}$_c80${RS}  ${CY}Port 143: ${YE}$_c143${RS}\n\n"
+            systemctl status chaiya-sshws --no-pager -n 5 2>/dev/null || true
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          4)
+            clear; _m18_add_ssh_user
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          5)
+            clear; _m18_list_users
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          6)
+            clear; _m18_del_ssh_user
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          7)
+            clear; _m18_show_appconfig
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          8)
+            clear
+            local _lf="/var/log/chaiya-sshws.log"
+            [[ -f "$_lf" ]] && tail -30 "$_lf" || journalctl -u chaiya-sshws -n 30 --no-pager 2>/dev/null || true
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          10)
+            clear
+            printf "${OR}⚠️  จะ restart nginx + chaiya-sshws ยืนยัน? (y/N): ${RS}"
+            read -r _c10
+            if [[ "$_c10" == "y" || "$_c10" == "Y" ]]; then
+              [[ -f /usr/local/bin/ws-stunnel ]] && _m18_setup_systemd && _m18_setup_nginx_ws                 || printf "${RD}❌ ไม่พบ ws-stunnel${RS}\n"
+            fi
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          11)
+            clear
+            printf "${CY}URL: ${WH}$_DASH_URL${RS}\n"
+            printf "${MG}Token URL: ${WH}$_DASH_URL_TOK${RS}\n\n"
+            read -rp "$(printf "${YE}Enter...${RS}")" ;;
+          0) break ;;
+          *) ;;
+        esac
+      done
+      menu_18 ;;
 
     0) return ;;
     *) menu_18 ;;
