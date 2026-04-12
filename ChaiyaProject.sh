@@ -1470,13 +1470,13 @@ async function genToken() {
 // ══════════════════════════════════════════════
 const PROS = {
   dtac: {name:'DTAC GAMING', proxy:'104.18.63.124:80',
-    payload:'CONNECT / HTTP/1.1[crlf]Host: dl.dir.freefiremobile.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]User-Agent: [ua][crlf][crlf]',
-    darkProxy:location.hostname, darkProxyPort:80},
+    payload:'CONNECT /  HTTP/1.1 [crlf]Host: dl.dir.freefiremobile.com [crlf][crlf]PATCH / HTTP/1.1[crlf]Host:[host][crlf]Upgrade:User-Agent: [ua][crlf][crlf]',
+    darkProxy:'104.18.63.124', darkProxyPort:80},
   true: {name:'TRUE TWITTER', proxy:'104.18.39.24:80',
     payload:'POST / HTTP/1.1[crlf]Host: help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]',
-    darkProxy:location.hostname, darkProxyPort:80}
+    darkProxy:'104.18.39.24', darkProxyPort:80}
 };
-const NPV_HOST=location.hostname, NPV_PORT=143;
+const NPV_HOST=location.hostname, NPV_PORT=80;
 let _curPro='dtac', _curApp='npv';
 
 function selPro(p) {
@@ -1491,26 +1491,44 @@ function selApp(a) {
 }
 
 function buildNpvLink(name, pass, pro) {
-  const j={sshConfigType:'SSH-Proxy-Payload',remarks:pro.name+'-'+name,sshHost:NPV_HOST,sshPort:NPV_PORT,sshUsername:name,sshPassword:pass,sni:'',tlsVersion:'DEFAULT',httpProxy:pro.proxy,authenticateProxy:false,proxyUsername:'',proxyPassword:'',payload:pro.payload,dnsMode:'UDP',dnsServer:'',nameserver:'',publicKey:'',udpgwPort:7300,udpgwTransparentDNS:true};
+  const j={sshConfigType:'SSH-Proxy-Payload',remarks:pro.name+'-'+name,sshHost:NPV_HOST,sshPort:NPV_PORT,sshUsername:name,sshPassword:pass,sni:'',tlsVersion:'DEFAULT',httpProxy:pro.proxy,authenticateProxy:false,proxyUsername:'',proxyPassword:'',payload:pro.payload,dnsTTMode:'UDP',dnsServer:'',nameserver:'',publicKey:'',udpgwPort:7300,udpgwTransparentDNS:true};
   return 'npvt-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
 function buildDarkLink(name, pass, pro) {
-  const _proxyRaw = (pro.proxy || '').split(':');
-  const _proxyHost = _proxyRaw[0] || '';
-  const _proxyPort = parseInt(_proxyRaw[1]) || 80;
   const j = {
-    remarks: pro.name + '-' + name,
-    server: NPV_HOST,
-    serverPort: NPV_PORT,
-    username: name,
-    password: pass,
-    proxyHost: _proxyHost,
-    proxyPort: _proxyPort,
-    proxyPayload: pro.payload || '',
-    udpgwAddr: '127.0.0.1',
-    udpgwPort: 7300
+    type: 'SSH',
+    name: pro.name + '-' + name,
+    sshTunnelConfig: {
+      sshConfig: {
+        host: NPV_HOST,
+        port: NPV_PORT,
+        username: name,
+        password: pass
+      },
+      injectConfig: {
+        mode: 'PROXY',
+        proxyHost: pro.darkProxy || '',
+        proxyPort: pro.darkProxyPort || 80,
+        payload: pro.payload || ''
+      }
+    }
   };
   return 'darktunnel://' + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
+}
+function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast('📋 คัดลอกแล้ว!')).catch(() => { _copyFallback(text); });
+  } else { _copyFallback(text); }
+}
+function _copyFallback(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  try { document.execCommand('copy'); toast('📋 คัดลอกแล้ว!'); }
+  catch(e) { toast('❌ คัดลอกไม่ได้', false); }
+  document.body.removeChild(ta);
 }
 
 async function genImportLink() {
@@ -1528,7 +1546,7 @@ async function genImportLink() {
       <span style="font-size:.65rem;color:var(--muted)">${pro.name} · ${u.user}</span>
     </div>
     <div class="link-preview ${isNpv?'':'dark-lp'}">${link}</div>
-    <button class="copy-link-btn ${_curApp}" onclick="navigator.clipboard.writeText(window._impLink).then(()=>toast('📋 คัดลอกแล้ว!'))">📋 คัดลอก Link</button>`;
+    <button class="copy-link-btn ${_curApp}" onclick="copyToClipboard(window._impLink)">📋 คัดลอก Link</button>`;
 }
 
 // ══════════════════════════════════════════════
@@ -1616,7 +1634,7 @@ async function createUserAndLink() {
       <span style='font-size:.65rem;color:var(--muted)'>${pro.name} · ${user}</span>
     </div>
     <div class='link-preview ${isNpv?'':'dark-lp'}'>${link}</div>
-    <button class='copy-link-btn ${_cuApp}' onclick='navigator.clipboard.writeText(window._cuLink).then(()=>toast("📋 คัดลอกแล้ว!"))'>📋 คัดลอกลิงค์ใส่แอพ</button>
+    <button class='copy-link-btn ${_cuApp}' onclick='copyToClipboard(window._cuLink)'>📋 คัดลอกลิงค์ใส่แอพ</button>
   `;
 }
 
@@ -3936,7 +3954,7 @@ var DATA_LIMIT_GB = """ + str(dg_num) + """;
 
 // ── Copy & QR ─────────────────────────────────────────────────
 function copyLink(){
-  if(navigator.clipboard){navigator.clipboard.writeText(vlessLink).then(showToast);}
+  if(navigator.clipboard){navigator.clipboard.writeText(vlessLink).then(showToast).catch(function(){var ta=document.createElement("textarea");ta.value=vlessLink;document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);showToast();});}
   else{var ta=document.createElement("textarea");ta.value=vlessLink;
     document.body.appendChild(ta);ta.select();document.execCommand("copy");
     document.body.removeChild(ta);showToast();}
@@ -4164,7 +4182,11 @@ menu_1() {
 
   # ── Set credential + basepath ลง db ก่อน start service ─────────
   local _pw_hash=""
-  _pw_hash=$(python3 -c     "import bcrypt; print(bcrypt.hashpw(b'${_pw}', bcrypt.gensalt(rounds=10)).decode())"     2>/dev/null)
+  _pw_hash=$(python3 -c "
+import bcrypt, sys
+pw = sys.argv[1].encode()
+print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
+" "$_pw" 2>/dev/null)
 
   if command -v sqlite3 &>/dev/null && [[ -f "$_xui_db" ]]; then
     if [[ -n "$_pw_hash" ]]; then
@@ -4211,11 +4233,17 @@ menu_1() {
   # ── verify basepath จาก db หลัง start ────────────────────────────
   local _basepath; _basepath=$(detect_xui_basepath)
   if [[ -z "$_basepath" || "$_basepath" == "/" ]]; then
-    printf "  ${YE}⚠ basepath ใน db ว่าง — set ซ้ำ${RS}\n"
+    printf "  ${YE}⚠ basepath ใน db ว่าง — หยุด x-ui แล้ว set ใหม่${RS}\n"
+    systemctl stop x-ui 2>/dev/null || true
+    sleep 1
     if command -v sqlite3 &>/dev/null && [[ -f "$_xui_db" ]]; then
-      sqlite3 "$_xui_db"         "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','${_gen_bp}');" 2>/dev/null || true
+      sqlite3 "$_xui_db" \
+        "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','${_gen_bp}');" 2>/dev/null || true
     fi
-    _basepath="$_gen_bp"
+    systemctl start x-ui 2>/dev/null || true
+    sleep 3
+    _basepath=$(detect_xui_basepath)
+    [[ -z "$_basepath" || "$_basepath" == "/" ]] && _basepath="$_gen_bp"
   fi
   echo "$_basepath" > /etc/chaiya/xui-basepath.conf
   printf "  ${GR}✔ basepath ยืนยัน: ${WH}%s${RS}\n" "$_basepath"
@@ -4232,9 +4260,11 @@ menu_1() {
       systemctl stop x-ui 2>/dev/null || true
       sleep 1
       local _pw_hash2
-      _pw_hash2=$(python3 -c \
-        "import bcrypt; print(bcrypt.hashpw(b'${_pw}', bcrypt.gensalt(rounds=10)).decode())" \
-        2>/dev/null)
+      _pw_hash2=$(python3 -c "
+import bcrypt, sys
+pw = sys.argv[1].encode()
+print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
+" "$_pw" 2>/dev/null)
       if [[ -n "$_pw_hash2" ]]; then
         sqlite3 "$_xui_db" \
           "UPDATE users SET username='${_u}', password='${_pw_hash2}' WHERE id=1;" 2>/dev/null || true
