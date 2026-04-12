@@ -953,7 +953,8 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   @keyframes orb3{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(25px,-40px) scale(.93);}}
   @keyframes orb4{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-20px,30px) scale(1.06);}}
 
-  /* Snow Canvas */
+  /* Shooting Stars Canvas */
+  #stars-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:.85;}
 
   /* Bandwidth Level Badge */
   .bw-level{display:inline-flex;align-items:center;gap:4px;font-family:'Share Tech Mono',monospace;font-size:.6rem;padding:2px 9px;border-radius:12px;margin-left:6px;font-weight:700;letter-spacing:1px;transition:all .5s;vertical-align:middle;}
@@ -974,6 +975,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 </style>
 </head>
 <body>
+<canvas id="stars-canvas"></canvas>
 <div class="rgb-orb o1"></div>
 <div class="rgb-orb o2"></div>
 <div class="rgb-orb o3"></div>
@@ -1861,9 +1863,121 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateClock();
   await ensureToken();
   loadDashboard();
+  initStars();
 });
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-dashboard') loadDashboard(); }, 15000);
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
+
+// ══════════════════════════════════════════════
+// Shooting Stars + Static Stars Animation
+// ══════════════════════════════════════════════
+function initStars(){
+  const cv = document.getElementById('stars-canvas');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let W, H;
+
+  function resize(){
+    W = cv.width  = window.innerWidth;
+    H = cv.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ── static background stars ──
+  const STAR_COUNT = 160;
+  const bgStars = Array.from({length: STAR_COUNT}, () => ({
+    x: Math.random() * window.innerWidth,
+    y: Math.random() * window.innerHeight,
+    r: Math.random() * 1.2 + 0.2,
+    a: Math.random(),
+    speed: Math.random() * 0.004 + 0.001,
+    phase: Math.random() * Math.PI * 2
+  }));
+
+  // ── shooting stars ──
+  const meteors = [];
+  const COLORS = ['#ffffff','#80ffdd','#b8a0ff','#4dffa0','#ffe680','#ff6b8a'];
+
+  function spawnMeteor(){
+    const angle = Math.PI / 5;          // มุม 36 องศา
+    const speed = Math.random() * 6 + 5;
+    const startX = Math.random() * W * 1.2 - W * 0.1;
+    const startY = Math.random() * H * 0.4;
+    const len    = Math.random() * 120 + 60;
+    const color  = COLORS[Math.floor(Math.random() * COLORS.length)];
+    meteors.push({
+      x: startX, y: startY,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      len, color,
+      life: 1,          // 1 = เต็ม, 0 = หาย
+      decay: Math.random() * 0.012 + 0.008
+    });
+  }
+
+  // spawn ดาวตกแรกทันที 2 ดวง
+  spawnMeteor(); spawnMeteor();
+
+  // spawn ใหม่สุ่มทุก 1.2–3.5 วินาที
+  function scheduleMeteor(){
+    spawnMeteor();
+    setTimeout(scheduleMeteor, Math.random() * 2300 + 1200);
+  }
+  setTimeout(scheduleMeteor, 1200);
+
+  function draw(ts){
+    ctx.clearRect(0, 0, W, H);
+
+    // วาด background stars
+    bgStars.forEach(s => {
+      s.a = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(ts * 0.001 * s.speed * 60 + s.phase));
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${s.a.toFixed(2)})`;
+      ctx.fill();
+    });
+
+    // วาด shooting stars
+    for(let i = meteors.length - 1; i >= 0; i--){
+      const m = meteors[i];
+      const tailX = m.x - m.vx / Math.hypot(m.vx, m.vy) * m.len;
+      const tailY = m.y - m.vy / Math.hypot(m.vx, m.vy) * m.len;
+
+      const grad = ctx.createLinearGradient(tailX, tailY, m.x, m.y);
+      grad.addColorStop(0, 'rgba(255,255,255,0)');
+      grad.addColorStop(0.7, m.color.replace(')',`,${(m.life * 0.5).toFixed(2)})`).replace('rgb(','rgba(').replace('#', 'rgba(').replace(/rgba\(([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2}),/, (_, r,g,b) => `rgba(${parseInt(r,16)},${parseInt(g,16)},${parseInt(b,16)},`));
+      grad.addColorStop(1, m.color.replace(')',`,${m.life.toFixed(2)})`).replace('rgb(','rgba(').replace('#','rgba(').replace(/rgba\(([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2}),/, (_, r,g,b) => `rgba(${parseInt(r,16)},${parseInt(g,16)},${parseInt(b,16)},`));
+
+      // วาดแบบง่ายและชัดเจน
+      ctx.save();
+      ctx.globalAlpha = m.life;
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = m.color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(m.x, m.y);
+      ctx.stroke();
+      // หัวดาว
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, 2, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowBlur = 12;
+      ctx.fill();
+      ctx.restore();
+
+      m.x += m.vx;
+      m.y += m.vy;
+      m.life -= m.decay;
+      if(m.life <= 0 || m.x > W + 100 || m.y > H + 100) meteors.splice(i, 1);
+    }
+
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+}
 </script>
 
 </body>
@@ -4289,43 +4403,68 @@ menu_2() {
   ufw allow 443/tcp        2>/dev/null || true
   apt-get install -y certbot -qq 2>/dev/null || true
 
-  # ── [1/4] ตรวจและหยุด ทุก service ที่ใช้ port 80 ──────────
-  printf "\n${YE}⏳ [1/4] หยุด services บน port 80 ชั่วคราว...${RS}\n"
-  # เก็บ service ที่กำลัง active ไว้ restart ทีหลัง
+  # ── [1/4] เตรียม webroot สำหรับ certbot (ไม่ต้องหยุด port 80) ──
+  printf "\n${YE}⏳ [1/4] เตรียม webroot สำหรับ certbot...${RS}\n"
+  # ใช้ webroot แทน standalone เพราะ ws-stunnel ครอง port 80 ตลอดเวลา
+  mkdir -p /var/www/html/.well-known/acme-challenge
+
+  # ตรวจว่า nginx กำลังรันอยู่ไหม ถ้าไม่รัน ให้ start ก่อน
+  if ! systemctl is-active --quiet nginx 2>/dev/null; then
+    systemctl start nginx 2>/dev/null || true
+    sleep 1
+  fi
+
+  # เพิ่ม location /.well-known/ ใน nginx chaiya config ชั่วคราว (ถ้ายังไม่มี)
+  if ! grep -q "well-known" /etc/nginx/sites-available/chaiya 2>/dev/null; then
+    sed -i '/listen 81;/a\    location /.well-known/acme-challenge/ { root /var/www/html; }' \
+      /etc/nginx/sites-available/chaiya 2>/dev/null || true
+    nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
+  fi
+
+  # หยุดเฉพาะ ws-stunnel ชั่วคราว แล้วให้ nginx ฟัง port 80 แทน
   local _stopped_svcs=()
-  local _all_port80_svcs=(nginx chaiya-sshws apache2 lighttpd)
+  local _all_port80_svcs=(chaiya-sshws apache2 lighttpd)
   for _svc in "${_all_port80_svcs[@]}"; do
     if systemctl is-active --quiet "$_svc" 2>/dev/null; then
       systemctl stop "$_svc" 2>/dev/null || true
       _stopped_svcs+=("$_svc")
-      printf "  ${OR}⏹ %s${RS}\n" "$_svc"
+      printf "  ${OR}⏹ หยุด %s ชั่วคราว${RS}\n" "$_svc"
     fi
   done
-  # kill process อื่นที่ยังค้างบน port 80
   fuser -k 80/tcp 2>/dev/null || true
   sleep 1
-  # ตรวจว่า port 80 ว่างจริง
-  local _w=0
-  while ss -tlnp 2>/dev/null | grep -q ':80 ' && (( _w < 10 )); do
-    sleep 1; (( _w++ )) || true
-  done
-  if ss -tlnp 2>/dev/null | grep -q ':80 '; then
-    printf "${RD}❌ port 80 ยังถูกใช้อยู่ ไม่สามารถดำเนินการได้${RS}\n"
-    # restart services กลับก่อน return
-    for _s in "${_stopped_svcs[@]}"; do
-      systemctl start "$_s" 2>/dev/null || true
-      printf "  ${GR}▶ %s${RS}\n" "$_s"
-    done
-    read -rp "Enter ย้อนกลับ..."; return
-  fi
-  printf "  ${GR}✅ port 80 ว่างแล้ว${RS}\n"
+
+  # เพิ่ม nginx server block port 80 ชั่วคราวสำหรับ ACME challenge
+  cat > /etc/nginx/conf.d/acme-temp.conf << 'ACMEEOF'
+server {
+    listen 80;
+    server_name _;
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    location / { return 444; }
+}
+ACMEEOF
+
+  nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+  sleep 1
+  printf "  ${GR}✅ nginx พร้อมรับ ACME challenge บน port 80${RS}\n"
 
   # ── [2/4] ขอ SSL certificate ──────────────────────────────
-  printf "\n${YE}⏳ [2/4] ขอ SSL certificate (certbot standalone)...${RS}\n"
-  certbot certonly --standalone \
+  printf "\n${YE}⏳ [2/4] ขอ SSL certificate (certbot webroot)...${RS}\n"
+  certbot certonly --webroot \
+    -w /var/www/html \
     -d "$domain" \
     --non-interactive --agree-tos \
     -m "admin@${domain}" 2>&1
+
+  # ── ลบ nginx temp config และ restart ws-stunnel กลับ ──────
+  rm -f /etc/nginx/conf.d/acme-temp.conf 2>/dev/null || true
+  nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
+  for _s in "${_stopped_svcs[@]}"; do
+    systemctl start "$_s" 2>/dev/null || true
+    printf "  ${GR}▶ เริ่ม %s กลับแล้ว${RS}\n" "$_s"
+  done
 
   local _cert_ok=false
   [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]] && _cert_ok=true
