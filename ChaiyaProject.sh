@@ -954,7 +954,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   @keyframes orb4{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-20px,30px) scale(1.06);}}
 
   /* Shooting Stars Canvas */
-  #stars-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:.85;}
+  #stars-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;}
 
   /* Bandwidth Level Badge */
   .bw-level{display:inline-flex;align-items:center;gap:4px;font-family:'Share Tech Mono',monospace;font-size:.6rem;padding:2px 9px;border-radius:12px;margin-left:6px;font-weight:700;letter-spacing:1px;transition:all .5s;vertical-align:middle;}
@@ -1869,111 +1869,111 @@ setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='pa
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
 
 // ══════════════════════════════════════════════
-// Shooting Stars + Static Stars Animation
+// Shooting Stars — ช้า สวย เห็นชัด
 // ══════════════════════════════════════════════
 function initStars(){
-  const cv = document.getElementById('stars-canvas');
+  const cv=document.getElementById('stars-canvas');
   if(!cv) return;
-  const ctx = cv.getContext('2d');
-  let W, H;
+  const ctx=cv.getContext('2d');
+  let W,H;
+  function resize(){W=cv.width=window.innerWidth;H=cv.height=window.innerHeight;}
+  resize(); window.addEventListener('resize',resize);
 
-  function resize(){
-    W = cv.width  = window.innerWidth;
-    H = cv.height = window.innerHeight;
-  }
-  resize();
-  window.addEventListener('resize', resize);
-
-  // ── static background stars ──
-  const STAR_COUNT = 160;
-  const bgStars = Array.from({length: STAR_COUNT}, () => ({
-    x: Math.random() * window.innerWidth,
-    y: Math.random() * window.innerHeight,
-    r: Math.random() * 1.2 + 0.2,
-    a: Math.random(),
-    speed: Math.random() * 0.004 + 0.001,
-    phase: Math.random() * Math.PI * 2
+  // ดาวพื้นหลัง 180 ดวง กระพริบช้าๆ
+  const bgStars=Array.from({length:180},()=>({
+    x:Math.random()*window.innerWidth,
+    y:Math.random()*window.innerHeight,
+    r:Math.random()*1.6+0.4,
+    phase:Math.random()*Math.PI*2,
+    speed:Math.random()*0.35+0.15,
+    baseA:Math.random()*0.45+0.35
   }));
 
-  // ── shooting stars ──
-  const meteors = [];
-  const COLORS = ['#ffffff','#80ffdd','#b8a0ff','#4dffa0','#ffe680','#ff6b8a'];
+  const meteors=[];
+  const PALETTE=[
+    {r:255,g:255,b:255},
+    {r:128,g:255,b:221},
+    {r:184,g:160,b:255},
+    {r:77,g:255,b:160},
+    {r:255,g:230,b:128},
+  ];
 
-  function spawnMeteor(){
-    const angle = Math.PI / 5;          // มุม 36 องศา
-    const speed = Math.random() * 6 + 5;
-    const startX = Math.random() * W * 1.2 - W * 0.1;
-    const startY = Math.random() * H * 0.4;
-    const len    = Math.random() * 120 + 60;
-    const color  = COLORS[Math.floor(Math.random() * COLORS.length)];
+  function spawn(){
+    const col=PALETTE[Math.floor(Math.random()*PALETTE.length)];
+    const spd=Math.random()*3+2;   // ช้า: 2–5 px/frame
+    const ang=Math.PI/5+(Math.random()-0.5)*0.12;
     meteors.push({
-      x: startX, y: startY,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      len, color,
-      life: 1,          // 1 = เต็ม, 0 = หาย
-      decay: Math.random() * 0.012 + 0.008
+      x:Math.random()*W*1.2-W*0.1,
+      y:Math.random()*H*0.38-20,
+      vx:Math.cos(ang)*spd,
+      vy:Math.sin(ang)*spd,
+      len:Math.random()*150+90,
+      col,
+      life:1.0,
+      decay:Math.random()*0.004+0.003,  // จางช้า — อยู่นาน
+      width:Math.random()*1.2+1.2
     });
   }
 
-  // spawn ดาวตกแรกทันที 2 ดวง
-  spawnMeteor(); spawnMeteor();
-
-  // spawn ใหม่สุ่มทุก 1.2–3.5 วินาที
-  function scheduleMeteor(){
-    spawnMeteor();
-    setTimeout(scheduleMeteor, Math.random() * 2300 + 1200);
-  }
-  setTimeout(scheduleMeteor, 1200);
+  spawn(); spawn();
+  // spawn ทุก 2–5 วิ
+  (function go(){ spawn(); setTimeout(go, Math.random()*3000+2000); })();
 
   function draw(ts){
-    ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(0,0,W,H);
 
-    // วาด background stars
-    bgStars.forEach(s => {
-      s.a = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(ts * 0.001 * s.speed * 60 + s.phase));
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,255,255,${s.a.toFixed(2)})`;
-      ctx.fill();
+    // วาดดาวพื้นหลัง
+    bgStars.forEach(s=>{
+      const a=s.baseA*(0.55+0.45*Math.sin(ts*0.001*s.speed+s.phase));
+      ctx.save();
+      ctx.globalAlpha=a;
+      ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+      ctx.fillStyle='#ffffff';
+      if(s.r>1.3){ctx.shadowColor='#80ffdd';ctx.shadowBlur=5;}
+      ctx.fill(); ctx.restore();
     });
 
-    // วาด shooting stars
-    for(let i = meteors.length - 1; i >= 0; i--){
-      const m = meteors[i];
-      const tailX = m.x - m.vx / Math.hypot(m.vx, m.vy) * m.len;
-      const tailY = m.y - m.vy / Math.hypot(m.vx, m.vy) * m.len;
-
-      const grad = ctx.createLinearGradient(tailX, tailY, m.x, m.y);
-      grad.addColorStop(0, 'rgba(255,255,255,0)');
-      grad.addColorStop(0.7, m.color.replace(')',`,${(m.life * 0.5).toFixed(2)})`).replace('rgb(','rgba(').replace('#', 'rgba(').replace(/rgba\(([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2}),/, (_, r,g,b) => `rgba(${parseInt(r,16)},${parseInt(g,16)},${parseInt(b,16)},`));
-      grad.addColorStop(1, m.color.replace(')',`,${m.life.toFixed(2)})`).replace('rgb(','rgba(').replace('#','rgba(').replace(/rgba\(([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2}),/, (_, r,g,b) => `rgba(${parseInt(r,16)},${parseInt(g,16)},${parseInt(b,16)},`));
-
-      // วาดแบบง่ายและชัดเจน
+    // วาดดาวตก
+    for(let i=meteors.length-1;i>=0;i--){
+      const m=meteors[i];
+      const {r,g,b}=m.col;
+      const dist=Math.hypot(m.vx,m.vy)||1;
+      const nx=m.vx/dist, ny=m.vy/dist;
+      const tx=m.x-nx*m.len, ty=m.y-ny*m.len;
       ctx.save();
-      ctx.globalAlpha = m.life;
-      ctx.strokeStyle = m.color;
-      ctx.lineWidth = 1.5;
-      ctx.shadowColor = m.color;
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.moveTo(tailX, tailY);
-      ctx.lineTo(m.x, m.y);
-      ctx.stroke();
+
+      // หางหลัก
+      const gr=ctx.createLinearGradient(tx,ty,m.x,m.y);
+      gr.addColorStop(0,  `rgba(${r},${g},${b},0)`);
+      gr.addColorStop(0.5,`rgba(${r},${g},${b},${(m.life*0.4).toFixed(2)})`);
+      gr.addColorStop(1,  `rgba(${r},${g},${b},${m.life.toFixed(2)})`);
+      ctx.strokeStyle=gr; ctx.lineWidth=m.width;
+      ctx.shadowColor=`rgb(${r},${g},${b})`; ctx.shadowBlur=14;
+      ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(m.x,m.y); ctx.stroke();
+
+      // glow ชั้นนอก
+      const gr2=ctx.createLinearGradient(tx,ty,m.x,m.y);
+      gr2.addColorStop(0,`rgba(${r},${g},${b},0)`);
+      gr2.addColorStop(1,`rgba(${r},${g},${b},${(m.life*0.12).toFixed(2)})`);
+      ctx.strokeStyle=gr2; ctx.lineWidth=m.width*5; ctx.shadowBlur=28;
+      ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(m.x,m.y); ctx.stroke();
+
       // หัวดาว
-      ctx.beginPath();
-      ctx.arc(m.x, m.y, 2, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.shadowBlur = 12;
+      ctx.globalAlpha=m.life;
+      ctx.beginPath(); ctx.arc(m.x,m.y,m.width*1.6,0,Math.PI*2);
+      ctx.fillStyle='#ffffff';
+      ctx.shadowColor=`rgb(${r},${g},${b})`; ctx.shadowBlur=22;
       ctx.fill();
+
+      // แสงจ้าหัว
+      ctx.beginPath(); ctx.arc(m.x,m.y,m.width*3.5,0,Math.PI*2);
+      ctx.fillStyle=`rgba(${r},${g},${b},${(m.life*0.2).toFixed(2)})`;
+      ctx.shadowBlur=0; ctx.fill();
+
       ctx.restore();
-
-      m.x += m.vx;
-      m.y += m.vy;
-      m.life -= m.decay;
-      if(m.life <= 0 || m.x > W + 100 || m.y > H + 100) meteors.splice(i, 1);
+      m.x+=m.vx; m.y+=m.vy; m.life-=m.decay;
+      if(m.life<=0||m.x>W+200||m.y>H+200) meteors.splice(i,1);
     }
-
     requestAnimationFrame(draw);
   }
   requestAnimationFrame(draw);
@@ -4401,64 +4401,57 @@ menu_2() {
   echo "$_wsport" > /etc/chaiya/wsport.conf
   ufw allow "$_wsport"/tcp 2>/dev/null || true
   ufw allow 443/tcp        2>/dev/null || true
-  apt-get install -y certbot -qq 2>/dev/null || true
+  apt-get install -y certbot dnsutils -qq 2>/dev/null || true
 
-  # ── [1/4] เตรียม webroot สำหรับ certbot (ไม่ต้องหยุด port 80) ──
+  # ── [0/4] ตรวจ DNS ก่อน — ถ้าไม่ชี้มา IP นี้จะล้มแน่ ──────
+  printf "\n${YE}⏳ [0/4] ตรวจสอบ DNS...${RS}\n"
+  local _my_ip; _my_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+  local _dns_ip; _dns_ip=$(dig +short "$domain" 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  printf "  IP เซิร์ฟเวอร์ : ${WH}%s${RS}\n" "$_my_ip"
+  printf "  DNS ของ %s : ${WH}%s${RS}\n" "$domain" "${_dns_ip:-ไม่พบ}"
+  if [[ -z "$_dns_ip" ]]; then
+    printf "${RD}❌ DNS ไม่พบ A record — ตั้ง A record ชี้มาที่ %s ก่อน แล้วรอ 5-30 นาที${RS}\n" "$_my_ip"
+    read -rp "$(printf "${YE}กด Enter ย้อนกลับ...${RS}")"; return
+  fi
+  if [[ "$_dns_ip" != "$_my_ip" ]]; then
+    printf "${RD}❌ DNS ชี้ไปที่ %s ≠ IP เซิร์ฟเวอร์ %s${RS}\n" "$_dns_ip" "$_my_ip"
+    read -rp "$(printf "${OR}ลองต่อไปถึงแม้ DNS ไม่ตรง? [y/N]: ${RS}")" _force
+    [[ "${_force,,}" != "y" ]] && return
+  else
+    printf "  ${GR}✅ DNS ถูกต้อง${RS}\n"
+  fi
+
+  # ── [1/4] เตรียม nginx รับ ACME challenge ───────────────────
   printf "\n${YE}⏳ [1/4] เตรียม webroot สำหรับ certbot...${RS}\n"
-  # ใช้ webroot แทน standalone เพราะ ws-stunnel ครอง port 80 ตลอดเวลา
   mkdir -p /var/www/html/.well-known/acme-challenge
-
-  # ตรวจว่า nginx กำลังรันอยู่ไหม ถ้าไม่รัน ให้ start ก่อน
-  if ! systemctl is-active --quiet nginx 2>/dev/null; then
-    systemctl start nginx 2>/dev/null || true
-    sleep 1
-  fi
-
-  # เพิ่ม location /.well-known/ ใน nginx chaiya config ชั่วคราว (ถ้ายังไม่มี)
-  if ! grep -q "well-known" /etc/nginx/sites-available/chaiya 2>/dev/null; then
-    sed -i '/listen 81;/a\    location /.well-known/acme-challenge/ { root /var/www/html; }' \
-      /etc/nginx/sites-available/chaiya 2>/dev/null || true
-    nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
-  fi
-
-  # หยุดเฉพาะ ws-stunnel ชั่วคราว แล้วให้ nginx ฟัง port 80 แทน
   local _stopped_svcs=()
-  local _all_port80_svcs=(chaiya-sshws apache2 lighttpd)
-  for _svc in "${_all_port80_svcs[@]}"; do
+  for _svc in chaiya-sshws apache2 lighttpd; do
     if systemctl is-active --quiet "$_svc" 2>/dev/null; then
       systemctl stop "$_svc" 2>/dev/null || true
       _stopped_svcs+=("$_svc")
       printf "  ${OR}⏹ หยุด %s ชั่วคราว${RS}\n" "$_svc"
     fi
   done
-  fuser -k 80/tcp 2>/dev/null || true
-  sleep 1
-
-  # เพิ่ม nginx server block port 80 ชั่วคราวสำหรับ ACME challenge
+  fuser -k 80/tcp 2>/dev/null || true; sleep 1
   cat > /etc/nginx/conf.d/acme-temp.conf << 'ACMEEOF'
 server {
     listen 80;
     server_name _;
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-    }
+    location /.well-known/acme-challenge/ { root /var/www/html; }
     location / { return 444; }
 }
 ACMEEOF
-
   nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
   sleep 1
   printf "  ${GR}✅ nginx พร้อมรับ ACME challenge บน port 80${RS}\n"
 
-  # ── [2/4] ขอ SSL certificate ──────────────────────────────
+  # ── [2/4] ขอ SSL certificate (webroot) ──────────────────────
   printf "\n${YE}⏳ [2/4] ขอ SSL certificate (certbot webroot)...${RS}\n"
   certbot certonly --webroot \
     -w /var/www/html \
     -d "$domain" \
     --non-interactive --agree-tos \
     -m "admin@${domain}" 2>&1
-
-  # ── ลบ nginx temp config และ restart ws-stunnel กลับ ──────
   rm -f /etc/nginx/conf.d/acme-temp.conf 2>/dev/null || true
   nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
   for _s in "${_stopped_svcs[@]}"; do
@@ -7060,4 +7053,22 @@ echo "║                                                          ║"
 echo "║  ⌨️  พิมพ์ menu เพื่อเปิดเมนู Chaiya                    ║"
 echo "╰══════════════════════════════════════════════════════════╯"
 echo ""
+
+# ── แสดง 3x-ui credentials ที่สำคัญ ──────────────────────────
+_XUI_USER=$(cat /etc/chaiya/xui-user.conf 2>/dev/null | tr -d '[:space:]')
+_XUI_PASS=$(cat /etc/chaiya/xui-pass.conf 2>/dev/null | tr -d '[:space:]')
+_XUI_PORT=$(cat /etc/chaiya/xui-port.conf 2>/dev/null | tr -d '[:space:]')
+_XUI_PORT=${_XUI_PORT:-2053}
+if [[ -n "$_XUI_USER" && -n "$_XUI_PASS" ]]; then
+  echo "╭══════════════════════════════════════════════════════════╮"
+  echo "║  🔐 3x-ui Panel — ข้อมูลเข้าสู่ระบบ                    ║"
+  echo "║                                                          ║"
+  printf "║  🌐 URL      : http://%s:%s/\n" "$_FIX_IP" "$_XUI_PORT"
+  printf "║  👤 Username : %s\n" "$_XUI_USER"
+  printf "║  🔑 Password : %s\n" "$_XUI_PASS"
+  echo "║                                                          ║"
+  echo "║  ⚠️  บันทึก password นี้ไว้ด้วย!                        ║"
+  echo "╰══════════════════════════════════════════════════════════╯"
+  echo ""
+fi
 
