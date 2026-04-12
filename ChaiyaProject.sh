@@ -1476,7 +1476,7 @@ const PROS = {
     payload:'POST / HTTP/1.1[crlf]Host: help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]',
     darkProxy:location.hostname, darkProxyPort:80}
 };
-const NPV_HOST=location.hostname, NPV_PORT=80;
+const NPV_HOST=location.hostname, NPV_PORT=143;
 let _curPro='dtac', _curApp='npv';
 
 function selPro(p) {
@@ -1499,22 +1499,16 @@ function buildDarkLink(name, pass, pro) {
   const _proxyHost = _proxyRaw[0] || '';
   const _proxyPort = parseInt(_proxyRaw[1]) || 80;
   const j = {
-    type: 'SSH',
-    name: pro.name + '-' + name,
-    sshTunnelConfig: {
-      sshConfig: {
-        host: NPV_HOST,
-        port: NPV_PORT,
-        username: name,
-        password: pass
-      },
-      injectConfig: {
-        mode: 'PROXY',
-        proxyHost: _proxyHost,
-        proxyPort: _proxyPort,
-        payload: pro.payload || ''
-      }
-    }
+    remarks: pro.name + '-' + name,
+    server: NPV_HOST,
+    serverPort: NPV_PORT,
+    username: name,
+    password: pass,
+    proxyHost: _proxyHost,
+    proxyPort: _proxyPort,
+    proxyPayload: pro.payload || '',
+    udpgwAddr: '127.0.0.1',
+    udpgwPort: 7300
   };
   return 'darktunnel://' + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
@@ -1560,11 +1554,19 @@ function renderUserTable(users) {
     const badge = u.active && !expired ? '<span class="bdg bdg-g">ACTIVE</span>'
       : expired ? '<span class="bdg bdg-r">EXPIRED</span>'
       : '<span class="bdg bdg-y">INACTIVE</span>';
+    let _daysLeft = '∞', _dColor = 'var(--green)', _dTitle = 'ไม่จำกัด';
+    if (u.exp) {
+      const _diff = Math.ceil((new Date(u.exp) - new Date(today)) / 86400000);
+      if (_diff > 3) { _daysLeft = _diff+'d'; _dColor = 'var(--green)'; _dTitle = 'คงเหลือ '+_diff+' วัน'; }
+      else if (_diff > 0) { _daysLeft = _diff+'d'; _dColor = 'var(--yellow,#f5c518)'; _dTitle = 'คงเหลือ '+_diff+' วัน (ใกล้หมด!)'; }
+      else if (_diff === 0) { _daysLeft = 'วันนี้'; _dColor = 'var(--orange,#ff8c00)'; _dTitle = 'หมดอายุวันนี้!'; }
+      else { _daysLeft = 'หมด'; _dColor = 'var(--red)'; _dTitle = 'หมดอายุแล้ว '+Math.abs(_diff)+' วัน'; }
+    }
     return `<tr><td>${i+1}</td><td><b>${u.user}</b></td><td style="color:${expired?'var(--red)':'var(--green)'}">${u.exp||'N/A'}</td><td>${badge}</td>
       <td><div style="display:flex;gap:4px">
         <button class="btn btn-c btn-sm" onclick="openRenew('${u.user}')">🔄</button>
         <button class="btn btn-r btn-sm" onclick="confirmDel('${u.user}')">🗑️</button>
-        <button class="btn btn-y btn-sm" onclick="kickUser('${u.user}')">⚡</button>
+        <button class="btn btn-y btn-sm" title="${_dTitle}" onclick="showDaysLeft('${u.user}',${JSON.stringify(u.exp||'')},${JSON.stringify(_dTitle)})" style="font-size:.7rem;font-weight:700;min-width:44px;padding:2px 4px;color:${_dColor};border-color:${_dColor}">${_daysLeft}</button>
       </div></td></tr>`;
   }).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">ยังไม่มี Users</td></tr>`;
 }
@@ -1646,6 +1648,12 @@ async function doDelete() {
 async function kickUser(u) {
   const r=await api('POST','/api/kick',{user:u});
   toast(r.ok?`Kick ${u} แล้ว`:(r.error||'ล้มเหลว'), r.ok);
+}
+
+function showDaysLeft(username, expDate, msg) {
+  const _icon = msg.includes('หมดอายุแล้ว') ? '🔴'
+    : msg.includes('ใกล้หมด') || msg.includes('วันนี้') ? '🟡' : '🟢';
+  toast(`${_icon} ${username}: ${msg}`, !msg.includes('หมดอายุแล้ว'));
 }
 
 
@@ -4137,74 +4145,80 @@ menu_1() {
 
   # ── 50% force-set credential + port ด้วย sqlite3 โดยตรง ────────
   # วิธีนี้ไม่ขึ้นกับ installer prompt และไม่ขึ้นกับ service state
+  # ── 50% force-set credential + port + basepath ด้วย sqlite3 ────
   rgb_bar 50 "ตั้งค่า credential..."
   local _xui_db="/etc/x-ui/x-ui.db"
 
-  # ลอง x-ui setting CLI ก่อน (วิธีที่ 1)
-  if /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" -port 2053 \
-       >> /var/log/chaiya-xui-install.log 2>&1; then
-    echo "2053" > /etc/chaiya/xui-port.conf
-  # ถ้า CLI ไม่รองรับ -port flag ลองไม่ใส่ -port (วิธีที่ 2)
-  elif /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" \
-         >> /var/log/chaiya-xui-install.log 2>&1; then
-    echo "2053" > /etc/chaiya/xui-port.conf
-  # fallback: แก้ db โดยตรงด้วย sqlite3 (วิธีที่ 3)
-  # ⚠️ CRITICAL: 3x-ui เก็บ password เป็น bcrypt hash เท่านั้น
-  # ห้ามเขียน plaintext ลง db โดยตรง — login จะไม่ได้เด็ดขาด
-  # ต้อง hash ด้วย python3 bcrypt ก่อนเสมอ
-  elif command -v sqlite3 &>/dev/null && [[ -f "$_xui_db" ]]; then
-    # สร้าง bcrypt hash ของ password (rounds=10 ตรงกับ 3x-ui default)
-    local _pw_hash
-    _pw_hash=$(python3 -c \
-      "import bcrypt; print(bcrypt.hashpw(b'${_pw}', bcrypt.gensalt(rounds=10)).decode())" \
-      2>/dev/null)
-    if [[ -z "$_pw_hash" ]]; then
-      printf "  ${RD}✗ bcrypt hash ล้มเหลว — pip3 install bcrypt แล้วลองใหม่${RS}\n"
-    else
-      sqlite3 "$_xui_db" \
-        "UPDATE users SET username='${_u}', password='${_pw_hash}' WHERE id=1;" 2>/dev/null || true
-      sqlite3 "$_xui_db" \
-        "UPDATE settings SET value='2053' WHERE key='webPort';" 2>/dev/null || true
-      echo "2053" > /etc/chaiya/xui-port.conf
-      printf "  ${YE}⚠ ใช้ sqlite3 + bcrypt set credential${RS}\n"
-    fi
+  # ── [KEY FIX] Generate secret basepath ก่อน start x-ui เสมอ ──
+  local _gen_bp
+  _gen_bp="/$(openssl rand -hex 6)/"
+  local _existing_bp
+  _existing_bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
+  if [[ -n "$_existing_bp" && "$_existing_bp" != "/" && ${#_existing_bp} -gt 2 ]]; then
+    _gen_bp="$_existing_bp"
+    printf "  ${GR}✔ ใช้ basepath เดิม: ${WH}%s${RS}\n" "$_gen_bp"
   else
-    printf "  ${RD}✗ ตั้งค่า credential ไม่สำเร็จ — ตรวจสอบ log: /var/log/chaiya-xui-install.log${RS}\n"
+    printf "  ${GR}✔ Generate basepath ใหม่: ${WH}%s${RS}\n" "$_gen_bp"
+  fi
+  echo "$_gen_bp" > /etc/chaiya/xui-basepath.conf
+
+  # ── Set credential + basepath ลง db ก่อน start service ─────────
+  local _pw_hash=""
+  _pw_hash=$(python3 -c     "import bcrypt; print(bcrypt.hashpw(b'${_pw}', bcrypt.gensalt(rounds=10)).decode())"     2>/dev/null)
+
+  if command -v sqlite3 &>/dev/null && [[ -f "$_xui_db" ]]; then
+    if [[ -n "$_pw_hash" ]]; then
+      sqlite3 "$_xui_db"         "UPDATE users SET username='${_u}', password='${_pw_hash}' WHERE id=1;" 2>/dev/null || true
+      printf "  ${GR}✔ Set username/password (bcrypt) สำเร็จ${RS}\n"
+    fi
+    sqlite3 "$_xui_db"       "UPDATE settings SET value='2053' WHERE key='webPort';" 2>/dev/null || true
+    echo "2053" > /etc/chaiya/xui-port.conf
+    sqlite3 "$_xui_db"       "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','${_gen_bp}');" 2>/dev/null || true
+    printf "  ${GR}✔ Set webBasePath='%s' ลง db สำเร็จ${RS}\n" "$_gen_bp"
   fi
 
-  # ── 55% เริ่ม x-ui และรอให้พร้อมจริงๆ ─────────────────────────
+  # ── CLI fallback ถ้า bcrypt ล้มเหลว ────────────────────────────
+  if [[ -z "$_pw_hash" ]]; then
+    if /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" -port 2053          >> /var/log/chaiya-xui-install.log 2>&1; then
+      echo "2053" > /etc/chaiya/xui-port.conf
+      printf "  ${GR}✔ CLI set credential สำเร็จ${RS}\n"
+    elif /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw"            >> /var/log/chaiya-xui-install.log 2>&1; then
+      echo "2053" > /etc/chaiya/xui-port.conf
+      printf "  ${GR}✔ CLI set credential (ไม่มี -port flag) สำเร็จ${RS}\n"
+    else
+      printf "  ${RD}✗ ตั้งค่า credential ไม่สำเร็จ — ดู: /var/log/chaiya-xui-install.log${RS}\n"
+    fi
+  fi
+
+  # ── 55% start x-ui และรอให้พร้อม ────────────────────────────────
   rgb_bar 55 "รอ x-ui พร้อม..."
   systemctl start x-ui 2>/dev/null || true
 
   local _panel_port; _panel_port=$(xui_port)
+  local _bp_trim; _bp_trim=$(echo "$_gen_bp" | sed 's|/$||')
   local _ok=0
-  # รอสูงสุด 60 วินาที (30 รอบ × 2 วินาที)
   for _i in $(seq 1 30); do
-    if curl -s --max-time 2 "http://127.0.0.1:${_panel_port}/" &>/dev/null; then
-      _ok=1; break
-    fi
-    if curl -sk --max-time 2 "https://127.0.0.1:${_panel_port}/" &>/dev/null; then
-      _ok=1; break
-    fi
+    if curl -s  --max-time 2 "http://127.0.0.1:${_panel_port}${_bp_trim}/"  &>/dev/null; then _ok=1; break; fi
+    if curl -sk --max-time 2 "https://127.0.0.1:${_panel_port}${_bp_trim}/" &>/dev/null; then _ok=1; break; fi
+    if curl -s  --max-time 2 "http://127.0.0.1:${_panel_port}/"             &>/dev/null; then _ok=1; break; fi
+    if curl -sk --max-time 2 "https://127.0.0.1:${_panel_port}/"            &>/dev/null; then _ok=1; break; fi
     sleep 2
   done
+  [[ "$_ok" == "0" ]] && printf "  ${RD}✗ x-ui ไม่ตอบสนองที่ port ${_panel_port} — ตรวจ: systemctl status x-ui${RS}\n"
 
-  if [[ "$_ok" == "0" ]]; then
-    printf "  ${RD}✗ x-ui ไม่ตอบสนองที่ port ${_panel_port} — ตรวจสอบด้วย: systemctl status x-ui${RS}\n"
-  fi
-
-  # buffer เพิ่มหลังจาก port ตอบแล้ว ให้ db พร้อมรับ API
   sleep 3
 
-  # ── detect basepath จาก db (ทำหลัง service พร้อมแล้ว) ──────────
+  # ── verify basepath จาก db หลัง start ────────────────────────────
   local _basepath; _basepath=$(detect_xui_basepath)
-  local _bp_try=0
-  while [[ ( -z "$_basepath" || "$_basepath" == "/" ) && $_bp_try -lt 5 ]]; do
-    sleep 3
-    _basepath=$(detect_xui_basepath)
-    (( _bp_try++ )) || true
-  done
+  if [[ -z "$_basepath" || "$_basepath" == "/" ]]; then
+    printf "  ${YE}⚠ basepath ใน db ว่าง — set ซ้ำ${RS}\n"
+    if command -v sqlite3 &>/dev/null && [[ -f "$_xui_db" ]]; then
+      sqlite3 "$_xui_db"         "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','${_gen_bp}');" 2>/dev/null || true
+    fi
+    _basepath="$_gen_bp"
+  fi
   echo "$_basepath" > /etc/chaiya/xui-basepath.conf
+  printf "  ${GR}✔ basepath ยืนยัน: ${WH}%s${RS}\n" "$_basepath"
 
   # ── 80% login API — retry สูงสุด 5 ครั้ง ───────────────────────
   rgb_bar 80 "Login API..."
@@ -7053,22 +7067,4 @@ echo "║                                                          ║"
 echo "║  ⌨️  พิมพ์ menu เพื่อเปิดเมนู Chaiya                    ║"
 echo "╰══════════════════════════════════════════════════════════╯"
 echo ""
-
-# ── แสดง 3x-ui credentials ที่สำคัญ ──────────────────────────
-_XUI_USER=$(cat /etc/chaiya/xui-user.conf 2>/dev/null | tr -d '[:space:]')
-_XUI_PASS=$(cat /etc/chaiya/xui-pass.conf 2>/dev/null | tr -d '[:space:]')
-_XUI_PORT=$(cat /etc/chaiya/xui-port.conf 2>/dev/null | tr -d '[:space:]')
-_XUI_PORT=${_XUI_PORT:-2053}
-if [[ -n "$_XUI_USER" && -n "$_XUI_PASS" ]]; then
-  echo "╭══════════════════════════════════════════════════════════╮"
-  echo "║  🔐 3x-ui Panel — ข้อมูลเข้าสู่ระบบ                    ║"
-  echo "║                                                          ║"
-  printf "║  🌐 URL      : http://%s:%s/\n" "$_FIX_IP" "$_XUI_PORT"
-  printf "║  👤 Username : %s\n" "$_XUI_USER"
-  printf "║  🔑 Password : %s\n" "$_XUI_PASS"
-  echo "║                                                          ║"
-  echo "║  ⚠️  บันทึก password นี้ไว้ด้วย!                        ║"
-  echo "╰══════════════════════════════════════════════════════════╯"
-  echo ""
-fi
 
