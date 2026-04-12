@@ -253,11 +253,30 @@ NGINXEOF
 
 ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya
 rm -f /etc/nginx/sites-enabled/default
-# ป้องกัน nginx default config ชน port 80
-# nginx.conf ต้องไม่มี default server บน port 80
-sed -i '/listen 80 default_server/d' /etc/nginx/nginx.conf 2>/dev/null || true
-# ลบ conf.d default ถ้ามี
+
+# ── ล้าง port 80 ออกจาก nginx config ทุก path (Ubuntu 20/22/24) ──
+# 1. nginx.conf หลัก
+sed -i '/listen 80/d' /etc/nginx/nginx.conf 2>/dev/null || true
+# 2. conf.d
 rm -f /etc/nginx/conf.d/default.conf 2>/dev/null || true
+for _f in /etc/nginx/conf.d/*.conf; do
+  [[ -f "$_f" ]] && sed -i '/listen 80/d' "$_f" 2>/dev/null || true
+done
+# 3. sites-available อื่นที่อาจมี listen 80 (ยกเว้น chaiya ของเรา)
+for _f in /etc/nginx/sites-enabled/*; do
+  [[ "$_f" == *"chaiya"* ]] && continue
+  [[ -f "$_f" ]] && grep -q "listen 80" "$_f" 2>/dev/null && {
+    echo "  ⚠ ลบ nginx config ที่ชน port 80: $_f"
+    rm -f "$_f"
+  } || true
+done
+# 4. ตรวจ port 80 ยังถูกใช้ไหม (นอกจาก ws-stunnel)
+_p80_proc=$(ss -tlnp 2>/dev/null | grep ":80 " | grep -v "ws-stunnel\|python" | grep -oP '(?<=users:\(\(")[^"]+' | head -1)
+[[ -n "$_p80_proc" ]] && {
+  echo "  ⚠ kill process แย่ง port 80: $_p80_proc"
+  fuser -k 80/tcp 2>/dev/null || true
+  sleep 1
+} || true
 
 # ── auto-install nginx ถ้าหายไป ──────────────────────────────
 _ensure_nginx() {
