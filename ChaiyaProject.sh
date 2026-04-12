@@ -239,19 +239,6 @@ server {
         proxy_set_header Cookie $http_cookie;
         proxy_read_timeout 30s;
     }
-    # radio proxy — stream ผ่าน nginx แก้ปัญหา CORS
-    location /radio/ {
-        proxy_pass https://sc.requestradio.in.th/listen/request_radio/radio.mp3;
-        proxy_set_header Host sc.requestradio.in.th;
-        proxy_set_header Referer https://www.requestradio.in.th/;
-        proxy_set_header User-Agent "Mozilla/5.0";
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 3600s;
-        proxy_connect_timeout 10s;
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Cache-Control "no-cache" always;
-    }
 }
 # หมายเหตุ: port 80 ถูกจัดการโดย ws-stunnel (HTTP CONNECT tunnel)
 # ไม่ใช้ nginx จัดการ port 80 เพราะจะชนกับ tunnel
@@ -874,7 +861,6 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   @keyframes orb4{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-20px,30px) scale(1.06);}}
 
   /* Snow Canvas */
-  #snow-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:.5;}
 
   /* Bandwidth Level Badge */
   .bw-level{display:inline-flex;align-items:center;gap:4px;font-family:'Share Tech Mono',monospace;font-size:.6rem;padding:2px 9px;border-radius:12px;margin-left:6px;font-weight:700;letter-spacing:1px;transition:all .5s;vertical-align:middle;}
@@ -895,7 +881,6 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 </style>
 </head>
 <body>
-<canvas id="snow-canvas"></canvas>
 <div class="rgb-orb o1"></div>
 <div class="rgb-orb o2"></div>
 <div class="rgb-orb o3"></div>
@@ -1705,48 +1690,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-dashboard') loadDashboard(); }, 15000);
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
-</script>
-<audio id="_r" preload="none" style="display:none"><source src="/radio/" type="audio/mpeg"></audio>
-<script>
-(function(){
-  var cv=document.getElementById('snow-canvas');
-  if(cv){
-    var ctx=cv.getContext('2d'),W,H,fl=[];
-    var C=['rgba(180,230,255,','rgba(128,255,221,','rgba(184,160,255,','rgba(200,240,255,','rgba(255,230,128,'];
-    function rsz(){W=cv.width=window.innerWidth;H=cv.height=window.innerHeight;}
-    window.addEventListener('resize',rsz);rsz();
-    function mk(){return{x:Math.random()*W,y:Math.random()*H-H,r:Math.random()*2.3+0.4,sp:Math.random()*0.8+0.2,sw:Math.random()*0.5-0.25,op:Math.random()*0.5+0.2,col:C[Math.floor(Math.random()*C.length)],bloom:Math.random()>0.7};}
-    for(var i=0;i<130;i++)fl.push(mk());
-    function draw(){
-      ctx.clearRect(0,0,W,H);
-      for(var i=0;i<fl.length;i++){
-        var f=fl[i];ctx.beginPath();
-        if(f.bloom){var g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,f.r*4);g.addColorStop(0,f.col+'0.7)');g.addColorStop(1,f.col+'0)');ctx.fillStyle=g;ctx.arc(f.x,f.y,f.r*4,0,6.28);}else{ctx.fillStyle=f.col+f.op+')';ctx.arc(f.x,f.y,f.r,0,6.28);}
-        ctx.fill();f.y+=f.sp;f.x+=f.sw;f.sw+=(Math.random()-0.5)*0.025;
-        if(f.sw>0.55)f.sw=0.55;if(f.sw<-0.55)f.sw=-0.55;
-        if(f.y>H+10){fl[i]=mk();fl[i].y=-5;}if(f.x<-10)f.x=W+5;if(f.x>W+10)f.x=-5;
-      }
-      requestAnimationFrame(draw);
-    }
-    draw();
-  }
-  var audio=document.getElementById('_r');
-  if(!audio)return;
-  audio.loop=true;audio.volume=0.4;
-  var btn=document.createElement('div');
-  btn.innerHTML='🎵';
-  btn.title='Play/Pause';
-  btn.style.cssText='position:fixed;bottom:22px;right:18px;width:44px;height:44px;border-radius:50%;background:rgba(17,24,39,.88);border:1.5px solid rgba(128,255,221,.4);display:flex;align-items:center;justify-content:center;font-size:1.15rem;cursor:pointer;z-index:9999;box-shadow:0 0 14px rgba(128,255,221,.22);transition:all .3s;backdrop-filter:blur(8px);';
-  btn.onmouseenter=function(){btn.style.boxShadow='0 0 22px rgba(128,255,221,.55)';btn.style.borderColor='rgba(128,255,221,.75)';};
-  btn.onmouseleave=function(){btn.style.boxShadow='0 0 14px rgba(128,255,221,.22)';btn.style.borderColor='rgba(128,255,221,.4)';};
-  document.body.appendChild(btn);
-  var playing=false;
-  function tryPlay(){audio.play().then(function(){playing=true;btn.innerHTML='⏸';}).catch(function(){playing=false;btn.innerHTML='🎵';});}
-  btn.addEventListener('click',function(e){e.stopPropagation();if(playing){audio.pause();playing=false;btn.innerHTML='🎵';}else{tryPlay();}});
-  function firstTouch(e){if(e.target===btn)return;tryPlay();document.removeEventListener('click',firstTouch);document.removeEventListener('touchend',firstTouch);}
-  document.addEventListener('click',firstTouch);
-  document.addEventListener('touchend',firstTouch);
-})();
 </script>
 
 </body>
@@ -6580,18 +6523,6 @@ server {
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
-    }
-    location /radio/ {
-        proxy_pass https://sc.requestradio.in.th/listen/request_radio/radio.mp3;
-        proxy_set_header Host sc.requestradio.in.th;
-        proxy_set_header Referer https://www.requestradio.in.th/;
-        proxy_set_header User-Agent "Mozilla/5.0";
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 3600s;
-        proxy_connect_timeout 10s;
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Cache-Control "no-cache" always;
     }
 }
 NGINXEOF
