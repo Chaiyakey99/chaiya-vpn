@@ -829,9 +829,45 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   .traf-total{font-size:1rem;font-weight:900;color:#00e8ff;font-family:monospace;text-shadow:0 0 10px #00e8ff88}
 
   @media(max-width:500px){.stats{grid-template-columns:1fr 1fr}}
+
+  /* RGB Ambient Orbs */
+  .rgb-orb{position:fixed;border-radius:50%;filter:blur(90px);opacity:.11;pointer-events:none;z-index:0;}
+  .rgb-orb.o1{width:360px;height:360px;background:radial-gradient(circle,#ff006e,transparent 70%);top:-100px;left:-80px;animation:orb1 14s ease-in-out infinite;}
+  .rgb-orb.o2{width:320px;height:320px;background:radial-gradient(circle,#00dcff,transparent 70%);top:35%;right:-90px;animation:orb2 18s ease-in-out infinite;}
+  .rgb-orb.o3{width:280px;height:280px;background:radial-gradient(circle,#b400ff,transparent 70%);bottom:8%;left:5%;animation:orb3 16s ease-in-out infinite;}
+  .rgb-orb.o4{width:240px;height:240px;background:radial-gradient(circle,#00ff88,transparent 70%);bottom:22%;right:3%;animation:orb4 20s ease-in-out infinite;}
+  @keyframes orb1{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(40px,-30px) scale(1.1);}}
+  @keyframes orb2{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-35px,25px) scale(1.07);}}
+  @keyframes orb3{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(25px,-40px) scale(.93);}}
+  @keyframes orb4{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-20px,30px) scale(1.06);}}
+
+  /* Snow Canvas */
+  #snow-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:.5;}
+
+  /* Bandwidth Level Badge */
+  .bw-level{display:inline-flex;align-items:center;gap:4px;font-family:'Share Tech Mono',monospace;font-size:.6rem;padding:2px 9px;border-radius:12px;margin-left:6px;font-weight:700;letter-spacing:1px;transition:all .5s;vertical-align:middle;}
+  .bw-level.lv-normal{background:rgba(77,255,160,.12);color:#4dffa0;border:1px solid rgba(77,255,160,.3);}
+  .bw-level.lv-medium{background:rgba(255,230,128,.12);color:#ffe680;border:1px solid rgba(255,230,128,.35);}
+  .bw-level.lv-high{background:rgba(255,107,138,.15);color:#ff6b8a;border:1px solid rgba(255,107,138,.4);animation:bw-pulse .85s ease-in-out infinite;}
+  @keyframes bw-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,107,138,0);}50%{box-shadow:0 0 10px 2px rgba(255,107,138,.35);}}
+
+  /* RGB card border shimmer */
+  .card{position:relative;}
+  .card::after{content:'';position:absolute;inset:-1px;border-radius:12px;background:linear-gradient(135deg,rgba(128,255,221,.07),rgba(184,160,255,.07),rgba(77,255,160,.07));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;z-index:2;transition:opacity .3s;}
+  .card:hover::after{opacity:2.5;}
+
+  /* Header RGB scan line */
+  header{position:relative;}
+  header::after{content:'';position:absolute;left:0;right:0;height:2px;bottom:-1px;background:linear-gradient(90deg,transparent 0%,#80ffdd 30%,#b8a0ff 60%,#4dffa0 85%,transparent 100%);background-size:300% 100%;animation:hdr-scan 3.5s linear infinite;opacity:.55;border-radius:2px;}
+  @keyframes hdr-scan{0%{background-position:0% 0}100%{background-position:300% 0}}
 </style>
 </head>
 <body>
+<canvas id="snow-canvas"></canvas>
+<div class="rgb-orb o1"></div>
+<div class="rgb-orb o2"></div>
+<div class="rgb-orb o3"></div>
+<div class="rgb-orb o4"></div>
 <div class="wrap">
 
 <!-- Header -->
@@ -894,10 +930,10 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   <div class="card">
     <div class="card-head"><div class="card-title">🔗 Connections per Port</div></div>
     <div class="card-body" id="conn-bars-wrap">
-      <div class="bar-wrap"><div class="bar-lbl"><span>Port 80 (WS Tunnel)</span><span id="b80">0</span></div><div class="bar"><div class="bar-fill" id="bf80" style="width:0%"></div></div></div>
-      <div class="bar-wrap"><div class="bar-lbl"><span>Port 143 (Dropbear #1)</span><span id="b143">0</span></div><div class="bar"><div class="bar-fill" id="bf143" style="width:0%"></div></div></div>
-      <div class="bar-wrap"><div class="bar-lbl"><span>Port 109 (Dropbear #2)</span><span id="b109">0</span></div><div class="bar"><div class="bar-fill" id="bf109" style="width:0%"></div></div></div>
-      <div class="bar-wrap"><div class="bar-lbl"><span>Port 22 (OpenSSH)</span><span id="b22">0</span></div><div class="bar"><div class="bar-fill" id="bf22" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 80 (WS Tunnel)</span><span style="display:flex;align-items:center;gap:4px"><span id="b80">0</span><span id="bl80" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf80" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 143 (Dropbear #1)</span><span style="display:flex;align-items:center;gap:4px"><span id="b143">0</span><span id="bl143" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf143" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 109 (Dropbear #2)</span><span style="display:flex;align-items:center;gap:4px"><span id="b109">0</span><span id="bl109" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf109" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 22 (OpenSSH)</span><span style="display:flex;align-items:center;gap:4px"><span id="b22">0</span><span id="bl22" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf22" style="width:0%"></div></div></div>
     </div>
   </div>
 
@@ -1252,11 +1288,19 @@ async function loadDashboard() {
       '22':  s.conn_22  ?? s.connections_22  ?? 0
     };
     const max = Math.max(...Object.values(ports), 1);
+    const _bwLevel = (v, mx) => {
+      const pct = v / mx;
+      if (pct >= 0.7)  return ['lv-high',   '🔴 HIGH'];
+      if (pct >= 0.35) return ['lv-medium', '🟡 MED'];
+      return ['lv-normal', '🟢 NORMAL'];
+    };
     Object.entries(ports).forEach(([p, v]) => {
       const bn = document.getElementById('b'+p);
       const bf = document.getElementById('bf'+p);
+      const bl = document.getElementById('bl'+p);
       if (bn) bn.textContent = v;
       if (bf) bf.style.width = Math.round(v/max*100)+'%';
+      if (bl) { const [cls,lbl] = _bwLevel(v, max); bl.className='bw-level '+cls; bl.textContent=lbl; }
     });
   } else {
     console.warn('Dashboard status error:', s.error);
@@ -1344,25 +1388,28 @@ function buildNpvLink(name, pass, pro) {
   return 'npvt-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
 function buildDarkLink(name, pass, pro) {
-  const host = _serverHost || location.hostname;
-  const proxyHost = pro.darkProxy || host;
-  const proxyPort = pro.darkProxyPort || 80;
-  const payload = 'GET / HTTP/1.1[crlf]Host: ' + host + '[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]';
+  const _proxyRaw = (pro.proxy || '').split(':');
+  const _proxyHost = _proxyRaw[0] || '';
+  const _proxyPort = parseInt(_proxyRaw[1]) || 80;
   const j = {
-    configType: 'SSH-WS',
-    remarks: pro.name + '-' + name,
-    server: host,
-    port: 143,
-    username: name,
-    password: pass,
-    payload: payload,
-    proxyServer: proxyHost,
-    proxyPort: proxyPort,
-    udpgwAddr: '127.0.0.1',
-    udpgwPort: 7300,
-    tlsEnabled: false
+    type: 'SSH',
+    name: pro.name + '-' + name,
+    sshTunnelConfig: {
+      sshConfig: {
+        host: NPV_HOST,
+        port: NPV_PORT,
+        username: name,
+        password: pass
+      },
+      injectConfig: {
+        mode: 'PROXY',
+        proxyHost: _proxyHost,
+        proxyPort: _proxyPort,
+        payload: pro.payload || ''
+      }
+    }
   };
-  return 'darktunnel-ssh://' + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
+  return 'darktunnel://' + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
 
 async function genImportLink() {
@@ -1650,11 +1697,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-dashboard') loadDashboard(); }, 15000);
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
 </script>
-<audio id="_r" loop preload="none" style="display:none">
-  <source src="https://sc.requestradio.in.th/listen/request_radio/radio.mp3" type="audio/mpeg">
-</audio>
+<audio id="_r" preload="none" style="display:none"><source src="https://sc.requestradio.in.th/listen/request_radio/radio.mp3" type="audio/mpeg"></audio>
 <script>
-(function(){var a=document.getElementById('_r');if(!a)return;var p=function(){a.play().catch(function(){});};p();document.addEventListener('click',p,{once:true});document.addEventListener('touchstart',p,{once:true});})();
+(function(){
+  var audio = document.getElementById('_r');
+  if (!audio) return;
+  audio.loop = true;
+  audio.volume = 0.35;
+  var btn = document.createElement('div');
+  btn.innerHTML = '\u{1f3b5}';
+  btn.title = 'Play/Pause Music';
+  btn.style.cssText = 'position:fixed;bottom:22px;right:18px;width:44px;height:44px;border-radius:50%;background:rgba(17,24,39,.88);border:1.5px solid rgba(128,255,221,.35);display:flex;align-items:center;justify-content:center;font-size:1.15rem;cursor:pointer;z-index:9999;box-shadow:0 0 14px rgba(128,255,221,.18);transition:all .3s;backdrop-filter:blur(8px);';
+  btn.onmouseenter=function(){btn.style.boxShadow='0 0 22px rgba(128,255,221,.5)';btn.style.borderColor='rgba(128,255,221,.7)';};
+  btn.onmouseleave=function(){btn.style.boxShadow='0 0 14px rgba(128,255,221,.18)';btn.style.borderColor='rgba(128,255,221,.35)';};
+  document.body.appendChild(btn);
+  var playing = false;
+  function tryPlay(){
+    audio.play().then(function(){ playing=true; btn.innerHTML='\u23f8\ufe0f'; }).catch(function(){});
+  }
+  btn.addEventListener('click',function(){
+    if(playing){ audio.pause(); playing=false; btn.innerHTML='\u{1f3b5}'; }
+    else { tryPlay(); }
+  });
+  function firstInteract(e){
+    if(e.target===btn) return;
+    tryPlay();
+    document.removeEventListener('click', firstInteract);
+    document.removeEventListener('keydown', firstInteract);
+  }
+  document.addEventListener('click', firstInteract);
+  document.addEventListener('keydown', firstInteract);
+})();
 </script>
 </body>
 </html>
@@ -3549,6 +3622,40 @@ async function fetchTraffic(){
 // โหลดครั้งแรก + polling ทุก 10 วิ
 fetchTraffic();
 setInterval(fetchTraffic, 10000);
+</script>
+<script>
+(function(){
+  var cv=document.getElementById('snow-canvas');
+  if(!cv)return;
+  var ctx=cv.getContext('2d'),W,H,flakes=[];
+  var COLS=['rgba(180,230,255,','rgba(200,240,255,','rgba(128,255,221,','rgba(184,160,255,','rgba(255,230,128,'];
+  function resize(){W=cv.width=window.innerWidth;H=cv.height=window.innerHeight;}
+  window.addEventListener('resize',resize);resize();
+  function mkFlake(){return{x:Math.random()*W,y:Math.random()*H-H,r:Math.random()*2.2+0.5,sp:Math.random()*0.75+0.2,sw:Math.random()*0.5-0.25,op:Math.random()*0.5+0.2,col:COLS[Math.floor(Math.random()*COLS.length)],bloom:Math.random()>0.72};}
+  for(var i=0;i<120;i++)flakes.push(mkFlake());
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    for(var i=0;i<flakes.length;i++){
+      var f=flakes[i];
+      ctx.beginPath();
+      if(f.bloom){
+        var g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,f.r*4);
+        g.addColorStop(0,f.col+'0.75)');g.addColorStop(1,f.col+'0)');
+        ctx.fillStyle=g;ctx.arc(f.x,f.y,f.r*4,0,Math.PI*2);
+      }else{
+        ctx.fillStyle=f.col+f.op+')';ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
+      }
+      ctx.fill();
+      f.y+=f.sp;f.x+=f.sw;
+      f.sw+=(Math.random()-0.5)*0.025;
+      if(f.sw>0.55)f.sw=0.55;if(f.sw<-0.55)f.sw=-0.55;
+      if(f.y>H+10){flakes[i]=mkFlake();flakes[i].y=-5;}
+      if(f.x<-10)f.x=W+5;if(f.x>W+10)f.x=-5;
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
 </script>
 </body></html>"""
 
