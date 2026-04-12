@@ -276,7 +276,25 @@ _ensure_nginx() {
 }
 
 _ensure_nginx
-nginx -t && systemctl enable nginx && systemctl restart nginx
+# ── Start nginx พร้อม fallback ───────────────────────────────
+systemctl enable nginx 2>/dev/null || true
+if nginx -t 2>/dev/null; then
+  systemctl restart nginx 2>/dev/null || true
+  sleep 1
+  if systemctl is-active --quiet nginx; then
+    echo "✅ nginx เริ่มทำงานแล้ว"
+  else
+    echo "⚠ nginx start ไม่ได้ — ลอง force start..."
+    pkill -f nginx 2>/dev/null || true
+    sleep 1
+    nginx 2>/dev/null || true
+    sleep 1
+    systemctl is-active --quiet nginx && echo "✅ nginx OK" || echo "❌ nginx ยังไม่ทำงาน — ตรวจสอบ: journalctl -u nginx -n 20"
+  fi
+else
+  echo "❌ nginx config error:"
+  nginx -t
+fi
 
 # ── [FIX] badvpn ใช้ systemd service แทน rc.local ────────────
 # rc.local ไม่ reliable บน Ubuntu 20.04+ หลายเครื่อง
@@ -6579,7 +6597,14 @@ server {
 NGINXEOF
   ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya 2>/dev/null || true
 fi
-nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null && echo "  ✅ nginx reload สำเร็จ"
+if nginx -t 2>/dev/null; then
+  systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+  sleep 1
+  systemctl is-active --quiet nginx     && echo "  ✅ nginx reload/restart สำเร็จ"     || { echo "  ⚠ nginx ไม่ active — พยายาม start ใหม่..."; nginx 2>/dev/null || true; }
+else
+  echo "  ❌ nginx config error — ตรวจ: nginx -t"
+  nginx -t
+fi
 
 # 6. ทดสอบ API จริง
 sleep 1
