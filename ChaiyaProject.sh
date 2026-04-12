@@ -3625,56 +3625,40 @@ xui_proto() {
 xui_login() {
   local p u pw bp
   p=$(xui_port); u=$(xui_user); pw=$(xui_pass)
-  bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
+  bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
+  # normalize: ถ้าเป็น "/" หรือว่าง → ใช้ "" (root path ไม่มี prefix)
+  [[ "$bp" == "/" || -z "$bp" ]] && bp="" || bp=$(echo "$bp" | sed 's|/$||')
   local _cookie="/etc/chaiya/xui-cookie.jar"
   rm -f "$_cookie"
 
-  local _r
-  # ลอง https + basepath ก่อน (3x-ui เปิด SSL by default)
-  if [[ -n "$bp" && "$bp" != "/" ]]; then
-    _r=$(curl -sk -c "$_cookie" \
-      -X POST "https://127.0.0.1:${p}${bp}/login" \
-      -d "username=${u}&password=${pw}" \
-      -H "Content-Type: application/x-www-form-urlencoded" \
-      --max-time 10 2>/dev/null)
-    if echo "$_r" | grep -q '"success":true'; then
-      [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
-      return 0
-    fi
-    rm -f "$_cookie"
-    # fallback http + basepath
-    _r=$(curl -s -c "$_cookie" \
-      -X POST "http://127.0.0.1:${p}${bp}/login" \
-      -d "username=${u}&password=${pw}" \
-      -H "Content-Type: application/x-www-form-urlencoded" \
-      --max-time 10 2>/dev/null)
-    if echo "$_r" | grep -q '"success":true'; then
-      [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
-      return 0
-    fi
-    rm -f "$_cookie"
-  fi
+  local _r _url
+  # ลำดับ try: https+bp → http+bp → https root → http root
+  local _tries=(
+    "https://127.0.0.1:${p}${bp}/login"
+    "http://127.0.0.1:${p}${bp}/login"
+    "https://127.0.0.1:${p}/login"
+    "http://127.0.0.1:${p}/login"
+  )
+  # dedup ถ้า bp ว่าง (จะซ้ำกับ root)
+  local _seen=()
+  for _url in "${_tries[@]}"; do
+    # skip ซ้ำ
+    local _dup=0
+    for _s in "${_seen[@]}"; do [[ "$_s" == "$_url" ]] && _dup=1; done
+    [[ "$_dup" == "1" ]] && continue
+    _seen+=("$_url")
 
-  # fallback https ไม่มี basepath
-  _r=$(curl -sk -c "$_cookie" \
-    -X POST "https://127.0.0.1:${p}/login" \
-    -d "username=${u}&password=${pw}" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    --max-time 10 2>/dev/null)
-  if echo "$_r" | grep -q '"success":true'; then
-    [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
-    return 0
-  fi
-  # fallback http ไม่มี basepath
-  _r=$(curl -s -c "$_cookie" \
-    -X POST "http://127.0.0.1:${p}/login" \
-    -d "username=${u}&password=${pw}" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    --max-time 10 2>/dev/null)
-  if echo "$_r" | grep -q '"success":true'; then
-    [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
-    return 0
-  fi
+    _r=$(curl -sk -c "$_cookie" \
+      -X POST "$_url" \
+      -d "username=${u}&password=${pw}" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --max-time 10 2>/dev/null)
+    if echo "$_r" | grep -q '"success":true'; then
+      [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
+      return 0
+    fi
+    rm -f "$_cookie"
+  done
   return 1
 }
 
@@ -3682,55 +3666,45 @@ xui_api() {
   local method="$1" endpoint="$2" data="${3:-}"
   local p bp _r
   p=$(xui_port)
-  bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
+  bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
+  [[ "$bp" == "/" || -z "$bp" ]] && bp="" || bp=$(echo "$bp" | sed 's|/$||')
   local _cookie="/etc/chaiya/xui-cookie.jar"
 
-  # [FIX] login เฉพาะเมื่อ cookie ไม่มีหรือ session หมดอายุ
-  # ไม่ login ซ้ำทุก request — ประหยัดเวลา 2-3 วิต่อ call
+  # login ถ้าไม่มี cookie
   if [[ ! -f "$_cookie" ]]; then
     xui_login 2>/dev/null || true
   fi
 
-  # ตรวจว่า 3x-ui ฟัง https หรือ http (ลอง https ก่อน fallback http)
+  # ตรวจ proto
   local _proto="http"
-  if curl -sk --max-time 3 "https://127.0.0.1:${p}/" &>/dev/null; then
-    _proto="https"
-  fi
+  curl -sk --max-time 3 "https://127.0.0.1:${p}/" &>/dev/null && _proto="https"
 
-  if [[ -n "$data" ]]; then
-    _r=$(curl -sk -b "$_cookie" \
-      -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" \
-      -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null)
-  else
-    _r=$(curl -sk -b "$_cookie" \
-      -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null)
-  fi
-
-  # ถ้า unauthorized (session หมด) → login ใหม่แล้วลองซ้ำ 1 ครั้ง
-  if echo "$_r" | grep -qi '"unauthorized\|"msg":"please login"'; then
-    xui_login 2>/dev/null || true
+  _call_api() {
+    local _pr="$1"
     if [[ -n "$data" ]]; then
-      _r=$(curl -sk -b "$_cookie" \
-        -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" \
-        -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null)
+      curl -sk -b "$_cookie" -X "$method" \
+        "${_pr}://127.0.0.1:${p}${bp}${endpoint}" \
+        -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null
     else
-      _r=$(curl -sk -b "$_cookie" \
-        -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null)
+      curl -sk -b "$_cookie" -X "$method" \
+        "${_pr}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null
     fi
+  }
+
+  _r=$(_call_api "$_proto")
+
+  # session หมด → login ใหม่แล้วลองซ้ำ
+  if echo "$_r" | grep -qi 'unauthorized\|please login'; then
+    xui_login 2>/dev/null || true
+    _r=$(_call_api "$_proto")
   fi
 
-  # ถ้า response ว่างหรือไม่มี success ลอง protocol อีกตัว
+  # ถ้ายังไม่มี success → ลอง proto อีกตัว
   if ! echo "$_r" | grep -q '"success"'; then
     local _proto2="https"; [[ "$_proto" == "https" ]] && _proto2="http"
-    if [[ -n "$data" ]]; then
-      _r=$(curl -sk -b "$_cookie" \
-        -X "$method" "${_proto2}://127.0.0.1:${p}${bp}${endpoint}" \
-        -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null)
-    else
-      _r=$(curl -sk -b "$_cookie" \
-        -X "$method" "${_proto2}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null)
-    fi
+    _r=$(_call_api "$_proto2")
   fi
+
   echo "$_r"
 }
 
@@ -4152,62 +4126,90 @@ menu_1() {
   # Progress bar เดียว ครอบทุกขั้นตอน (install → port → API → inbound)
   # ════════════════════════════════════════════════════════════
 
+  # ════════════════════════════════════════════════════════════
+  # ROOT CAUSE จากการทดสอบ:
+  # 1. installer version ใหม่ start x-ui ที่ port random ไม่ใช่ 2053
+  # 2. basepath ที่ installer สร้างไม่ตรงกับที่เราสร้าง → login ผิด path
+  # 3. เราต้องอ่าน port + basepath จาก db หลัง install แล้วค่อย set ทับ
+  # แนวทางใหม่: install → stop → อ่าน db → set ทุกอย่างทับ → start
+  # ════════════════════════════════════════════════════════════
+
+  local _xui_db="/etc/x-ui/x-ui.db"
+  local _panel_port="2053"  # target port ที่เราต้องการ
+
   # ── 10% ดาวน์โหลด install script ──
   rgb_bar 10 "ดาวน์โหลด install script..."
   local _xui_sh; _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
   if ! curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
        -o "$_xui_sh" 2>/dev/null || [[ ! -s "$_xui_sh" ]]; then
-    printf "  ${RD}✗ ดาวน์โหลด install script ล้มเหลว — ตรวจการเชื่อมต่อ${RS}\n"
+    printf "  ${RD}✗ ดาวน์โหลด install script ล้มเหลว${RS}\n"
     read -rp "  Enter..."; return
   fi
 
-  # ── 15% รัน installer — รอจนเสร็จ 100% ───────────────────────
-  # ส่งแค่ "y" ยืนยัน — credential จะ set ผ่าน sqlite3 หลัง install เสร็จ
-  rgb_bar 15 "กำลังติดตั้ง 3x-ui..."
+  # ── 15% รัน installer ──────────────────────────────────────────
+  # ส่ง "y" เดียว — ปล่อยให้ installer ใช้ค่า default ทั้งหมด
+  # เราจะ overwrite ทุกอย่างด้วย sqlite3 หลัง install เสร็จ
+  rgb_bar 15 "กำลังติดตั้ง 3x-ui (อาจใช้ 1-3 นาที)..."
   printf "y\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
   rm -f "$_xui_sh"
 
   # ── 25% รอให้ installer เสร็จ + x-ui ขึ้นจริง ──────────────────
-  # installer จะ start x-ui เองตอนสุดท้าย
-  # รอ port ตอบ = ยืนยันว่า install สมบูรณ์ + db พร้อมแก้ได้
-  rgb_bar 25 "รอ installer เสร็จ + x-ui ขึ้น..."
-  local _xui_db="/etc/x-ui/x-ui.db"
-  local _panel_port="2053"
+  # installer start x-ui เองตอนสุดท้าย บน port ที่ installer กำหนด
+  # รอ db มีอยู่ + x-ui process ขึ้น = install เสร็จ 100%
+  rgb_bar 25 "รอ installer เสร็จสมบูรณ์..."
   local _install_ok=0
-  printf "  ${YE}⏳ รอ x-ui ขึ้นที่ port %s (สูงสุด 90s)...${RS}\n" "$_panel_port"
-  for _i in $(seq 1 45); do
-    if [[ -f "$_xui_db" ]]; then
-      if curl -s  --max-time 3 "http://127.0.0.1:${_panel_port}/"  &>/dev/null ||
-         curl -sk --max-time 3 "https://127.0.0.1:${_panel_port}/" &>/dev/null; then
-        _install_ok=1; break
-      fi
+  printf "  ${YE}⏳ รอ x-ui ขึ้น (สูงสุด 120s)...${RS}\n"
+  for _i in $(seq 1 60); do
+    # เช็ค db มีก่อน แล้วค่อยเช็ค process
+    if [[ -f "$_xui_db" ]] && pgrep -x x-ui &>/dev/null; then
+      # รออีก 3s ให้ x-ui write db เสร็จ
+      sleep 3
+      _install_ok=1; break
     fi
     sleep 2
   done
 
   if [[ "$_install_ok" == "0" ]]; then
-    printf "  ${RD}✗ x-ui ไม่ขึ้นหลัง install — ดู: tail -50 /var/log/chaiya-xui-install.log${RS}\n"
+    printf "  ${RD}✗ install ล้มเหลว — ดู: tail -50 /var/log/chaiya-xui-install.log${RS}\n"
     read -rp "  Enter..."; return
   fi
-  printf "  ${GR}✔ installer เสร็จ — x-ui ขึ้นสำเร็จ${RS}\n"
+  printf "  ${GR}✔ installer เสร็จสมบูรณ์${RS}\n"
 
-  # ── 35% หยุด x-ui เพื่อแก้ db อย่างปลอดภัย ─────────────────────
-  # install สมบูรณ์แล้ว db พร้อม → stop แล้วแก้ได้เลย
-  rgb_bar 35 "หยุด x-ui เพื่อ set credential..."
+  # ── 35% stop x-ui อย่างปลอดภัย ────────────────────────────────
+  # หยุดหลัง install สมบูรณ์ → db พร้อม 100% → ปลอดภัยที่จะแก้
+  rgb_bar 35 "หยุด x-ui เพื่อ overwrite config..."
   systemctl stop x-ui 2>/dev/null || true
+  pkill -9 x-ui 2>/dev/null || true  # kill ให้แน่ใจ
   for _si in $(seq 1 15); do
     pgrep -x x-ui &>/dev/null || break
     sleep 1
   done
-  sleep 1
+  sleep 2  # รอ sqlite3 flush ให้เสร็จ
 
   if [[ ! -f "$_xui_db" ]]; then
-    printf "  ${RD}✗ ไม่พบ x-ui.db — install ล้มเหลว ดู: tail -50 /var/log/chaiya-xui-install.log${RS}\n"
+    printf "  ${RD}✗ ไม่พบ x-ui.db — ดู: tail -50 /var/log/chaiya-xui-install.log${RS}\n"
     read -rp "  Enter..."; return
   fi
 
-  # ── 40% force-set credential + port ด้วย sqlite3 ────────────────
-  rgb_bar 40 "ตั้งค่า credential + port..."
+  # ── 40% อ่าน basepath จาก db ที่ installer สร้างไว้ ─────────────
+  # ต้องอ่านตอนที่ x-ui หยุดอยู่ — db ไม่ถูก lock
+  rgb_bar 40 "อ่าน basepath จาก db..."
+  local _basepath
+  _basepath=$(detect_xui_basepath 5)
+  if [[ -z "$_basepath" || "$_basepath" == "/" ]]; then
+    # installer version เก่าไม่มี basepath → ใช้ "/" (ไม่ต้อง generate เอง)
+    _basepath="/"
+    printf "  ${YE}⚠ installer ไม่ได้ตั้ง basepath — ใช้ root path${RS}\n"
+  else
+    printf "  ${GR}✔ basepath จาก installer: ${WH}%s${RS}\n" "$_basepath"
+  fi
+  echo "$_basepath" > /etc/chaiya/xui-basepath.conf
+
+  # ── 50% overwrite credential + port ลง db โดยตรง ────────────────
+  # ทำขณะ x-ui หยุด = ปลอดภัย 100% ไม่มี race condition
+  rgb_bar 50 "Set credential + port ลง db..."
+
+  # hash password ด้วย bcrypt
   local _pw_hash=""
   _pw_hash=$(python3 -c "
 import bcrypt, sys
@@ -4220,80 +4222,86 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
       "UPDATE users SET username='${_u}', password='${_pw_hash}' WHERE id=1;" 2>/dev/null || true
     printf "  ${GR}✔ Set username/password (bcrypt) สำเร็จ${RS}\n"
   else
-    # fallback: CLI (ไม่ต้องการ bcrypt)
-    if /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" -port 2053 \
-         >> /var/log/chaiya-xui-install.log 2>&1; then
-      printf "  ${GR}✔ CLI set credential สำเร็จ${RS}\n"
-    elif /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" \
-         >> /var/log/chaiya-xui-install.log 2>&1; then
-      printf "  ${GR}✔ CLI set credential (ไม่มี -port flag) สำเร็จ${RS}\n"
-    else
-      printf "  ${RD}✗ ตั้งค่า credential ไม่สำเร็จ — ดู: /var/log/chaiya-xui-install.log${RS}\n"
-    fi
+    # fallback: ใช้ x-ui CLI — binary ต้องมีอยู่แล้วหลัง install
+    /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" \
+      >> /var/log/chaiya-xui-install.log 2>&1 || true
+    printf "  ${YE}⚠ bcrypt ไม่ได้ — ใช้ CLI fallback${RS}\n"
   fi
 
+  # force port 2053 — เขียนทับค่าที่ installer ตั้งมา
   sqlite3 "$_xui_db" \
     "INSERT OR REPLACE INTO settings(key,value) VALUES('webPort','2053');" 2>/dev/null || true
   echo "2053" > /etc/chaiya/xui-port.conf
+  printf "  ${GR}✔ Set webPort=2053 สำเร็จ${RS}\n"
 
-  # ── 50% อ่าน basepath จาก db ขณะ x-ui หยุดอยู่ (ปลอดภัยที่สุด) ──
-  # READ จาก db ที่ x-ui สร้างไว้ตอน install — ไม่สร้างเอง
-  rgb_bar 50 "อ่าน basepath จาก x-ui db..."
-  local _basepath
-  _basepath=$(detect_xui_basepath 5)
+  # verify ค่าที่เขียนลง db
+  local _db_port _db_user
+  _db_port=$(sqlite3 "$_xui_db" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
+  _db_user=$(sqlite3 "$_xui_db" "SELECT username FROM users WHERE id=1;" 2>/dev/null)
+  printf "  ${CY}→ db verify: port=%s user=%s${RS}\n" "$_db_port" "$_db_user"
 
-  if [[ -z "$_basepath" || "$_basepath" == "/" ]]; then
-    # x-ui version นี้ไม่มี basepath → generate + เขียนลง db
-    _basepath="/$(openssl rand -hex 8)/"
-    sqlite3 "$_xui_db" \
-      "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','${_basepath}');" 2>/dev/null || true
-    printf "  ${YE}⚠ ไม่มี basepath ใน db — สร้างใหม่: ${WH}%s${RS}\n" "$_basepath"
-  else
-    printf "  ${GR}✔ basepath จาก x-ui db: ${WH}%s${RS}\n" "$_basepath"
-  fi
-  echo "$_basepath" > /etc/chaiya/xui-basepath.conf
-
-  # ── 65% start x-ui ด้วย credential + basepath ที่ set แล้ว ──────
-  rgb_bar 65 "Start x-ui ด้วย credential ใหม่..."
+  # ── 60% start x-ui พร้อม config ใหม่ ───────────────────────────
+  rgb_bar 60 "Start x-ui พร้อม config ใหม่..."
   systemctl start x-ui 2>/dev/null || true
+
+  # รอ x-ui ขึ้นที่ port 2053 (ที่เรา set ลง db แล้ว)
   local _bp_trim; _bp_trim=$(echo "$_basepath" | sed 's|/$||')
   local _ok=0
-  printf "  ${YE}⏳ รอ x-ui ขึ้น (สูงสุด 60s)...${RS}\n"
+  printf "  ${YE}⏳ รอ x-ui ขึ้นที่ port 2053 (สูงสุด 60s)...${RS}\n"
   for _i in $(seq 1 30); do
-    if curl -s  --max-time 3 "http://127.0.0.1:${_panel_port}${_bp_trim}/"  &>/dev/null; then _ok=1; break; fi
-    if curl -sk --max-time 3 "https://127.0.0.1:${_panel_port}${_bp_trim}/" &>/dev/null; then _ok=1; break; fi
-    if curl -s  --max-time 3 "http://127.0.0.1:${_panel_port}/"             &>/dev/null; then _ok=1; break; fi
-    if curl -sk --max-time 3 "https://127.0.0.1:${_panel_port}/"            &>/dev/null; then _ok=1; break; fi
+    if curl -s  --max-time 3 "http://127.0.0.1:2053${_bp_trim}/"  &>/dev/null ||
+       curl -sk --max-time 3 "https://127.0.0.1:2053${_bp_trim}/" &>/dev/null ||
+       curl -s  --max-time 3 "http://127.0.0.1:2053/"             &>/dev/null ||
+       curl -sk --max-time 3 "https://127.0.0.1:2053/"            &>/dev/null; then
+      _ok=1; break
+    fi
     sleep 2
   done
-  [[ "$_ok" == "0" ]] \
-    && printf "  ${RD}✗ x-ui ไม่ตอบสนองหลัง start — ตรวจ: systemctl status x-ui${RS}\n" \
-    || printf "  ${GR}✔ x-ui ขึ้นสำเร็จ${RS}\n"
 
-  # ── 80% login API — retry สูงสุด 5 ครั้ง ───────────────────────
+  if [[ "$_ok" == "0" ]]; then
+    printf "  ${RD}✗ x-ui ไม่ขึ้นที่ port 2053 — ตรวจ: systemctl status x-ui${RS}\n"
+    # debug: แสดง port ที่ x-ui ฟังจริง
+    local _actual_port
+    _actual_port=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K[0-9]+' | head -1)
+    [[ -n "$_actual_port" ]] && printf "  ${YE}→ x-ui กำลังฟัง port: %s${RS}\n" "$_actual_port"
+    read -rp "  Enter..."; return
+  fi
+  printf "  ${GR}✔ x-ui ขึ้นสำเร็จที่ port 2053${RS}\n"
+
+  # ── 80% login API ────────────────────────────────────────────────
   rgb_bar 80 "Login API..."
   local _login_ok=0
+
+  # debug: แสดงข้อมูลที่จะใช้ login
+  printf "  ${CY}→ Login: user=%s port=%s basepath=%s${RS}\n" "$_u" "2053" "$_basepath"
+
   for _ltry in 1 2 3 4 5; do
     if xui_login 2>/dev/null; then
       _login_ok=1
       printf "  ${GR}✔ Login API สำเร็จ (ครั้งที่ %s)${RS}\n" "$_ltry"
       break
     fi
-    printf "  ${YE}⚠ Login ครั้งที่ %s ล้มเหลว — รอ...${RS}\n" "$_ltry"
-    # retry ครั้งที่ 3: force-set credential ใหม่ → restart
-    if [[ $_ltry -eq 3 ]] && [[ -n "$_pw_hash" ]]; then
+    printf "  ${YE}⚠ Login ครั้งที่ %s ล้มเหลว${RS}\n" "$_ltry"
+
+    # ครั้งที่ 2: อ่าน basepath จาก db อีกครั้ง เผื่อ x-ui reset ค่า
+    if [[ $_ltry -eq 2 ]]; then
       systemctl stop x-ui 2>/dev/null || true
-      sleep 1
-      local _pw_hash2
-      _pw_hash2=$(python3 -c "
-import bcrypt, sys
-pw = sys.argv[1].encode()
-print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
-" "$_pw" 2>/dev/null || true)
-      if [[ -n "$_pw_hash2" ]]; then
+      sleep 2
+      local _bp_recheck
+      _bp_recheck=$(detect_xui_basepath 3)
+      if [[ "$_bp_recheck" != "$_basepath" && -n "$_bp_recheck" ]]; then
+        printf "  ${YE}⚠ basepath เปลี่ยน: %s → %s${RS}\n" "$_basepath" "$_bp_recheck"
+        _basepath="$_bp_recheck"
+        echo "$_basepath" > /etc/chaiya/xui-basepath.conf
+        _bp_trim=$(echo "$_basepath" | sed 's|/$||')
+      fi
+      # re-set credential ใน db อีกครั้ง (x-ui อาจ overwrite ตอน start)
+      if [[ -n "$_pw_hash" ]]; then
         sqlite3 "$_xui_db" \
-          "UPDATE users SET username='${_u}', password='${_pw_hash2}' WHERE id=1;" 2>/dev/null || true
-        printf "  ${YE}⚠ Force-set credential ใหม่ → restart x-ui${RS}\n"
+          "UPDATE users SET username='${_u}', password='${_pw_hash}' WHERE id=1;" 2>/dev/null || true
+        sqlite3 "$_xui_db" \
+          "INSERT OR REPLACE INTO settings(key,value) VALUES('webPort','2053');" 2>/dev/null || true
+        printf "  ${YE}⚠ Re-set credential ลง db${RS}\n"
       fi
       systemctl start x-ui 2>/dev/null || true
       sleep 5
