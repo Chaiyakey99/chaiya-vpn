@@ -1379,8 +1379,17 @@ async function restartUdpgw() {
 
 async function genToken() {
   const r = await api('POST', '/api/token/regenerate', {});
-  if (r.token) { TOKEN = r.token; toast('Token ใหม่: ' + r.token.slice(0,8)+'...'); }
-  else toast('สร้าง Token ล้มเหลว', false);
+  if (r.ok && r.token) {
+    TOKEN = r.token;
+    toast('\u2705 Token \u0e43\u0e2b\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08 \u0e01\u0e33\u0e25\u0e31\u0e07 reload...');
+    setTimeout(() => {
+      const u = new URL(location.href);
+      u.searchParams.set('token', r.token);
+      location.replace(u.toString());
+    }, 1200);
+  } else {
+    toast('\u274c \u0e2a\u0e23\u0e49\u0e32\u0e07 Token \u0e25\u0e49\u0e21\u0e40\u0e2b\u0e25\u0e27: ' + (r.error || 'unknown'), false);
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -2407,6 +2416,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 lines = [l for l in open(db) if not l.startswith(user+" ")]
                 with open(db,"w") as f: f.writelines(lines)
             return self.send_json(200, {"ok":True, "result":f"user_deleted:{user}"})
+
+        # ── Token regenerate ──
+        elif p == "/api/token/regenerate":
+            global TOKEN
+            import secrets, re as _re
+            new_tok = secrets.token_hex(16)
+            # บันทึกลงไฟล์
+            with open(TOKEN_FILE, "w") as f: f.write(new_tok)
+            # อัพเดต global TOKEN ใน process ปัจจุบัน
+            TOKEN = new_tok
+            # ฝัง token ใหม่เข้า sshws.html (แทนที่ _baked)
+            html_path = "/var/www/chaiya/sshws.html"
+            try:
+                with open(html_path, "r", errors="replace") as f: h = f.read()
+                h2 = _re.sub(r"(const _baked\s*=\s*')[^']*(')", r"\g<1>" + new_tok + r"\g<2>", h)
+                with open(html_path, "w") as f: f.write(h2)
+            except Exception: pass
+            return self.send_json(200, {"ok": True, "token": new_tok})
+
         else:
             return self.send_json(404, {"error":"not_found"})
 
