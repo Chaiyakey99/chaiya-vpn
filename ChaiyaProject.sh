@@ -4235,13 +4235,21 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
   if [[ -z "$_basepath" || "$_basepath" == "/" ]]; then
     printf "  ${YE}⚠ basepath ใน db ว่าง — หยุด x-ui แล้ว set ใหม่${RS}\n"
     systemctl stop x-ui 2>/dev/null || true
-    sleep 1
+    sleep 2
     if command -v sqlite3 &>/dev/null && [[ -f "$_xui_db" ]]; then
       sqlite3 "$_xui_db" \
         "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','${_gen_bp}');" 2>/dev/null || true
     fi
     systemctl start x-ui 2>/dev/null || true
-    sleep 3
+    # รอให้ x-ui พร้อมจริงๆ หลัง restart
+    local _bp_trim2; _bp_trim2=$(echo "$_gen_bp" | sed 's|/$||')
+    for _wi in $(seq 1 20); do
+      curl -s  --max-time 2 "http://127.0.0.1:${_panel_port}${_bp_trim2}/"  &>/dev/null && break
+      curl -sk --max-time 2 "https://127.0.0.1:${_panel_port}${_bp_trim2}/" &>/dev/null && break
+      curl -s  --max-time 2 "http://127.0.0.1:${_panel_port}/"              &>/dev/null && break
+      curl -sk --max-time 2 "https://127.0.0.1:${_panel_port}/"             &>/dev/null && break
+      sleep 2
+    done
     _basepath=$(detect_xui_basepath)
     [[ -z "$_basepath" || "$_basepath" == "/" ]] && _basepath="$_gen_bp"
   fi
