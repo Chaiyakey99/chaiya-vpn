@@ -643,16 +643,16 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
     --green:#4dffa0;--cyan:#80ffdd;--purple:#b8a0ff;
     --yellow:#ffe680;--red:#ff6b8a;--orange:#ffb347;
     --text:#c8ddd0;--muted:#7a9aaa;
-    --rgb1:#ff006e;--rgb2:#ff8c00;--rgb3:#ffe000;
-    --rgb4:#00ff50;--rgb5:#00dcff;--rgb6:#b400ff;
+    --rgb1:#a78bfa;--rgb2:#818cf8;--rgb3:#67e8f9;
+    --rgb4:#6ee7b7;--rgb5:#93c5fd;--rgb6:#c4b5fd;
   }
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'Exo 2',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
   body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(77,255,160,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(77,255,160,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
   body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.05) 2px,rgba(0,0,0,.05) 4px);pointer-events:none;z-index:0;}
 
-  .rgb-text{background:linear-gradient(90deg,var(--rgb1),var(--rgb2),var(--rgb3),var(--rgb4),var(--rgb5),var(--rgb6),var(--rgb1));background-size:200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:rgbshift 4s linear infinite;}
-  @keyframes rgbshift{0%{background-position:0%}100%{background-position:200%}}
+  .rgb-text{background:linear-gradient(90deg,var(--rgb1),var(--rgb2),var(--rgb3),var(--rgb4),var(--rgb5),var(--rgb6),var(--rgb1));background-size:300%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:rgbshift 8s ease-in-out infinite;}
+  @keyframes rgbshift{0%{background-position:0%}50%{background-position:150%}100%{background-position:300%}}
 
   .wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 14px 48px;}
 
@@ -697,7 +697,8 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   /* ─ Card ─ */
   .card{background:var(--panel);border:1px solid var(--border);border-radius:11px;margin-bottom:14px;overflow:hidden;}
   .card-head{display:flex;align-items:center;justify-content:space-between;padding:11px 15px;border-bottom:1px solid var(--border);background:var(--bg3);}
-  .card-title{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.85rem;letter-spacing:2px;text-transform:uppercase;color:var(--cyan);display:flex;align-items:center;gap:7px;}
+  .card-title{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.85rem;letter-spacing:2px;text-transform:uppercase;display:flex;align-items:center;gap:7px;color:var(--cyan);}
+  .rgb-label{background:linear-gradient(90deg,var(--rgb1),var(--rgb2),var(--rgb3),var(--rgb4),var(--rgb5),var(--rgb6),var(--rgb1));background-size:300%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:rgbshift 8s ease-in-out infinite;}
   .card-body{padding:14px;}
 
   /* ─ Service rows ─ */
@@ -776,8 +777,8 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   .modal{background:var(--panel);border:1px solid var(--border2);border-radius:13px;width:100%;max-width:460px;animation:mIn .22s ease;}
   @keyframes mIn{from{opacity:0;transform:scale(.92) translateY(18px)}to{opacity:1;transform:none}}
   .modal-head{display:flex;justify-content:space-between;align-items:center;padding:13px 15px;border-bottom:1px solid var(--border);font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.9rem;letter-spacing:2px;color:var(--cyan);}
-  .modal-x{background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;padding:2px 6px;border-radius:4px;}
-  .modal-x:hover{color:var(--red);}
+  .modal-x{background:none;border:none;color:var(--muted);-webkit-text-fill-color:var(--muted);font-size:1rem;cursor:pointer;padding:2px 6px;border-radius:4px;}
+  .modal-x:hover{color:var(--red);-webkit-text-fill-color:var(--red);}
   .modal-body{padding:14px;}
 
   /* ─ Toast ─ */
@@ -907,7 +908,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <div id="page-dashboard" class="page active">
   <div class="card">
     <div class="card-head">
-      <div class="card-title">📊 สถานะ Services</div>
+      <div class="card-title">📊 <span class="rgb-label">สถานะ Services</span></div>
       <button class="btn btn-c btn-sm" onclick="loadDashboard()">🔄 Refresh</button>
     </div>
     <div class="card-body">
@@ -928,7 +929,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   </div>
 
   <div class="card">
-    <div class="card-head"><div class="card-title">🔗 Connections per Port</div></div>
+    <div class="card-head"><div class="card-title">🔗 <span class="rgb-label">Connections per Port</span></div></div>
     <div class="card-body" id="conn-bars-wrap">
       <div class="bar-wrap"><div class="bar-lbl"><span>Port 80 (WS Tunnel)</span><span style="display:flex;align-items:center;gap:4px"><span id="b80">0</span><span id="bl80" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf80" style="width:0%"></div></div></div>
       <div class="bar-wrap"><div class="bar-lbl"><span>Port 143 (Dropbear #1)</span><span style="display:flex;align-items:center;gap:4px"><span id="b143">0</span><span id="bl143" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf143" style="width:0%"></div></div></div>
@@ -942,7 +943,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!-- ═══ USERS ═══ -->
 <div id="page-users" class="page">
   <div class="card">
-    <div class="card-head"><div class="card-title">➕ เพิ่ม SSH User</div></div>
+    <div class="card-head"><div class="card-title">➕ <span class="rgb-label">เพิ่ม SSH User</span></div></div>
     <div class="card-body">
       <div id="alert-create" class="alert"></div>
       <div class="form-grid">
@@ -963,14 +964,13 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
       </div>
       <div class="btn-row" style="margin-top:.6rem">
         <button class="btn btn-g" onclick="createUserAndLink()">➕ สร้าง User</button>
-        <button class="btn btn-p" onclick="openModal('modal-trial')">🎁 Trial</button>
       </div>
       <div class="imp-result" id="cu-link-result"></div>
     </div>
   </div>
   <div class="card">
     <div class="card-head">
-      <div class="card-title">📋 รายชื่อ Users</div>
+      <div class="card-title">📋 <span class="rgb-label">รายชื่อ Users</span></div>
       <div class="inp-row" style="max-width:180px">
         <input type="text" id="search-u" placeholder="ค้นหา..." oninput="filterUsers()" style="padding:4px 9px;font-size:.72rem">
       </div>
@@ -990,14 +990,14 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <div id="page-online" class="page">
   <div class="card">
     <div class="card-head">
-      <div class="card-title">👤 Online Users</div>
+      <div class="card-title">👤 <span class="rgb-label">Online Users</span></div>
       <button class="btn btn-c btn-sm" onclick="loadOnline()">🔄 Refresh</button>
     </div>
     <div class="card-body" id="online-list"><div style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</div></div>
   </div>
   <div class="card">
     <div class="card-head">
-      <div class="card-title">📶 Bandwidth</div>
+      <div class="card-title">📶 <span class="rgb-label">Bandwidth</span></div>
       <span class="traf-total" id="traf-total">— MB</span>
     </div>
     <div class="card-body">
@@ -1011,7 +1011,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <div id="page-banned" class="page">
   <div class="card">
     <div class="card-head">
-      <div class="card-title">🔒 Banned IPs / Users</div>
+      <div class="card-title">🔒 <span class="rgb-label">Banned IPs / Users</span></div>
       <button class="btn btn-c btn-sm" onclick="loadBanned()">🔄 Refresh</button>
     </div>
     <div class="card-body" id="banned-list"><div style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</div></div>
@@ -1021,14 +1021,14 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!-- ═══ BACKUP ═══ -->
 <div id="page-backup" class="page">
   <div class="card">
-    <div class="card-head"><div class="card-title">💾 Backup Users</div></div>
+    <div class="card-head"><div class="card-title">💾 <span class="rgb-label">Backup Users</span></div></div>
     <div class="card-body">
       <p style="font-size:.82rem;color:var(--muted);margin-bottom:.8rem">Export ข้อมูล users เป็น JSON</p>
       <button class="btn btn-g" onclick="backupUsers()">⬇️ Download Backup</button>
     </div>
   </div>
   <div class="card">
-    <div class="card-head"><div class="card-title">📥 Import Users</div></div>
+    <div class="card-head"><div class="card-title">📥 <span class="rgb-label">Import Users</span></div></div>
     <div class="card-body">
       <div id="alert-import" class="alert"></div>
       <div class="form-g" style="margin-bottom:.8rem"><label>เลือกไฟล์ JSON</label><input type="file" id="import-file" accept=".json" style="color:var(--text)"></div>
@@ -1041,7 +1041,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!-- ═══ SERVICES ═══ -->
 <div id="page-services" class="page">
   <div class="card">
-    <div class="card-head"><div class="card-title">⚙️ Service Control</div></div>
+    <div class="card-head"><div class="card-title">⚙️ <span class="rgb-label">Service Control</span></div></div>
     <div class="card-body">
       <div class="svc-list">
         <div class="svc-row svc-ctrl"><div style="display:flex;gap:.6rem;align-items:center"><span class="svc-ico">🚇</span><div><div class="svc-desc">chaiya-sshws</div><div id="s2-sshws" class="svc-name" style="font-size:.82rem">-</div></div></div><div class="btn-row" style="margin:0"><button class="btn btn-g btn-sm" onclick="svc1('chaiya-sshws','start')">▶</button><button class="btn btn-r btn-sm" onclick="svc1('chaiya-sshws','stop')">⏹</button><button class="btn btn-c btn-sm" onclick="svc1('chaiya-sshws','restart')">🔄</button></div></div>
@@ -1063,7 +1063,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!-- Modals -->
 <div id="modal-renew" class="modal-bg">
   <div class="modal">
-    <div class="modal-head">🔄 ต่ออายุ User <button class="modal-x" onclick="closeModal('modal-renew')">✕</button></div>
+    <div class="modal-head"><span class="rgb-label">🔄 ต่ออายุ User</span> <button class="modal-x" onclick="closeModal('modal-renew')">✕</button></div>
     <div class="modal-body">
       <input type="hidden" id="renew-username">
       <div class="form-grid">
@@ -1079,27 +1079,12 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 </div>
 <div id="modal-del" class="modal-bg">
   <div class="modal">
-    <div class="modal-head" style="color:var(--red)">🗑️ ยืนยันลบ <button class="modal-x" onclick="closeModal('modal-del')">✕</button></div>
+    <div class="modal-head"><span class="rgb-label">🗑️ ยืนยันลบ</span> <button class="modal-x" onclick="closeModal('modal-del')">✕</button></div>
     <div class="modal-body">
       <p style="margin:.5rem 0 1rem;color:var(--muted)">ต้องการลบ <strong id="del-username" style="color:var(--red)"></strong>?</p>
       <div class="btn-row">
         <button class="btn btn-r" onclick="doDelete()">🗑️ ลบเลย</button>
         <button class="btn btn-c" onclick="closeModal('modal-del')">ยกเลิก</button>
-      </div>
-    </div>
-  </div>
-</div>
-<div id="modal-trial" class="modal-bg">
-  <div class="modal">
-    <div class="modal-head">🎁 Trial User <button class="modal-x" onclick="closeModal('modal-trial')">✕</button></div>
-    <div class="modal-body">
-      <div class="form-grid">
-        <div class="form-g"><label>Username</label><input type="text" id="trial-user" placeholder="trial_xxx"></div>
-        <div class="form-g"><label>ชั่วโมง</label><input type="number" id="trial-hours" value="3" min="1"></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-g" onclick="doTrial()">✅ สร้าง Trial</button>
-        <button class="btn btn-r" onclick="closeModal('modal-trial')">ยกเลิก</button>
       </div>
     </div>
   </div>
@@ -1364,12 +1349,12 @@ async function genToken() {
 const PROS = {
   dtac: {name:'DTAC GAMING', proxy:'104.18.63.124:80',
     payload:'CONNECT / HTTP/1.1[crlf]Host: dl.dir.freefiremobile.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]User-Agent: [ua][crlf][crlf]',
-    darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80},
+    darkProxy:location.hostname, darkProxyPort:80},
   true: {name:'TRUE TWITTER', proxy:'104.18.39.24:80',
     payload:'POST / HTTP/1.1[crlf]Host: help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]',
-    darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80}
+    darkProxy:location.hostname, darkProxyPort:80}
 };
-const NPV_HOST='www.project.godvpn.shop', NPV_PORT=80;
+const NPV_HOST=location.hostname, NPV_PORT=80;
 let _curPro='dtac', _curApp='npv';
 
 function selPro(p) {
@@ -1541,13 +1526,6 @@ async function kickUser(u) {
   toast(r.ok?`Kick ${u} แล้ว`:(r.error||'ล้มเหลว'), r.ok);
 }
 
-async function doTrial() {
-  const user=(document.getElementById('trial-user').value.trim())||('trial_'+Math.random().toString(36).slice(2,6));
-  const hrs=parseInt(document.getElementById('trial-hours').value||3);
-  const r=await api('POST','/api/create',{user,pass:Math.random().toString(36).slice(2,10),exp_days:Math.max(1,Math.ceil(hrs/24)),ip_limit:1});
-  toast(r.ok?`Trial "${user}" ${hrs}h สร้างแล้ว`:(r.error||'ล้มเหลว'), r.ok);
-  closeModal('modal-trial'); if(r.ok) loadUsers();
-}
 
 // ══════════════════════════════════════════════
 // Online
@@ -1732,9 +1710,8 @@ setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='pa
   btn.onmouseleave=function(){btn.style.boxShadow='0 0 14px rgba(128,255,221,.22)';btn.style.borderColor='rgba(128,255,221,.4)';};
   document.body.appendChild(btn);
   var playing=false;
-  function tryPlay(){audio.play().then(function(){playing=true;btn.innerHTML='⏸';}).catch(function(){});}
+  function tryPlay(){audio.play().then(function(){playing=true;btn.innerHTML='⏸';}).catch(function(){playing=false;btn.innerHTML='🎵';});}
   btn.addEventListener('click',function(e){e.stopPropagation();if(playing){audio.pause();playing=false;btn.innerHTML='🎵';}else{tryPlay();}});
-  tryPlay();
   function firstTouch(e){if(e.target===btn)return;tryPlay();document.removeEventListener('click',firstTouch);document.removeEventListener('touchend',firstTouch);}
   document.addEventListener('click',firstTouch);
   document.addEventListener('touchend',firstTouch);
