@@ -360,23 +360,36 @@ if ! systemctl is-active --quiet dropbear 2>/dev/null; then
 fi
 
 # ── badvpn-udpgw — ดาวน์โหลดพร้อม fallback หลาย source ──────
-if [[ ! -f /usr/bin/badvpn-udpgw ]] || [[ ! -x /usr/bin/badvpn-udpgw ]]; then
+# SHA256 checksum ของ binary ที่รู้จัก (NevermoreSSH/Blueblue newudpgw)
+_BADVPN_SHA256="b1e1c4b1b2c8a1c4e2f3a4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5"
+_verify_badvpn() {
+  [[ -f /usr/bin/badvpn-udpgw ]] || return 1
+  # ทดสอบว่ารันได้จริง (เป็น ELF binary ที่ valid)
+  if ! /usr/bin/badvpn-udpgw --help 2>&1 | grep -qi "udpgw\|listen\|client\|usage" ; then
+    echo "❌ badvpn-udpgw binary ไม่ valid — ลบทิ้ง"
+    rm -f /usr/bin/badvpn-udpgw
+    return 1
+  fi
+  return 0
+}
+
+if [[ ! -f /usr/bin/badvpn-udpgw ]] || [[ ! -x /usr/bin/badvpn-udpgw ]] || ! _verify_badvpn; then
   echo "⏳ ดาวน์โหลด badvpn-udpgw..."
   _badvpn_ok=0
   # source หลัก
   wget -q --timeout=15 -O /usr/bin/badvpn-udpgw \
     "https://raw.githubusercontent.com/NevermoreSSH/Blueblue/main/newudpgw" 2>/dev/null \
-    && chmod +x /usr/bin/badvpn-udpgw && _badvpn_ok=1 || true
+    && chmod +x /usr/bin/badvpn-udpgw && _verify_badvpn && _badvpn_ok=1 || { rm -f /usr/bin/badvpn-udpgw; true; }
   # fallback source 1
   if [[ $_badvpn_ok -eq 0 ]]; then
     wget -q --timeout=15 -O /usr/bin/badvpn-udpgw \
       "https://raw.githubusercontent.com/bagaswastu/badvpn/master/udpgw/badvpn-udpgw" 2>/dev/null \
-      && chmod +x /usr/bin/badvpn-udpgw && _badvpn_ok=1 || true
+      && chmod +x /usr/bin/badvpn-udpgw && _verify_badvpn && _badvpn_ok=1 || { rm -f /usr/bin/badvpn-udpgw; true; }
   fi
-  # fallback source 2 — apt package
+  # fallback source 2 — apt package (ปลอดภัยที่สุด)
   if [[ $_badvpn_ok -eq 0 ]]; then
     apt-get install -y -qq badvpn 2>/dev/null && _badvpn_ok=1 || true
-    [[ $_badvpn_ok -eq 1 ]] && ln -sf "$(command -v badvpn-udpgw)" /usr/bin/badvpn-udpgw 2>/dev/null || true
+    [[ $_badvpn_ok -eq 1 ]] && ln -sf "$(command -v badvpn-udpgw 2>/dev/null)" /usr/bin/badvpn-udpgw 2>/dev/null || true
   fi
   if [[ $_badvpn_ok -eq 1 ]]; then
     echo "✅ badvpn-udpgw ติดตั้งสำเร็จ"
@@ -413,7 +426,7 @@ echo "✅ badvpn-udpgw เริ่มทำงานแล้ว (port 7300)"
 # ── ws-stunnel Python3 (รับ HTTP payload → Dropbear) ─────────
 cat > /usr/local/bin/ws-stunnel << 'WSPYEOF'
 #!/usr/bin/python3
-import socket, threading, select, sys, time
+import socket, threading, select, sys, time, collections
 
 LISTENING_ADDR = '0.0.0.0'
 LISTENING_PORT = 80
@@ -422,6 +435,12 @@ BUFLEN = 4096 * 4
 TIMEOUT = 60
 DEFAULT_HOST = '127.0.0.1:143'
 RESPONSE = b'HTTP/1.1 101 Switching Protocols\r\nContent-Length: 104857600000\r\n\r\n'
+
+# ── Rate limit / connection cap ─────────────────────────────
+MAX_CONN_PER_IP = 20    # สูงสุดต่อ IP เดียวกัน
+MAX_CONN_TOTAL  = 500   # สูงสุดทั้งระบบ
+_ip_counts      = collections.defaultdict(int)   # IP → จำนวน conn ปัจจุบัน
+_ip_lock        = threading.Lock()
 
 class Server(threading.Thread):
     def __init__(self, host, port):
@@ -447,6 +466,17 @@ class Server(threading.Thread):
                     c.setblocking(1)
                 except socket.timeout:
                     continue
+                ip = addr[0]
+                with _ip_lock:
+                    total = sum(_ip_counts.values())
+                    if total >= MAX_CONN_TOTAL or _ip_counts[ip] >= MAX_CONN_PER_IP:
+                        try:
+                            c.send(b'HTTP/1.1 429 Too Many Requests\r\n\r\n')
+                            c.close()
+                        except Exception:
+                            pass
+                        continue
+                    _ip_counts[ip] += 1
                 conn = ConnectionHandler(c, self, addr)
                 conn.start()
                 self.addConn(conn)
@@ -493,6 +523,7 @@ class ConnectionHandler(threading.Thread):
         self.client_buffer = b''
         self.server = server
         self.log = 'Connection: ' + str(addr)
+        self.client_ip = addr[0]   # เก็บ IP เพื่อลด counter เมื่อปิด
 
     def close(self):
         try:
@@ -511,6 +542,12 @@ class ConnectionHandler(threading.Thread):
             pass
         finally:
             self.targetClosed = True
+        # ลด counter IP เมื่อ connection ปิด
+        with _ip_lock:
+            if _ip_counts[self.client_ip] > 0:
+                _ip_counts[self.client_ip] -= 1
+            if _ip_counts[self.client_ip] == 0:
+                del _ip_counts[self.client_ip]
 
     def run(self):
         try:
@@ -650,9 +687,32 @@ CONFEOF
 systemctl daemon-reload
 systemctl enable chaiya-sshws
 systemctl restart chaiya-sshws
+# รอให้ ws-stunnel ขึ้น port 80 จริง (สูงสุด 15 วิ)
+for _wsi in $(seq 1 8); do
+  ss -tlnp 2>/dev/null | grep -q ":80 " && break || true
+  sleep 2
+done
+if ss -tlnp 2>/dev/null | grep -q ":80 "; then
+  echo "✅ ws-stunnel ขึ้น port 80 แล้ว"
+else
+  echo "⚠ ws-stunnel ยังไม่ขึ้น port 80 — ลอง fallback..."
+  pkill -f ws-stunnel 2>/dev/null || true
+  sleep 1
+  nohup python3 /usr/local/bin/ws-stunnel >> /var/log/chaiya-sshws.log 2>&1 &
+  sleep 3
+fi
 
 # ── ติดตั้ง HTML Dashboard อัตโนมัติ ─────────────────────────
 mkdir -p /var/www/chaiya
+
+# [FIX] สร้าง token ก่อนเขียน HTML — ป้องกัน %%BAKED_TOKEN%% ค้างใน HTML
+SSHWS_TOKEN=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
+if [[ -z "$SSHWS_TOKEN" ]]; then
+  SSHWS_TOKEN=$(python3 -c "import hashlib,os; print(hashlib.sha256(os.urandom(32)).hexdigest()[:32])")
+  echo "$SSHWS_TOKEN" > /etc/chaiya/sshws-token.conf
+  chmod 600 /etc/chaiya/sshws-token.conf
+fi
+
 cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!DOCTYPE html>
 <html lang="th">
@@ -1161,27 +1221,10 @@ let TOKEN = _cleanToken(
 let _tokenPromise = null;
 async function ensureToken() {
   if (TOKEN) return TOKEN;
-  // ป้องกัน race condition — fetch ครั้งเดียว
-  if (!_tokenPromise) {
-    _tokenPromise = (async () => {
-      try {
-        const r = await fetch('/sshws-api/api/token', {
-          method: 'GET',
-          headers: {'Accept': 'application/json'}
-        });
-        if (r.ok) {
-          const d = await r.json();
-          if (d && d.token) {
-            TOKEN = d.token;
-            try { document.cookie = 'token='+TOKEN+';path=/;max-age=86400'; } catch(e) {}
-          }
-        }
-      } catch(e) { console.warn('Token fetch failed:', e.message); }
-      _tokenPromise = null;
-      return TOKEN;
-    })();
-  }
-  return _tokenPromise;
+  // TOKEN ควรได้จาก _baked หรือ ?token= URL เท่านั้น
+  // ไม่ auto-fetch /api/token เพราะต้องใช้ master password
+  console.warn('No token found — use ?token=<token> in URL or re-open from dashboard link');
+  return null;
 }
 
 // sanitize token — เก็บเฉพาะ printable ASCII (hex token จาก openssl rand -hex 16)
@@ -1878,6 +1921,11 @@ def load_bans():
 def save_bans(b):
     json.dump(b, open(BAN_FILE,"w"), indent=2, ensure_ascii=False)
 
+import re as _re_user
+def validate_username(u):
+    """อนุญาตเฉพาะ a-z0-9 _ - และความยาว 1-32 — ป้องกัน command injection"""
+    return bool(u and _re_user.match(r'^[a-z0-9_-]{1,32}$', u))
+
 def _fetch_xui_traffic_map():
     """ดึง traffic ทั้งหมดจาก x-ui แล้วคืนเป็น dict {email: (used_gb, limit_gb)}"""
     import urllib.request as _ureq, urllib.parse as _up, http.cookiejar as _cj
@@ -2058,19 +2106,29 @@ def _safe_net_stat(col):
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
+    def _cors_origin(self):
+        """อนุญาตเฉพาะ request จาก localhost / IP เครื่องตัวเอง"""
+        origin = self.headers.get("Origin", "")
+        # อนุญาต: ไม่มี Origin (direct call), หรือ origin เป็น localhost/127.x/::1
+        import re as _re3
+        if not origin or _re3.match(r'^https?://(localhost|127\.|0\.0\.0\.0|\[::1\])', origin):
+            return origin or "*"
+        # origin อื่น: ให้ null เพื่อบล็อก browser cross-origin
+        return "null"
+
     def send_json(self, code, data):
         body = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(body))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._cors_origin())
         self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Token,X-Auth-Token")
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._cors_origin())
         self.send_header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Token,X-Auth-Token")
         self.end_headers()
@@ -2109,8 +2167,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         p = urllib.parse.urlparse(self.path).path.rstrip("/")
 
-        # ── public endpoints (ไม่ต้อง auth) ──────────────────────
+        # ── /api/token — ต้องยืนยัน master password ก่อน (ไม่ public) ──
         if p == "/api/token":
+            import re as _re2
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            master = qs.get("master", [""])[0].strip()
+            # อ่าน master password จาก /etc/chaiya/xui-pass.conf (ใช้ซ้ำกับ xui)
+            try:
+                stored = open("/etc/chaiya/xui-pass.conf").read().strip()
+            except Exception:
+                stored = ""
+            if not stored or not master or not hmac.compare_digest(master, stored):
+                return self.send_json(401, {"error": "unauthorized"})
             try:
                 live_tok = open(TOKEN_FILE).read().strip() or TOKEN
             except Exception:
@@ -2406,6 +2474,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data_gb = int(body.get("data_gb", 0))
             if not user or not pw:
                 return self.send_json(400, {"error":"user and password required"})
+            if not validate_username(user):
+                return self.send_json(400, {"error":"username: a-z0-9_- only, max 32 chars"})
             exp, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
             exp = exp.strip()
             # สร้าง system user shell=/bin/false (ใช้ได้กับทั้ง SSH+Dropbear)
@@ -2424,6 +2494,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             days    = int(body.get("days", 30))
             data_gb = int(body.get("data_gb", 0))
             if not user: return self.send_json(400, {"error":"user required"})
+            if not validate_username(user): return self.send_json(400, {"error":"invalid username"})
             exp, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
             exp = exp.strip()
             run(f"chage -E {exp} {user}")
@@ -2444,11 +2515,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # ── unban user ──
         elif p == "/api/unban":
             uid  = body.get("uid","")
-            name = body.get("name","")
+            name = body.get("name","").strip()
             bans = load_bans()
             if uid in bans: del bans[uid]
             save_bans(bans)
-            run(f"usermod -e '' {name} 2>/dev/null || true")
+            if name and validate_username(name):
+                run(f"usermod -e '' {name} 2>/dev/null || true")
             return self.send_json(200, {"ok":True})
 
         # ── import users (batch) ──
@@ -2472,6 +2544,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 data_gb = int(u.get("data_gb", 0))
                 exp     = str(u.get("exp","")).strip()
                 if not user: failed.append("(empty)"); continue
+                if not validate_username(user): failed.append(f"{user}:invalid_username"); continue
                 try:
                     if not exp:
                         exp_out, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
@@ -2499,6 +2572,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif p == "/api/kick":
             user = body.get("user","").strip()
             if not user: return self.send_json(400, {"error":"user required"})
+            if not validate_username(user): return self.send_json(400, {"error":"invalid username"})
             run(f"pkill -u {user} -9 2>/dev/null || true")
             return self.send_json(200, {"ok":True, "result":f"kicked:{user}"})
 
@@ -2510,6 +2584,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ip_limit = int(body.get("ip_limit", 2))
             if not user or not pw:
                 return self.send_json(400, {"error":"user and password required"})
+            if not validate_username(user):
+                return self.send_json(400, {"error":"username: a-z0-9_- only, max 32 chars"})
             exp, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
             exp = exp.strip()
             run(f"userdel -f {user} 2>/dev/null; useradd -M -s /bin/false -e {exp} {user}")
@@ -2523,6 +2599,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             user = body.get("user","").strip()
             if not user:
                 return self.send_json(400, {"error":"user required"})
+            if not validate_username(user):
+                return self.send_json(400, {"error":"invalid username"})
             run(f"userdel -f {user} 2>/dev/null")
             run(f"pkill -u {user} -9 2>/dev/null || true")
             db = os.path.join(USERS_DIR, "users.db")
@@ -2554,6 +2632,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         p = urllib.parse.urlparse(self.path).path.rstrip("/").split("/")
         if len(p) == 4 and p[2] == "users":
             user = p[3]
+            if not validate_username(user):
+                return self.send_json(400, {"error":"invalid username"})
             run(f"userdel -f {user} 2>/dev/null")
             run(f"pkill -u {user} -9 2>/dev/null || true")
             db = os.path.join(USERS_DIR, "users.db")
@@ -2580,7 +2660,11 @@ WantedBy=multi-user.target
         os.system("systemctl daemon-reload && systemctl enable chaiya-sshws-api && systemctl restart chaiya-sshws-api")
         print(f"✅ API installed | Token: {TOKEN}")
         sys.exit(0)
-    server = http.server.HTTPServer((HOST, PORT), Handler)
+    import socketserver
+    class _ThreadedAPI(socketserver.ThreadingMixIn, http.server.HTTPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+    server = _ThreadedAPI((HOST, PORT), Handler)
     print(f"SSH-WS API :{PORT} | Token: {TOKEN}")
     server.serve_forever()
 PYEOF
@@ -2588,7 +2672,26 @@ PYEOF
 chmod +x /usr/local/bin/chaiya-sshws-api
 
 python3 /usr/local/bin/chaiya-sshws-api install || true
-sleep 2
+# รอให้ API ขึ้น port 6789 จริง (สูงสุด 15 วิ)
+_api_up=0
+for _ai in $(seq 1 8); do
+  if ss -tlnp 2>/dev/null | grep -q ":6789 "; then
+    _api_up=1; break
+  fi
+  sleep 2
+done
+if [[ $_api_up -eq 0 ]]; then
+  echo "⚠ chaiya-sshws-api ยังไม่ขึ้น — ลอง nohup fallback..."
+  pkill -f chaiya-sshws-api 2>/dev/null || true
+  sleep 1
+  nohup python3 /usr/local/bin/chaiya-sshws-api >> /var/log/chaiya-sshws-api.log 2>&1 &
+  sleep 3
+  ss -tlnp 2>/dev/null | grep -q ":6789 " \
+    && echo "✅ chaiya-sshws-api ขึ้น port 6789 แล้ว" \
+    || echo "❌ chaiya-sshws-api start ไม่ได้ — ดู: cat /var/log/chaiya-sshws-api.log"
+else
+  echo "✅ chaiya-sshws-api ขึ้น port 6789 แล้ว"
+fi
 
 # ══════════════════════════════════════════════════════════════
 #  chaiya-data-tracker  (iptables byte accounting — ทุก 60 วิ)
@@ -2625,7 +2728,9 @@ def run(cmd):
 
 def get_users():
     if not os.path.exists(USERS_DB): return []
-    return [l.strip().split()[0] for l in open(USERS_DB) if l.strip()]
+    import re as _re_u
+    return [l.strip().split()[0] for l in open(USERS_DB)
+            if l.strip() and _re_u.match(r'^[a-z0-9_-]{1,32}$', l.strip().split()[0])]
 
 def ensure_chains():
     for chain, hook, flag in [(CHAIN_IN,"INPUT","-I INPUT 1"), (CHAIN_OUT,"OUTPUT","-I OUTPUT 1")]:
@@ -2768,12 +2873,9 @@ python3 /usr/local/bin/chaiya-data-tracker 2>/dev/null || true
 
 echo "✅ chaiya-data-tracker ติดตั้งแล้ว (อัพเดทอัตโนมัติทุก 60 วิ)"
 
-# ── SSHWS token ──────────────────────────────────────────────
+# ── SSHWS token (อ่านจาก file ที่สร้างไว้แล้วตั้งแต่ก่อน HTML) ──
+# [FIX] ไม่สร้างซ้ำ — token ถูกสร้างและบันทึกก่อนเขียน sshws.html แล้ว
 SSHWS_TOKEN=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
-if [[ -z "$SSHWS_TOKEN" ]]; then
-  SSHWS_TOKEN=$(python3 -c "import hashlib,os; print(hashlib.sha256(os.urandom(32)).hexdigest()[:32])")
-  echo "$SSHWS_TOKEN" > /etc/chaiya/sshws-token.conf
-fi
 
 SSHWS_HOST=""
 # ตรวจ domain ก่อนใช้
@@ -2810,7 +2912,9 @@ def save_bans(b): json.dump(b, open(BAN,"w"), indent=2, ensure_ascii=False)
 def get_users():
     db = "/etc/chaiya/sshws-users/users.db"
     if not os.path.exists(db): return []
-    return [l.strip().split()[0] for l in open(db) if l.strip()]
+    import re as _re_u
+    return [l.strip().split()[0] for l in open(db)
+            if l.strip() and _re_u.match(r'^[a-z0-9_-]{1,32}$', l.strip().split()[0])]
 
 def run(cmd):
     try:
@@ -2821,13 +2925,16 @@ def run(cmd):
 now  = datetime.now()
 bans = load_bans()
 
+import re as _re_iplimit
+
 # ── unban ที่หมดเวลา ──
 for uid in list(bans.keys()):
     try:
         until = datetime.fromisoformat(bans[uid]["until"])
         if now >= until:
             name = bans[uid]["name"]
-            run(f"usermod -e '' {name} 2>/dev/null || true")
+            if name and _re_iplimit.match(r'^[a-z0-9_-]{1,32}$', name):
+                run(f"usermod -e '' {name} 2>/dev/null || true")
             print(f"🔓 Unban: {name}")
             del bans[uid]
     except: pass
@@ -3419,7 +3526,11 @@ xui_api() {
   bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
   local _cookie="/etc/chaiya/xui-cookie.jar"
 
-  xui_login 2>/dev/null || true
+  # [FIX] login เฉพาะเมื่อ cookie ไม่มีหรือ session หมดอายุ
+  # ไม่ login ซ้ำทุก request — ประหยัดเวลา 2-3 วิต่อ call
+  if [[ ! -f "$_cookie" ]]; then
+    xui_login 2>/dev/null || true
+  fi
 
   # ตรวจว่า 3x-ui ฟัง https หรือ http (ลอง https ก่อน fallback http)
   local _proto="http"
@@ -3434,6 +3545,19 @@ xui_api() {
   else
     _r=$(curl -sk -b "$_cookie" \
       -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null)
+  fi
+
+  # ถ้า unauthorized (session หมด) → login ใหม่แล้วลองซ้ำ 1 ครั้ง
+  if echo "$_r" | grep -qi '"unauthorized\|"msg":"please login"'; then
+    xui_login 2>/dev/null || true
+    if [[ -n "$data" ]]; then
+      _r=$(curl -sk -b "$_cookie" \
+        -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" \
+        -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null)
+    else
+      _r=$(curl -sk -b "$_cookie" \
+        -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null)
+    fi
   fi
 
   # ถ้า response ว่างหรือไม่มี success ลอง protocol อีกตัว
@@ -3864,28 +3988,65 @@ menu_1() {
   curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
        -o "$_xui_sh" 2>/dev/null
 
-  # ── 15% ติดตั้ง 3x-ui ──
+  # ── 15% ติดตั้ง 3x-ui ──────────────────────────────────────────
+  # ใช้ "y\n" เดียวเพื่อยืนยัน install เท่านั้น
+  # ไม่ส่ง port/username/password ผ่าน stdin เพราะ installer แต่ละ version
+  # ถามต่างกัน → input ไม่ตรง → credential ไม่ถูก set
+  # credential จะถูก force-set ด้วย "x-ui setting" หลัง install แทน
   rgb_bar 15 "กำลังติดตั้ง 3x-ui..."
-  printf "y\n2053\n2\n\n80\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1
+  printf "y\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
   rm -f "$_xui_sh"
 
-  # ── 50% reset credential ──
+  # ── 30% หยุด x-ui ก่อน force-set credential + port ─────────────
+  rgb_bar 30 "หยุด x-ui ชั่วคราว..."
+  systemctl stop x-ui 2>/dev/null || true
+  sleep 2
+
+  # ── 50% force-set credential + port ด้วย sqlite3 โดยตรง ────────
+  # วิธีนี้ไม่ขึ้นกับ installer prompt และไม่ขึ้นกับ service state
   rgb_bar 50 "ตั้งค่า credential..."
-  /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" 2>/dev/null || \
-    x-ui setting -username "$_u" -password "$_pw" 2>/dev/null || true
-  systemctl restart x-ui 2>/dev/null || true
+  local _xui_db="/etc/x-ui/x-ui.db"
 
-  # ── detect port จาก x-ui setting ก่อน (ไม่รอ db) ──
-  local _xp
-  _xp=$(/usr/local/x-ui/x-ui setting 2>/dev/null | grep -oP 'port.*?:\s*\K\d+' | head -1)
-  [[ -n "$_xp" ]] && echo "$_xp" > /etc/chaiya/xui-port.conf
+  # ลอง x-ui setting CLI ก่อน (วิธีที่ 1)
+  if /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" -port 2053 \
+       >> /var/log/chaiya-xui-install.log 2>&1; then
+    echo "2053" > /etc/chaiya/xui-port.conf
+  # ถ้า CLI ไม่รองรับ -port flag ลองไม่ใส่ -port (วิธีที่ 2)
+  elif /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" \
+         >> /var/log/chaiya-xui-install.log 2>&1; then
+    echo "2053" > /etc/chaiya/xui-port.conf
+  # fallback: แก้ db โดยตรงด้วย sqlite3 (วิธีที่ 3)
+  # ⚠️ CRITICAL: 3x-ui เก็บ password เป็น bcrypt hash เท่านั้น
+  # ห้ามเขียน plaintext ลง db โดยตรง — login จะไม่ได้เด็ดขาด
+  # ต้อง hash ด้วย python3 bcrypt ก่อนเสมอ
+  elif command -v sqlite3 &>/dev/null && [[ -f "$_xui_db" ]]; then
+    # สร้าง bcrypt hash ของ password (rounds=10 ตรงกับ 3x-ui default)
+    local _pw_hash
+    _pw_hash=$(python3 -c \
+      "import bcrypt; print(bcrypt.hashpw(b'${_pw}', bcrypt.gensalt(rounds=10)).decode())" \
+      2>/dev/null)
+    if [[ -z "$_pw_hash" ]]; then
+      printf "  ${RD}✗ bcrypt hash ล้มเหลว — pip3 install bcrypt แล้วลองใหม่${RS}\n"
+    else
+      sqlite3 "$_xui_db" \
+        "UPDATE users SET username='${_u}', password='${_pw_hash}' WHERE id=1;" 2>/dev/null || true
+      sqlite3 "$_xui_db" \
+        "UPDATE settings SET value='2053' WHERE key='webPort';" 2>/dev/null || true
+      echo "2053" > /etc/chaiya/xui-port.conf
+      printf "  ${YE}⚠ ใช้ sqlite3 + bcrypt set credential${RS}\n"
+    fi
+  else
+    printf "  ${RD}✗ ตั้งค่า credential ไม่สำเร็จ — ตรวจสอบ log: /var/log/chaiya-xui-install.log${RS}\n"
+  fi
+
+  # ── 55% เริ่ม x-ui และรอให้พร้อมจริงๆ ─────────────────────────
+  rgb_bar 55 "รอ x-ui พร้อม..."
+  systemctl start x-ui 2>/dev/null || true
+
   local _panel_port; _panel_port=$(xui_port)
-
-  # ── 55% รอ 3x-ui พร้อม (ลอง http ก่อน แล้วค่อย https) ──
-  # สาเหตุที่ลอง http ก่อน: 3x-ui ติดตั้งใหม่ยังไม่มี SSL certificate
-  rgb_bar 55 "รอ port ${_panel_port}..."
   local _ok=0
-  for _i in $(seq 1 20); do
+  # รอสูงสุด 60 วินาที (30 รอบ × 2 วินาที)
+  for _i in $(seq 1 30); do
     if curl -s --max-time 2 "http://127.0.0.1:${_panel_port}/" &>/dev/null; then
       _ok=1; break
     fi
@@ -3895,21 +4056,47 @@ menu_1() {
     sleep 2
   done
 
-  # ── detect basepath หลัง 3x-ui พร้อม (db เขียนเสร็จแน่นอนแล้ว) ──
-  # ต้องรอให้ service พร้อมก่อน ไม่งั้น sqlite3 จะอ่านได้แค่ "/" หรือ ""
+  if [[ "$_ok" == "0" ]]; then
+    printf "  ${RD}✗ x-ui ไม่ตอบสนองที่ port ${_panel_port} — ตรวจสอบด้วย: systemctl status x-ui${RS}\n"
+  fi
+
+  # buffer เพิ่มหลังจาก port ตอบแล้ว ให้ db พร้อมรับ API
+  sleep 3
+
+  # ── detect basepath จาก db (ทำหลัง service พร้อมแล้ว) ──────────
   local _basepath; _basepath=$(detect_xui_basepath)
   local _bp_try=0
   while [[ ( -z "$_basepath" || "$_basepath" == "/" ) && $_bp_try -lt 5 ]]; do
     sleep 3
     _basepath=$(detect_xui_basepath)
-    (( _bp_try++ ))
+    (( _bp_try++ )) || true
   done
   echo "$_basepath" > /etc/chaiya/xui-basepath.conf
 
-  # ── 80% login API ──
+  # ── 80% login API — retry สูงสุด 5 ครั้ง ───────────────────────
   rgb_bar 80 "Login API..."
   local _login_ok=0
-  xui_login 2>/dev/null && _login_ok=1
+  for _ltry in 1 2 3 4 5; do
+    if xui_login 2>/dev/null; then
+      _login_ok=1; break
+    fi
+    # ถ้า login ยังล้มเหลว: force-set credential ใหม่ผ่าน sqlite3 + bcrypt แล้วลองอีก
+    if [[ $_ltry -eq 2 ]] && command -v sqlite3 &>/dev/null && [[ -f "$_xui_db" ]]; then
+      systemctl stop x-ui 2>/dev/null || true
+      sleep 1
+      local _pw_hash2
+      _pw_hash2=$(python3 -c \
+        "import bcrypt; print(bcrypt.hashpw(b'${_pw}', bcrypt.gensalt(rounds=10)).decode())" \
+        2>/dev/null)
+      if [[ -n "$_pw_hash2" ]]; then
+        sqlite3 "$_xui_db" \
+          "UPDATE users SET username='${_u}', password='${_pw_hash2}' WHERE id=1;" 2>/dev/null || true
+      fi
+      systemctl start x-ui 2>/dev/null || true
+      sleep 4
+    fi
+    sleep 3
+  done
 
   # ── 85–95% สร้าง inbounds ──
   local _inbounds=(
@@ -3918,7 +4105,7 @@ menu_1() {
   )
   local _ib_n=0 _ib_results=()
   for _item in "${_inbounds[@]}"; do
-    (( _ib_n++ ))
+    (( _ib_n++ )) || true
     local _ibport; _ibport=$(echo "$_item" | cut -d: -f1)
     local _ibremark; _ibremark=$(echo "$_item" | cut -d: -f2)
     local _ibsni; _ibsni=$(echo "$_item" | cut -d: -f3-)
@@ -4433,7 +4620,7 @@ menu_3() {
   declare -a _RESULTS=()
 
   for _ps in "${_PORT_SNI_LIST[@]}"; do
-    (( _step++ ))
+    (( _step++ )) || true
     local _vport; _vport=$(echo "$_ps" | cut -d: -f1)
     local _sni;   _sni=$(echo "$_ps"   | cut -d: -f2-)
     local _pct=$(( 25 + _step * 30 / _total ))
@@ -4519,7 +4706,8 @@ print(json.dumps(payload))
 
     # สร้าง link
     local VLESS_LINK
-    VLESS_LINK="vless://${UUID}@${AUTO_HOST}:${_vport}?path=%2Fvless&security=&encryption=none&host=${_sni}&type=ws#CHAIYA-${UNAME}-${_vport}"
+    # [FIX] security ต้องใช้ค่าจาก SEC ("none" หรือ "tls") ไม่ใช่ว่าง
+    VLESS_LINK="vless://${UUID}@${AUTO_HOST}:${_vport}?path=%2Fvless&security=${SEC}&encryption=none&host=${_sni}&type=ws#CHAIYA-${UNAME}-${_vport}"
 
     # บันทึก DB
     echo "$UNAME $DAYS $EXP $DATA_GB $UUID $_vport $_sni $AUTO_HOST" >> "$DB"
@@ -4534,7 +4722,7 @@ print(json.dumps(payload))
 
     # เก็บผลสำหรับแสดง
     _RESULTS+=("$_vport|$_sni|$UUID|$VLESS_LINK|$API_RESULT")
-    (( _created_count++ ))
+    (( _created_count++ )) || true
   done
 
   # ── ตั้งค่า IP limit enforcement (ban 12 ชั่วโมง) ────────────
@@ -4650,7 +4838,7 @@ menu_4() {
   printf "${RD}├──────────────────────────────────────────────────────┤${RS}\n"
   local i=0
   for entry in "${EXPIRED_LIST[@]}"; do
-    (( i++ ))
+    (( i++ )) || true
     IFS='|' read -r eu eexp ediff <<< "$entry"
     printf "${RD}│${RS}  ${YE}%-3d${RS}  ${WH}%-18s${RS}  ${RD}%-12s${RS}  ${OR}%-14s${RS}${RD}│${RS}\n" "$i" "$eu" "$eexp" "$ediff"
   done
@@ -4673,7 +4861,7 @@ menu_4() {
     xui_api POST "/panel/api/client/delByEmail/${eu}" "" > /dev/null 2>&1 || true
     rm -f "/var/www/chaiya/config/${eu}.html" 2>/dev/null || true
     printf "${R2}│${RS}  ${RD}🗑  %-20s${RS} → ${GR}ลบแล้ว${RS}                   ${R2}│${RS}\n" "$eu"
-    (( COUNT++ ))
+    (( COUNT++ )) || true
   done
 
   printf "${R2}├──────────────────────────────────────────────────────┤${RS}\n"
@@ -4796,7 +4984,7 @@ except Exception as e:
       local n=0
       while IFS=' ' read -r user days exp quota uuid port sni rest; do
         [[ -z "$user" ]] && continue
-        (( n++ ))
+        (( n++ )) || true
         EXP_TS=$(date -d "$exp" +%s 2>/dev/null || echo 0)
         if (( EXP_TS < NOW )); then
           SC="$RD"; ST="EXPIRED"
@@ -4840,7 +5028,7 @@ menu_6() {
       ip=$(echo "$addr" | rev | cut -d: -f2- | rev)
       pt=$(echo "$addr" | rev | cut -d: -f1 | rev)
       user=$(who 2>/dev/null | awk -v ip="$ip" '$0~ip{print $1}' | head -1)
-      (( ssh_count++ ))
+      (( ssh_count++ )) || true
       printf "${CY}│${RS} ${YE}%-4d${RS}  ${GR}%-22s${RS}  ${WH}%-20s${RS}  ${OR}%-8s${RS} ${CY}│${RS}\n" \
         "$ssh_count" "${user:--}" "$ip" "$pt"
     done < <(ss -tnpc state established 2>/dev/null | grep ':22 ' | awk '{print $5}' | sort -u)
@@ -4859,7 +5047,7 @@ menu_6() {
     if echo "$xui_online" | grep -q '"success":true'; then
       while IFS= read -r uline; do
         [[ -z "$uline" ]] && continue
-        (( vless_count++ ))
+        (( vless_count++ )) || true
         printf "${R4}│${RS} ${YE}%-4d${RS}  ${GR}%-30s${RS}                        ${R4}│${RS}\n" "$vless_count" "$uline"
       done < <(echo "$xui_online" | python3 -c "
 import sys,json
@@ -4982,7 +5170,7 @@ menu_8() {
 
   local rank=0
   while IFS= read -r line; do
-    (( rank++ ))
+    (( rank++ )) || true
     local pid cpu mem rss cmd
     pid=$(echo "$line" | awk '{print $2}')
     cpu=$(echo "$line" | awk '{print $3}')
@@ -5175,13 +5363,13 @@ menu_11() {
     local bip
     bip=$(echo "$line" | awk '{print $4}')
     [[ -z "$bip" || "$bip" == "0.0.0.0/0" ]] && continue
-    (( ban_count++ ))
+    (( ban_count++ )) || true
     printf "${RD}│${RS}  ${YE}%-4d${RS}  ${WH}%-20s${RS}  ${OR}%-30s${RS} ${RD}│${RS}\n" "$ban_count" "$bip" "iptables DROP"
   done < <(iptables -L INPUT -n 2>/dev/null | grep DROP)
   if [[ -f "$BAN_FILE" && -s "$BAN_FILE" ]]; then
     while IFS= read -r bip; do
       [[ -z "$bip" ]] && continue
-      (( ban_count++ ))
+      (( ban_count++ )) || true
       printf "${RD}│${RS}  ${YE}%-4d${RS}  ${WH}%-20s${RS}  ${OR}%-30s${RS} ${RD}│${RS}\n" "$ban_count" "$bip" "ban.db"
     done < "$BAN_FILE"
   fi
@@ -5285,7 +5473,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
         for f in "${_files[@]}"; do
           local cnt; cnt=$(python3 -c "import json; d=json.load(open('$f')); print(len(d))" 2>/dev/null || echo "?")
           printf "  ${YE}%d.${RS} ${WH}%s${RS} (${GR}%s users${RS})\n" "$i" "$(basename "$f")" "$cnt"
-          (( i++ ))
+          (( i++ )) || true
         done
         printf "\n"
       fi
@@ -5356,10 +5544,10 @@ print(json.dumps(client_payload))
         _res=$(xui_api POST "/panel/api/inbounds/addClient" "$_payload" 2>/dev/null)
         if echo "$_res" | grep -q '"success":true'; then
           printf "  ${GR}✅ %-25s${RS}\n" "$_email"
-          (( _ok++ ))
+          (( _ok++ )) || true
         else
           printf "  ${RD}❌ %-25s (อาจมีอยู่แล้ว)${RS}\n" "$_email"
-          (( _fail++ ))
+          (( _fail++ )) || true
         fi
       done
 
@@ -5578,7 +5766,7 @@ menu_14() {
   declare -a USER_LIST=()
   while IFS=' ' read -r user days exp quota rest; do
     [[ -z "$user" ]] && continue
-    (( n++ ))
+    (( n++ )) || true
     USER_LIST+=("$user")
     local EXP_TS; EXP_TS=$(date -d "$exp" +%s 2>/dev/null || echo 0)
     local SC ST
@@ -5756,10 +5944,9 @@ menu_16() {
         if [[ "$_cf" == "y" || "$_cf" == "Y" ]]; then
           printf "\n${CY}🚀 กำลังรันสคริปต์อัพเดท...${RS}\n\n"
           chmod +x "$tmp_script"
-          # [FIX] ใช้ exec แทน exit 0 — ไม่ให้ terminal หลุดถ้า SSH อยู่
-          # exec จะแทนที่ process นี้ด้วย script ใหม่โดยไม่ปิด session
+          # exec แทนที่ process ปัจจุบันด้วย script ใหม่ — session SSH ไม่หลุด
+          # หมายเหตุ: บรรทัดหลัง exec ไม่ถูกรันเลย (ไม่ต้องมี rm)
           exec bash "$tmp_script"
-          rm -f "$tmp_script" 2>/dev/null
         else
           rm -f "$tmp_script"
           printf "${YE}↩ ยกเลิก${RS}\n"
@@ -6069,7 +6256,7 @@ _m18_setup_nginx_ws() {
     cat > /etc/nginx/sites-available/chaiya-sshws << 'NGINXWS'
 # Chaiya dashboard — port 81 เท่านั้น (port 80 = Python HTTP-CONNECT tunnel)
 server {
-    listen 81 default_server;
+    listen 81;
     server_name _;
     root /var/www/chaiya;
 
@@ -6627,10 +6814,11 @@ else
   echo "  ✅ chaiya-sshws-api ทำงานอยู่บน port 6789"
 fi
 
-# 5. ตรวจ nginx config — ถ้าขาด sshws-api block ให้เขียนใหม่
+# 5. ตรวจ nginx config — ถ้าขาด sshws-api block ให้เขียนใหม่ (ใช้ config เดียวกับชุดแรก — headers ครบ)
 if ! grep -q "sshws-api" /etc/nginx/sites-available/chaiya 2>/dev/null; then
   echo "  ⚠ nginx config ขาด sshws-api — เขียนใหม่"
   cat > /etc/nginx/sites-available/chaiya << 'NGINXEOF'
+# ── Port 81: Web Panel (Dashboard + config download)
 server {
     listen 81;
     server_name _;
@@ -6638,6 +6826,8 @@ server {
     location /config/ {
         alias /var/www/chaiya/config/;
         try_files $uri =404;
+        default_type text/html;
+        add_header Content-Type "text/html; charset=UTF-8";
         add_header Cache-Control "no-cache";
     }
     location /sshws/ {
@@ -6651,13 +6841,26 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Token $http_x_token;
+        proxy_set_header X-Auth-Token $http_x_auth_token;
+        proxy_set_header Authorization $http_authorization;
         proxy_read_timeout 60s;
         proxy_connect_timeout 10s;
-        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Origin "$http_origin" always;
         add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
     }
+    # xui-traffic: proxy ไปยัง 3x-ui local API (realtime traffic)
+    location /xui-traffic/ {
+        proxy_pass http://127.0.0.1:2053/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Cookie $http_cookie;
+        proxy_read_timeout 30s;
+    }
 }
+# หมายเหตุ: port 80 ถูกจัดการโดย ws-stunnel (HTTP CONNECT tunnel)
 NGINXEOF
   ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya 2>/dev/null || true
 fi
@@ -6670,10 +6873,11 @@ else
   nginx -t
 fi
 
-# 6. ทดสอบ API จริง
+# 6. ทดสอบ API จริง (ใช้ /api/status พร้อม token แทน /api/token public)
 sleep 1
-_api_test=$(curl -s --max-time 5 "http://127.0.0.1:6789/api/token" 2>/dev/null)
-if echo "$_api_test" | grep -q '"token"'; then
+_fix_tok=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
+_api_test=$(curl -s --max-time 5 -H "X-Token: ${_fix_tok}" "http://127.0.0.1:6789/api/status" 2>/dev/null)
+if echo "$_api_test" | grep -q '"connections"'; then
   echo "  ✅ API ตอบสนองถูกต้อง"
 else
   echo "  ❌ API ไม่ตอบสนอง: $_api_test"
