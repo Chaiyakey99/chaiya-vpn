@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CHAIYA VPN PANEL</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Share+Tech+Mono&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+:root{
+  --bg:#03060f;--bg2:#060d1c;--bg3:#0a1426;--panel:#0c1830;
+  --b1:#162540;--b2:#1e3560;
+  --g:#00ff99;--c:#00cfff;--p:#a855f7;--y:#fbbf24;--r:#f43f5e;--o:#fb923c;
+  --ais:#ff6200;--true:#0ea5e9;
+  --tx:#bfd8e8;--mu:#4a7090;
+  --fh:'Orbitron',monospace;--fu:'Rajdhani',sans-serif;--fm:'Share Tech Mono',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:var(--fu);background:var(--bg);color:var(--tx);min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(0,207,255,.016) 1px,transparent 1px),linear-gradient(90deg,rgba(0,207,255,.016) 1px,transparent 1px);
+  background-size:44px 44px;}
+body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 40% at 20% 10%,rgba(0,207,255,.035) 0,transparent 70%),
+             radial-gradient(ellipse 50% 30% at 80% 85%,rgba(168,85,247,.035) 0,transparent 70%);}
+#app{position:relative;z-index:1;}
+.shell{max-width:980px;margin:0 auto;padding:0 14px 64px;}
+
+/* LOGIN */
+#scr-login{position:fixed;inset:0;z-index:999;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;}
+.lc{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--b2);border-radius:18px;padding:36px 30px;
+  box-shadow:0 0 80px rgba(0,207,255,.07),0 30px 80px rgba(0,0,0,.6);}
+.lc-top{text-align:center;margin-bottom:26px;}
+.lc-ico{font-size:2.5rem;display:block;filter:drop-shadow(0 0 12px var(--g));animation:glo 2.5s ease-in-out infinite;}
+@keyframes glo{0%,100%{filter:drop-shadow(0 0 10px var(--g))}50%{filter:drop-shadow(0 0 22px var(--c));transform:scale(1.06)}}
+.lc-name{font-family:var(--fh);font-size:1.4rem;font-weight:900;letter-spacing:5px;margin-top:8px;
+  background:linear-gradient(120deg,var(--g),var(--c));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.lc-sub{font-family:var(--fm);font-size:.58rem;color:var(--mu);letter-spacing:5px;margin-top:3px;}
+.lf{margin-bottom:11px;}
+.lf label{display:block;font-size:.62rem;letter-spacing:2px;text-transform:uppercase;color:var(--mu);margin-bottom:5px;font-weight:700;}
+.lf input{width:100%;background:var(--bg2);border:1px solid var(--b1);border-radius:8px;
+  padding:9px 12px;color:var(--tx);font-family:var(--fm);font-size:.8rem;outline:none;transition:.2s;}
+.lf input:focus{border-color:var(--c);box-shadow:0 0 0 3px rgba(0,207,255,.08);}
+.lbtn{width:100%;margin-top:10px;padding:11px;border:1px solid var(--c);border-radius:9px;cursor:pointer;
+  font-family:var(--fh);font-size:.8rem;font-weight:700;letter-spacing:3px;
+  background:linear-gradient(135deg,rgba(0,207,255,.16),rgba(0,255,153,.09));color:var(--c);transition:.2s;}
+.lbtn:hover{background:linear-gradient(135deg,rgba(0,207,255,.26),rgba(0,255,153,.16));transform:translateY(-1px);}
+.lbtn:disabled{opacity:.38;pointer-events:none;}
+#lmsg{text-align:center;font-family:var(--fm);font-size:.7rem;min-height:19px;margin-top:9px;}
+.ok{color:var(--g);}.err{color:var(--r);}.info{color:var(--c);}
+.pdots{display:flex;justify-content:center;gap:5px;margin-top:14px;}
+.pd{width:6px;height:6px;border-radius:50%;background:var(--b2);transition:.3s;}
+.pd.lit{background:var(--g);box-shadow:0 0 8px var(--g);}
+.pd.pulse{animation:pdb 1.1s infinite;}
+@keyframes pdb{0%,100%{opacity:1}50%{opacity:.18}}
+
+/* TOPBAR */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 0 12px;border-bottom:1px solid var(--b1);flex-wrap:wrap;gap:10px;}
+.tb-brand{display:flex;align-items:center;gap:11px;}
+.tb-ico{font-size:1.7rem;filter:drop-shadow(0 0 9px var(--g));animation:glo 2.5s infinite;}
+.tb-name{font-family:var(--fh);font-size:1rem;font-weight:900;letter-spacing:4px;
+  background:linear-gradient(90deg,var(--g),var(--c));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.tb-sub{font-family:var(--fm);font-size:.55rem;color:var(--mu);letter-spacing:3px;}
+.tb-r{display:flex;align-items:center;gap:8px;}
+.pill{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--b1);border-radius:20px;padding:4px 13px;
+  font-family:var(--fm);font-size:.64rem;color:var(--mu);}
+.dot-live{width:7px;height:7px;border-radius:50%;background:var(--g);box-shadow:0 0 8px var(--g);animation:pdb 1.5s infinite;}
+#tb-host{color:var(--c);}
+.btn-lo{background:none;border:1px solid var(--b1);border-radius:6px;color:var(--mu);font-family:var(--fm);font-size:.6rem;padding:5px 11px;cursor:pointer;transition:.2s;}
+.btn-lo:hover{border-color:var(--r);color:var(--r);}
+
+/* NAV */
+.nav{display:flex;gap:5px;flex-wrap:wrap;margin:13px 0 18px;}
+.nt{display:flex;align-items:center;gap:5px;padding:7px 15px;border-radius:8px;border:1px solid var(--b1);
+  background:var(--panel);color:var(--mu);font-family:var(--fu);font-weight:700;font-size:.8rem;letter-spacing:1px;cursor:pointer;transition:.2s;white-space:nowrap;}
+.nt:hover{border-color:var(--c);color:var(--c);}
+.nt.on{border-color:var(--c);color:var(--c);background:rgba(0,207,255,.09);box-shadow:0 0 14px rgba(0,207,255,.11);}
+
+/* PAGE */
+.page{display:none;animation:fi .22s ease;}
+.page.on{display:block;}
+@keyframes fi{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+
+/* SECTION */
+.sh{display:flex;align-items:center;gap:9px;margin-bottom:13px;}
+.sh h2{font-family:var(--fh);font-size:.8rem;font-weight:700;letter-spacing:3px;white-space:nowrap;}
+.sh-line{flex:1;height:1px;}
+
+/* CARD */
+.card{background:var(--panel);border:1px solid var(--b1);border-radius:13px;overflow:hidden;margin-bottom:16px;}
+.ch{display:flex;align-items:center;justify-content:space-between;padding:10px 15px;border-bottom:1px solid var(--b1);background:var(--bg3);}
+.ch-l{display:flex;align-items:center;gap:7px;}
+.cht{font-family:var(--fh);font-size:.7rem;font-weight:700;letter-spacing:2px;}
+.ntag{font-family:var(--fm);font-size:.56rem;font-weight:700;letter-spacing:2px;padding:2px 8px;border-radius:9px;}
+.tag-a{background:rgba(255,98,0,.14);border:1px solid rgba(255,98,0,.32);color:var(--ais);}
+.tag-t{background:rgba(14,165,233,.14);border:1px solid rgba(14,165,233,.32);color:var(--true);}
+.ch-r{font-family:var(--fm);font-size:.58rem;color:var(--mu);}
+.cb{padding:16px;}
+
+/* INFO STRIP */
+.istrip{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:13px;padding:8px 12px;
+  background:var(--bg2);border:1px solid var(--b1);border-radius:8px;}
+.is-k{font-family:var(--fm);font-size:.54rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--mu);}
+.is-v{font-family:var(--fm);font-size:.73rem;font-weight:700;margin-top:1px;}
+
+/* FORM */
+.fg{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+@media(max-width:520px){.fg{grid-template-columns:1fr;}}
+.fi{display:flex;flex-direction:column;gap:4px;}
+.fi label{font-size:.62rem;letter-spacing:1.8px;text-transform:uppercase;color:var(--mu);font-weight:700;}
+.fi input,.fi select{background:var(--bg2);border:1px solid var(--b1);border-radius:7px;
+  padding:8px 11px;color:var(--tx);font-family:var(--fm);font-size:.79rem;outline:none;transition:.2s;width:100%;}
+.fi input:focus,.fi select:focus{border-color:var(--c);box-shadow:0 0 0 2px rgba(0,207,255,.09);}
+.full{grid-column:1/-1;}
+
+/* BUTTONS */
+.brow{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px;}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 17px;border-radius:7px;border:1px solid;
+  font-family:var(--fu);font-weight:700;font-size:.79rem;letter-spacing:1.5px;cursor:pointer;transition:.2s;white-space:nowrap;}
+.btn:hover{opacity:.82;transform:translateY(-1px);}
+.btn:active{transform:scale(.97);}
+.btn:disabled{opacity:.35;pointer-events:none;}
+.bc{background:rgba(0,207,255,.09);border-color:var(--c);color:var(--c);}
+.bg{background:rgba(0,255,153,.09);border-color:var(--g);color:var(--g);}
+.br{background:rgba(244,63,94,.09);border-color:var(--r);color:var(--r);}
+.bp{background:rgba(168,85,247,.09);border-color:var(--p);color:var(--p);}
+.ba{background:rgba(255,98,0,.09);border-color:var(--ais);color:var(--ais);}
+.bt{background:rgba(14,165,233,.09);border-color:var(--true);color:var(--true);}
+
+/* ALERT */
+.alert{padding:7px 12px;border-radius:7px;font-size:.76rem;display:none;margin-top:9px;}
+.alert.on{display:block;animation:fi .2s ease;}
+.aok{background:rgba(0,255,153,.09);border:1px solid rgba(0,255,153,.22);color:var(--g);}
+.aerr{background:rgba(244,63,94,.09);border:1px solid rgba(244,63,94,.22);color:var(--r);}
+
+/* RESULT */
+.result{display:none;margin-top:14px;border-top:1px solid var(--b1);padding-top:14px;}
+.result.on{display:block;animation:fi .28s ease;}
+.rg{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;}
+@media(max-width:540px){.rg{grid-template-columns:1fr;}}
+
+.lb{background:#04080f;border:1px solid var(--b1);border-radius:9px;padding:11px 13px;}
+.lb+.lb{margin-top:8px;}
+.lb-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+.lb-lbl{font-family:var(--fm);font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:var(--mu);}
+.lb-cp{background:none;border:1px solid var(--b1);border-radius:5px;color:var(--mu);font-family:var(--fm);font-size:.58rem;padding:2px 8px;cursor:pointer;transition:.2s;}
+.lb-cp:hover{border-color:var(--c);color:var(--c);}
+.lb-val{font-family:var(--fm);font-size:.61rem;color:var(--c);word-break:break-all;line-height:1.75;max-height:50px;overflow:hidden;position:relative;}
+.lb-val::after{content:'';position:absolute;bottom:0;left:0;right:0;height:13px;background:linear-gradient(transparent,#04080f);}
+.lb-full{font-family:var(--fm);font-size:.68rem;color:var(--y);line-height:1.8;}
+
+.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:7px;
+  background:#04080f;border:1px solid var(--b1);border-radius:9px;padding:12px 12px 9px;}
+.qr-lbl{font-family:var(--fm);font-size:.54rem;letter-spacing:2px;text-transform:uppercase;color:var(--mu);}
+
+/* TABLE */
+.twrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;}
+th{font-family:var(--fh);font-size:.58rem;letter-spacing:2px;color:var(--c);
+  padding:9px 11px;border-bottom:1px solid var(--b1);text-align:left;background:var(--bg3);}
+td{padding:9px 11px;border-bottom:1px solid rgba(22,37,64,.45);font-family:var(--fm);font-size:.7rem;vertical-align:middle;}
+tr:hover td{background:rgba(0,207,255,.016);}
+.bdg{display:inline-block;padding:2px 8px;border-radius:9px;font-size:.57rem;font-family:var(--fm);letter-spacing:1px;}
+.bdg-g{background:rgba(0,255,153,.1);color:var(--g);border:1px solid rgba(0,255,153,.26);}
+.bdg-r{background:rgba(244,63,94,.1);color:var(--r);border:1px solid rgba(244,63,94,.26);}
+.bdg-y{background:rgba(251,191,36,.1);color:var(--y);border:1px solid rgba(251,191,36,.26);}
+
+/* STATUS */
+.svc{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bg2);border:1px solid var(--b1);border-radius:8px;margin-bottom:7px;}
+.svc-d{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.svc-d.on{background:var(--g);box-shadow:0 0 7px var(--g);animation:pdb 1.4s infinite;}
+.svc-d.off{background:var(--r);}
+.svc-n{font-family:var(--fu);font-weight:600;font-size:.88rem;flex:1;}
+.svc-s{font-family:var(--fm);font-size:.62rem;}
+.svc-s.on{color:var(--g);}.svc-s.off{color:var(--r);}
+
+.ig{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+@media(max-width:480px){.ig{grid-template-columns:1fr;}}
+.igi{background:var(--bg2);border:1px solid var(--b1);border-radius:7px;padding:10px 12px;}
+.ig-k{font-family:var(--fm);font-size:.56rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--mu);margin-bottom:4px;}
+.ig-v{font-family:var(--fm);font-size:.8rem;font-weight:700;color:var(--y);}
+
+/* TOAST */
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(90px);
+  background:var(--panel);border:1px solid var(--c);border-radius:8px;
+  padding:8px 20px;font-family:var(--fm);font-size:.72rem;color:var(--c);
+  box-shadow:0 0 20px rgba(0,207,255,.18);transition:.26s ease;z-index:9999;white-space:nowrap;}
+#toast.show{transform:translateX(-50%) translateY(0);}
+#toast.err{border-color:var(--r);color:var(--r);}
+#toast.ok{border-color:var(--g);color:var(--g);}
+.spin{display:inline-block;width:11px;height:11px;border:2px solid rgba(255,255,255,.08);
+  border-top-color:var(--c);border-radius:50%;animation:sp .55s linear infinite;vertical-align:middle;margin-right:5px;}
+@keyframes sp{to{transform:rotate(360deg)}}
+.divider{height:1px;background:linear-gradient(90deg,transparent,var(--b1),transparent);margin:13px 0;}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- LOGIN -->
+<div id="scr-login">
+<div class="lc">
+  <div class="lc-top">
+    <span class="lc-ico">🛸</span>
+    <div class="lc-name">CHAIYA VPN</div>
+    <div class="lc-sub">MANAGEMENT PANEL</div>
+  </div>
+  <div class="lf"><label>VPS IP / Domain</label>
+    <input id="l-host" type="text" placeholder="157.85.102.153 หรือ project.godvpn.shop" autocomplete="off"></div>
+  <div class="lf"><label>X-UI Port</label>
+    <input id="l-xport" type="text" value="2053" placeholder="2053"></div>
+  <div class="lf"><label>X-UI Username</label>
+    <input id="l-user" type="text" placeholder="admin" autocomplete="off"></div>
+  <div class="lf"><label>X-UI Password</label>
+    <input id="l-pass" type="password" placeholder="••••••••"></div>
+  <div class="lf"><label>SSH API Token <span style="color:var(--mu);font-size:.56rem">(จาก /etc/chaiya/sshws-token.conf)</span></label>
+    <input id="l-token" type="text" placeholder="32-char hex token" autocomplete="off"></div>
+  <button class="lbtn" id="lbtn" onclick="doLogin()">⚡ CONNECT VPS</button>
+  <div id="lmsg"></div>
+  <div class="pdots"><div class="pd" id="pd1"></div><div class="pd" id="pd2"></div><div class="pd" id="pd3"></div><div class="pd" id="pd4"></div><div class="pd" id="pd5"></div></div>
+</div>
+</div>
+
+<!-- MAIN -->
+<div id="scr-main" style="display:none">
+<div class="shell">
+  <div class="topbar">
+    <div class="tb-brand">
+      <span class="tb-ico">🚀</span>
+      <div><div class="tb-name">CHAIYA VPN</div><div class="tb-sub">MANAGEMENT PANEL</div></div>
+    </div>
+    <div class="tb-r">
+      <div class="pill"><div class="dot-live"></div><span id="tb-host">—</span></div>
+      <button class="btn-lo" onclick="doLogout()">⏻ LOGOUT</button>
+    </div>
+  </div>
+
+  <div class="nav">
+    <button class="nt on" onclick="sw('vless',this)">📡 V2RAY VLESS</button>
+    <button class="nt"    onclick="sw('ssh',this)">🔑 SSH USERS</button>
+    <button class="nt"    onclick="sw('manage',this)">👥 จัดการ Users</button>
+    <button class="nt"    onclick="sw('status',this)">📊 Status</button>
+  </div>
+
+  <!-- PAGE: VLESS -->
+  <div class="page on" id="page-vless">
+
+    <div class="sh"><h2 style="color:var(--ais)">📶 AIS — กันรั่ว</h2><div class="sh-line" style="background:linear-gradient(90deg,var(--ais),transparent)"></div></div>
+    <div class="card" style="border-color:rgba(255,98,0,.22)">
+      <div class="ch" style="border-color:rgba(255,98,0,.18)">
+        <div class="ch-l"><div class="cht" style="color:var(--ais)">CREATE VLESS USER</div><span class="ntag tag-a">AIS</span></div>
+        <div class="ch-r">Port 8080 · WS · SNI: cj-ebb.speedtest.net</div>
+      </div>
+      <div class="cb">
+        <div class="istrip">
+          <div><div class="is-k">Protocol</div><div class="is-v" style="color:var(--ais)">VLESS</div></div>
+          <div><div class="is-k">Port</div><div class="is-v" style="color:var(--y)">8080</div></div>
+          <div><div class="is-k">Network</div><div class="is-v">WebSocket</div></div>
+          <div><div class="is-k">SNI / Host</div><div class="is-v" style="color:var(--c)">cj-ebb.speedtest.net</div></div>
+          <div><div class="is-k">Security</div><div class="is-v">none</div></div>
+          <div><div class="is-k">Path</div><div class="is-v">/vless</div></div>
+        </div>
+        <div class="fg">
+          <div class="fi"><label>Username / Email</label><input id="av-user" type="text" placeholder="ais_user01"></div>
+          <div class="fi"><label>วันหมดอายุ (วัน)</label><input id="av-days" type="number" value="30" min="1" max="365"></div>
+          <div class="fi"><label>Data Limit (GB, 0=∞)</label><input id="av-data" type="number" value="0" min="0"></div>
+          <div class="fi"><label>จำนวนเครื่องสูงสุด</label><input id="av-ipl" type="number" value="2" min="1" max="20"></div>
+        </div>
+        <div id="av-alert" class="alert"></div>
+        <div class="brow"><button class="btn ba" id="av-btn" onclick="createVless('ais')">⚡ สร้าง AIS User</button></div>
+        <div class="result" id="av-res">
+          <div class="rg">
+            <div>
+              <div class="lb">
+                <div class="lb-top"><div class="lb-lbl">VLESS LINK</div><button class="lb-cp" onclick="cp('av-lv')">📋 COPY</button></div>
+                <div class="lb-val" id="av-ld">—</div><input type="hidden" id="av-lv">
+              </div>
+              <div class="lb">
+                <div class="lb-top"><div class="lb-lbl">UUID</div><button class="lb-cp" onclick="cp('av-uv')">📋 COPY</button></div>
+                <div class="lb-full" id="av-ud">—</div><input type="hidden" id="av-uv">
+              </div>
+            </div>
+            <div class="qr-wrap"><div class="qr-lbl">QR CODE</div><div id="av-qr"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sh"><h2 style="color:var(--true)">📺 TRUE — VDO</h2><div class="sh-line" style="background:linear-gradient(90deg,var(--true),transparent)"></div></div>
+    <div class="card" style="border-color:rgba(14,165,233,.22)">
+      <div class="ch" style="border-color:rgba(14,165,233,.18)">
+        <div class="ch-l"><div class="cht" style="color:var(--true)">CREATE VLESS USER</div><span class="ntag tag-t">TRUE</span></div>
+        <div class="ch-r">Port 8880 · WS · SNI: true-internet.zoom.xzy.services</div>
+      </div>
+      <div class="cb">
+        <div class="istrip">
+          <div><div class="is-k">Protocol</div><div class="is-v" style="color:var(--true)">VLESS</div></div>
+          <div><div class="is-k">Port</div><div class="is-v" style="color:var(--y)">8880</div></div>
+          <div><div class="is-k">Network</div><div class="is-v">WebSocket</div></div>
+          <div><div class="is-k">SNI / Host</div><div class="is-v" style="color:var(--c)">true-internet.zoom.xzy.services</div></div>
+          <div><div class="is-k">Security</div><div class="is-v">none</div></div>
+          <div><div class="is-k">Path</div><div class="is-v">/vless</div></div>
+        </div>
+        <div class="fg">
+          <div class="fi"><label>Username / Email</label><input id="tv-user" type="text" placeholder="true_user01"></div>
+          <div class="fi"><label>วันหมดอายุ (วัน)</label><input id="tv-days" type="number" value="30" min="1" max="365"></div>
+          <div class="fi"><label>Data Limit (GB, 0=∞)</label><input id="tv-data" type="number" value="0" min="0"></div>
+          <div class="fi"><label>จำนวนเครื่องสูงสุด</label><input id="tv-ipl" type="number" value="2" min="1" max="20"></div>
+        </div>
+        <div id="tv-alert" class="alert"></div>
+        <div class="brow"><button class="btn bt" id="tv-btn" onclick="createVless('true')">⚡ สร้าง TRUE User</button></div>
+        <div class="result" id="tv-res">
+          <div class="rg">
+            <div>
+              <div class="lb">
+                <div class="lb-top"><div class="lb-lbl">VLESS LINK</div><button class="lb-cp" onclick="cp('tv-lv')">📋 COPY</button></div>
+                <div class="lb-val" id="tv-ld">—</div><input type="hidden" id="tv-lv">
+              </div>
+              <div class="lb">
+                <div class="lb-top"><div class="lb-lbl">UUID</div><button class="lb-cp" onclick="cp('tv-uv')">📋 COPY</button></div>
+                <div class="lb-full" id="tv-ud">—</div><input type="hidden" id="tv-uv">
+              </div>
+            </div>
+            <div class="qr-wrap"><div class="qr-lbl">QR CODE</div><div id="tv-qr"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE: SSH -->
+  <div class="page" id="page-ssh">
+
+    <div class="sh"><h2 style="color:var(--ais)">🎮 DTAC — เกมส์มิ่ง</h2><div class="sh-line" style="background:linear-gradient(90deg,var(--ais),transparent)"></div></div>
+    <div class="card" style="border-color:rgba(255,98,0,.22)">
+      <div class="ch" style="border-color:rgba(255,98,0,.18)">
+        <div class="ch-l"><div class="cht" style="color:var(--ais)">CREATE SSH USER</div><span class="ntag tag-a">DTAC</span></div>
+        <div class="ch-r">Port 80 · HTTP-CONNECT → Dropbear 143 · NPV Tunnel</div>
+      </div>
+      <div class="cb">
+        <div class="fg">
+          <div class="fi"><label>Username</label><input id="ds-user" type="text" placeholder="dtac_user01"></div>
+          <div class="fi"><label>Password</label><input id="ds-pass" type="password" placeholder="••••••••"></div>
+          <div class="fi"><label>จำนวนวันใช้งาน</label><input id="ds-days" type="number" value="30" min="1" max="365"></div>
+          <div class="fi"><label>ชื่อโปร (แสดงใน App)</label><input id="ds-name" type="text" value="DTAC เกมส์มิ่ง"></div>
+        </div>
+        <div id="ds-alert" class="alert"></div>
+        <div class="brow"><button class="btn ba" id="ds-btn" onclick="createSSH('dtac')">🔑 สร้าง DTAC + NPV Link</button></div>
+        <div class="result" id="ds-res">
+          <div class="rg">
+            <div>
+              <div class="lb">
+                <div class="lb-top"><div class="lb-lbl">NPV IMPORT LINK</div><button class="lb-cp" onclick="cp('ds-lv')">📋 COPY</button></div>
+                <div class="lb-val" id="ds-ld">—</div><input type="hidden" id="ds-lv">
+              </div>
+              <div class="lb">
+                <div class="lb-top"><div class="lb-lbl">SSH INFO</div></div>
+                <div class="lb-full" id="ds-info">—</div>
+              </div>
+            </div>
+            <div class="qr-wrap"><div class="qr-lbl">QR CODE</div><div id="ds-qr"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sh"><h2 style="color:var(--true)">🌐 TRUE — SSH</h2><div class="sh-line" style="background:linear-gradient(90deg,var(--true),transparent)"></div></div>
+    <div class="card" style="border-color:rgba(14,165,233,.22)">
+      <div class="ch" style="border-color:rgba(14,165,233,.18)">
+        <div class="ch-l"><div class="cht" style="color:var(--true)">CREATE SSH USER</div><span class="ntag tag-t">TRUE</span></div>
+        <div class="ch-r">Port 80 · HTTP-CONNECT → Dropbear 143 · NPV Tunnel</div>
+      </div>
+      <div class="cb">
+        <div class="fg">
+          <div class="fi"><label>Username</label><input id="ts-user" type="text" placeholder="true_user01"></div>
+          <div class="fi"><label>Password</label><input id="ts-pass" type="password" placeholder="••••••••"></div>
+          <div class="fi"><label>จำนวนวันใช้งาน</label><input id="ts-days" type="number" value="30" min="1" max="365"></div>
+          <div class="fi"><label>ชื่อโปร (แสดงใน App)</label><input id="ts-name" type="text" value="TRUE SSH Pro"></div>
+        </div>
+        <div id="ts-alert" class="alert"></div>
+        <div class="brow"><button class="btn bt" id="ts-btn" onclick="createSSH('true')">🔑 สร้าง TRUE + NPV Link</button></div>
+        <div class="result" id="ts-res">
+          <div class="rg">
+            <div>
+              <div class="lb">
+                <div class="lb-top"><div class="lb-lbl">NPV IMPORT LINK</div><button class="lb-cp" onclick="cp('ts-lv')">📋 COPY</button></div>
+                <div class="lb-val" id="ts-ld">—</div><input type="hidden" id="ts-lv">
+              </div>
+              <div class="lb">
+                <div class="lb-top"><div class="lb-lbl">SSH INFO</div></div>
+                <div class="lb-full" id="ts-info">—</div>
+              </div>
+            </div>
+            <div class="qr-wrap"><div class="qr-lbl">QR CODE</div><div id="ts-qr"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE: MANAGE -->
+  <div class="page" id="page-manage">
+    <div class="sh"><h2 style="color:var(--c)">👥 SSH USERS</h2><div class="sh-line" style="background:linear-gradient(90deg,var(--c),transparent)"></div></div>
+    <div class="card">
+      <div class="ch">
+        <div class="ch-l"><div class="cht" style="color:var(--c)">รายชื่อ SSH Users</div></div>
+        <button class="btn bc" style="padding:4px 11px;font-size:.68rem" onclick="loadSSH()">🔄 โหลด</button>
+      </div>
+      <div class="cb">
+        <div class="twrap"><table>
+          <thead><tr><th>#</th><th>Username</th><th>หมดอายุ</th><th>Status</th><th>Data</th><th>IP Limit</th><th></th></tr></thead>
+          <tbody id="ssh-tb"><tr><td colspan="7" style="text-align:center;color:var(--mu);padding:22px">กด "โหลด"</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="sh" style="margin-top:4px"><h2 style="color:var(--p)">🎯 VLESS USERS (x-ui)</h2><div class="sh-line" style="background:linear-gradient(90deg,var(--p),transparent)"></div></div>
+    <div class="card">
+      <div class="ch">
+        <div class="ch-l"><div class="cht" style="color:var(--p)">รายชื่อ VLESS Users</div></div>
+        <button class="btn bp" style="padding:4px 11px;font-size:.68rem" onclick="loadVless()">🔄 โหลด</button>
+      </div>
+      <div class="cb">
+        <div class="twrap"><table>
+          <thead><tr><th>#</th><th>Email</th><th>Network</th><th>Data Used</th><th>หมดอายุ</th><th>Status</th></tr></thead>
+          <tbody id="vl-tb"><tr><td colspan="6" style="text-align:center;color:var(--mu);padding:22px">กด "โหลด"</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE: STATUS -->
+  <div class="page" id="page-status">
+    <div class="sh"><h2 style="color:var(--g)">📊 VPS STATUS</h2><div class="sh-line" style="background:linear-gradient(90deg,var(--g),transparent)"></div></div>
+    <div class="card">
+      <div class="ch">
+        <div class="ch-l"><div class="cht" style="color:var(--g)">Services</div></div>
+        <button class="btn bg" style="padding:4px 11px;font-size:.68rem" onclick="loadStatus()">🔄 Refresh</button>
+      </div>
+      <div class="cb" id="svc-list"><div style="text-align:center;color:var(--mu);padding:22px;font-family:var(--fm);font-size:.73rem">กด Refresh</div></div>
+    </div>
+    <div class="card">
+      <div class="ch"><div class="ch-l"><div class="cht" style="color:var(--c)">Connection Info</div></div></div>
+      <div class="cb" id="conn-info"><div style="text-align:center;color:var(--mu);padding:22px;font-family:var(--fm);font-size:.73rem">กด Refresh ด้านบน</div></div>
+    </div>
+  </div>
+
+</div>
+</div>
+</div>
+<div id="toast"></div>
+
+<script>
+const S={host:'',xport:'2053',user:'',pass:'',token:''};
+const VN={ais:{port:8080,sni:'cj-ebb.speedtest.net'},true:{port:8880,sni:'true-internet.zoom.xzy.services'}};
+const SP={
+  dtac:{proxy:'104.18.63.124:80',phost:'104.18.63.124',pport:80,
+    payload:'CONNECT /  HTTP/1.1 [crlf]Host: dl.dir.freefiremobile.com [crlf][crlf]PATCH / HTTP/1.1[crlf]Host:[host][crlf]Upgrade:User-Agent: [ua][crlf][crlf]'},
+  true:{proxy:'104.18.39.24:80',phost:'104.18.39.24',pport:80,
+    payload:'POST / HTTP/1.1[crlf]Host: help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]'}
+};
+
+let _tT;
+function toast(msg,type='ok'){
+  const t=document.getElementById('toast');
+  t.textContent=(type==='ok'?'✅ ':type==='err'?'❌ ':'⏳ ')+msg;
+  t.className='show '+type; clearTimeout(_tT);
+  _tT=setTimeout(()=>t.classList.remove('show'),3200);
+}
+function al(id,msg,ok=true){
+  const el=document.getElementById(id); if(!el)return;
+  el.textContent=(ok?'✅ ':'❌ ')+msg;
+  el.className='alert on '+(ok?'aok':'aerr');
+  setTimeout(()=>el.classList.remove('on'),5500);
+}
+function cp(id){
+  const el=document.getElementById(id);
+  const v=el.value||el.textContent; if(!v||v==='—')return;
+  navigator.clipboard?navigator.clipboard.writeText(v).then(()=>toast('คัดลอกแล้ว!')).catch(()=>cpFB(v)):cpFB(v);
+}
+function cpFB(t){
+  const ta=Object.assign(document.createElement('textarea'),{value:t});
+  ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);ta.focus();ta.select();
+  try{document.execCommand('copy');toast('คัดลอกแล้ว!');}catch(e){toast('คัดลอกไม่ได้','err');}
+  document.body.removeChild(ta);
+}
+function sw(name,btn){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.nt').forEach(b=>b.classList.remove('on'));
+  document.getElementById('page-'+name).classList.add('on');
+  btn.classList.add('on');
+}
+
+// LOGIN
+async function doLogin(){
+  const host=document.getElementById('l-host').value.trim();
+  const xport=document.getElementById('l-xport').value.trim()||'2053';
+  const user=document.getElementById('l-user').value.trim();
+  const pass=document.getElementById('l-pass').value.trim();
+  const token=document.getElementById('l-token').value.trim();
+  if(!host||!user||!pass){setMsg('กรอกข้อมูลให้ครบ','err');return;}
+  setMsg('กำลังเชื่อมต่อ...','info');
+  setBL(true); litD(true);
+  Object.assign(S,{host,xport,user,pass,token});
+  const xuiOk=await xuiLogin();
+  const sshOk=token?await sshOk_():false;
+  litD(false); setBL(false);
+  if(xuiOk||sshOk){
+    setMsg('✅ เชื่อมต่อสำเร็จ!','ok');
+    setTimeout(()=>{
+      document.getElementById('scr-login').style.display='none';
+      document.getElementById('scr-main').style.display='';
+      document.getElementById('tb-host').textContent=host;
+    },500);
+  } else setMsg('❌ เชื่อมต่อไม่ได้ — ตรวจสอบข้อมูล','err');
+}
+function doLogout(){
+  Object.assign(S,{host:'',xport:'2053',user:'',pass:'',token:''});
+  document.getElementById('scr-login').style.display='flex';
+  document.getElementById('scr-main').style.display='none';
+  setMsg('','');
+}
+function setMsg(t,c){const el=document.getElementById('lmsg');el.textContent=t;el.className=c;}
+function setBL(l){const b=document.getElementById('lbtn');b.disabled=l;b.innerHTML=l?'<span class="spin"></span> CONNECTING...':'⚡ CONNECT VPS';}
+function litD(on){for(let i=1;i<=5;i++){const d=document.getElementById('pd'+i);if(on)setTimeout(()=>{d.classList.add('lit','pulse');},i*120);else d.classList.remove('lit','pulse');}}
+
+async function xuiLogin(){
+  for(const proto of['http','https']){
+    try{
+      const r=await fetch(`${proto}://${S.host}:${S.xport}/login`,{
+        method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:`username=${encodeURIComponent(S.user)}&password=${encodeURIComponent(S.pass)}`,
+        credentials:'include',signal:AbortSignal.timeout(8000)
+      });
+      const d=await r.json();if(d.success)return true;
+    }catch(e){}
+  }
+  return false;
+}
+async function sshOk_(){const r=await sshAPI('GET','/api/status');return r&&!r.error;}
+
+async function xuiAPI(method,path,body=null){
+  for(const proto of['http','https']){
+    const url=`${proto}://${S.host}:${S.xport}${path}`;
+    const o={method,credentials:'include',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(12000)};
+    if(body)o.body=JSON.stringify(body);
+    try{const r=await fetch(url,o);const d=await r.json();if(d!==null)return d;}catch(e){}
+  }
+  await xuiLogin();
+  for(const proto of['http','https']){
+    const url=`${proto}://${S.host}:${S.xport}${path}`;
+    const o={method,credentials:'include',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(12000)};
+    if(body)o.body=JSON.stringify(body);
+    try{return await(await fetch(url,o)).json();}catch(e){}
+  }
+  return{error:'xui_unreachable'};
+}
+
+async function sshAPI(method,path,body=null){
+  const base=`http://${S.host}:81/sshws-api`;
+  const tok=S.token;
+  const h={'Content-Type':'application/json'};
+  if(tok){h['X-Token']=tok;h['X-Auth-Token']=tok;h['Authorization']='Bearer '+tok;}
+  const url=base+path+(tok?(path.includes('?')?'&':'?')+'token='+encodeURIComponent(tok):'');
+  const o={method,headers:h,signal:AbortSignal.timeout(12000)};
+  if(body)o.body=JSON.stringify(body);
+  try{
+    const r=await fetch(url,o);
+    const ct=r.headers.get('content-type')||'';
+    if(ct.includes('application/json'))return await r.json();
+    const txt=await r.text();
+    try{return JSON.parse(txt);}catch(e){return{error:'bad_json'};}
+  }catch(e){return{error:e.message};}
+}
+
+function mkUUID(){
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r=Math.random()*16|0;return(c==='x'?r:(r&3|8)).toString(16);
+  });
+}
+
+function makeQR(cid,text){
+  const el=document.getElementById(cid);el.innerHTML='';
+  try{new QRCode(el,{text,width:120,height:120,colorDark:'#00cfff',colorLight:'#04080f',correctLevel:QRCode.CorrectLevel.M});}
+  catch(e){el.innerHTML='<div style="color:var(--mu);font-size:.6rem;width:120px;text-align:center">QR Error</div>';}
+}
+
+// CREATE VLESS
+async function createVless(net){
+  const p=net==='ais'?'av':'tv';
+  const cfg=VN[net];
+  const uname=document.getElementById(p+'-user').value.trim();
+  const days=parseInt(document.getElementById(p+'-days').value)||30;
+  const dataGb=parseInt(document.getElementById(p+'-data').value)||0;
+  const ipl=parseInt(document.getElementById(p+'-ipl').value)||2;
+  if(!uname){al(p+'-alert','กรอก Username',false);return;}
+  const btn=document.getElementById(p+'-btn');
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> กำลังสร้าง...';
+  al(p+'-alert','กำลังสร้างใน x-ui...',true);
+  const uuid=mkUUID();
+  const expMs=Date.now()+days*86400000;
+  const email='chaiya-'+uname;
+  const totalB=dataGb>0?dataGb*1073741824:0;
+  // find inbound
+  let ibId=null;
+  const ibl=await xuiAPI('GET','/panel/api/inbounds/list');
+  if(ibl&&ibl.obj)for(const ib of ibl.obj)if(ib.port===cfg.port){ibId=ib.id;break;}
+  let res;
+  if(ibId){
+    res=await xuiAPI('POST','/panel/api/inbounds/addClient',{
+      id:ibId,
+      settings:JSON.stringify({clients:[{id:uuid,email,limitIp:ipl,totalGB:totalB,expiryTime:expMs,enable:true,comment:'',reset:0}]})
+    });
+  }else{
+    res=await xuiAPI('POST','/panel/api/inbounds/add',{
+      remark:'CHAIYA-'+net.toUpperCase()+'-'+uname,
+      enable:true,listen:'',port:cfg.port,protocol:'vless',
+      settings:JSON.stringify({clients:[{id:uuid,email,limitIp:ipl,totalGB:totalB,expiryTime:expMs,enable:true,comment:'',reset:0}],decryption:'none'}),
+      streamSettings:JSON.stringify({network:'ws',security:'none',wsSettings:{path:'/vless',headers:{Host:cfg.sni}}}),
+      sniffing:JSON.stringify({enabled:true,destOverride:['http','tls']})
+    });
+  }
+  const ok=res&&res.success===true;
+  const link=`vless://${uuid}@${S.host}:${cfg.port}?path=%2Fvless&security=none&encryption=none&host=${cfg.sni}&type=ws#CHAIYA-${uname}-${net.toUpperCase()}`;
+  document.getElementById(p+'-ld').textContent=link;
+  document.getElementById(p+'-lv').value=link;
+  document.getElementById(p+'-ud').textContent=uuid;
+  document.getElementById(p+'-uv').value=uuid;
+  document.getElementById(p+'-res').classList.add('on');
+  makeQR(p+'-qr',link);
+  btn.disabled=false;
+  btn.innerHTML=ok?'✅ สร้างสำเร็จ!':`⚡ สร้าง ${net.toUpperCase()} User`;
+  if(ok){al(p+'-alert',`สร้างสำเร็จ! email: ${email}`,true);toast('สร้าง '+net.toUpperCase()+' VLESS สำเร็จ!');}
+  else{al(p+'-alert',(res?.msg||res?.error||'x-ui ไม่ตอบสนอง')+' — link พร้อมแล้ว',false);toast('Link พร้อม — ตรวจสอบ x-ui','err');}
+}
+
+// CREATE SSH
+async function createSSH(net){
+  const p=net==='dtac'?'ds':'ts';
+  const pro=SP[net];
+  const uname=document.getElementById(p+'-user').value.trim();
+  const upass=document.getElementById(p+'-pass').value.trim();
+  const days=parseInt(document.getElementById(p+'-days').value)||30;
+  const pname=document.getElementById(p+'-name').value.trim()||(net==='dtac'?'DTAC GAMING':'TRUE SSH');
+  if(!uname||!upass){al(p+'-alert','กรอก Username และ Password',false);return;}
+  const btn=document.getElementById(p+'-btn');
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> กำลังสร้าง...';
+  al(p+'-alert','กำลังสร้าง SSH user...',true);
+  // SSH API
+  const r=await sshAPI('POST','/api/create',{user:uname,pass:upass,exp_days:days,days,data_gb:0,ip_limit:2});
+  // NPV link
+  const npvObj={
+    sshConfigType:'SSH-Proxy-Payload',remarks:pname+'-'+uname,
+    sshHost:S.host,sshPort:80,sshUsername:uname,sshPassword:upass,
+    sni:'',tlsVersion:'DEFAULT',httpProxy:pro.proxy,
+    authenticateProxy:false,proxyUsername:'',proxyPassword:'',
+    payload:pro.payload,dnsTTMode:'UDP',dnsServer:'',nameserver:'',publicKey:'',
+    udpgwPort:7300,udpgwTransparentDNS:true
+  };
+  const npvLink='npvt-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(npvObj))));
+  const expDate=new Date(Date.now()+days*86400000).toISOString().split('T')[0];
+  document.getElementById(p+'-ld').textContent=npvLink;
+  document.getElementById(p+'-lv').value=npvLink;
+  document.getElementById(p+'-info').innerHTML=
+    `Host: <span style="color:var(--c)">${S.host}</span>  Port: <span style="color:var(--y)">80</span><br>`+
+    `User: <span style="color:var(--g)">${uname}</span>  หมดอายุ: <span style="color:var(--y)">${expDate}</span><br>`+
+    `Proxy: <span style="color:var(--mu)">${pro.proxy}</span>`;
+  document.getElementById(p+'-res').classList.add('on');
+  makeQR(p+'-qr',npvLink);
+  btn.disabled=false;
+  const ok=r&&r.ok;
+  btn.innerHTML=ok?'✅ สร้างสำเร็จ!':`🔑 สร้าง ${net.toUpperCase()} + NPV Link`;
+  if(ok){al(p+'-alert',`สร้าง SSH user ${uname} สำเร็จ! หมดอายุ ${expDate}`,true);toast('สร้าง '+net.toUpperCase()+' SSH สำเร็จ!');}
+  else{al(p+'-alert',(r?.error||'SSH API ไม่ตอบสนอง')+' — NPV Link พร้อมแล้ว',false);toast('NPV Link พร้อม — ตรวจสอบ SSH API','err');}
+}
+
+// MANAGE
+async function loadSSH(){
+  const tb=document.getElementById('ssh-tb');
+  tb.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px"><span class="spin"></span></td></tr>';
+  const r=await sshAPI('GET','/api/users');
+  if(!r||r.error||!r.users){tb.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--r);padding:20px">❌ ${r?.error||'ไม่สามารถเชื่อมต่อ'}</td></tr>`;return;}
+  if(!r.users.length){tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--mu);padding:20px">ยังไม่มี users</td></tr>';return;}
+  const today=new Date().toISOString().split('T')[0];
+  tb.innerHTML=r.users.map((u,i)=>{
+    const dead=u.exp&&u.exp<today;
+    const badge=u.active&&!dead?'<span class="bdg bdg-g">ACTIVE</span>':dead?'<span class="bdg bdg-r">EXPIRED</span>':'<span class="bdg bdg-y">INACTIVE</span>';
+    const data=u.data_gb>0?`${u.used_gb||0}/${u.data_gb}GB`:'∞';
+    return `<tr><td style="color:var(--mu)">${i+1}</td><td><b style="color:var(--c)">${u.user}</b></td>
+    <td style="color:${dead?'var(--r)':'var(--g)'}">${u.exp||'N/A'}</td><td>${badge}</td>
+    <td>${data}</td><td>${u.ip_limit||2}</td>
+    <td><button class="btn br" style="padding:3px 9px;font-size:.62rem" onclick="delUser('${u.user}')">🗑</button></td></tr>`;
+  }).join('');
+}
+async function delUser(u){
+  if(!confirm('ลบ user "'+u+'" ?'))return;
+  const r=await sshAPI('POST','/api/delete',{user:u});
+  if(r&&r.ok){toast('ลบ '+u+' แล้ว');loadSSH();}
+  else toast('ลบไม่สำเร็จ: '+(r?.error||'error'),'err');
+}
+
+async function loadVless(){
+  const tb=document.getElementById('vl-tb');
+  tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px"><span class="spin"></span></td></tr>';
+  const r=await xuiAPI('GET','/panel/api/inbounds/list');
+  if(!r||!r.obj){tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--r);padding:20px">❌ ดึงข้อมูลจาก x-ui ไม่ได้</td></tr>';return;}
+  const now=Date.now();const rows=[];let idx=1;
+  for(const ib of r.obj){
+    const nl=ib.port===8080?'AIS':ib.port===8880?'TRUE':'PORT '+ib.port;
+    const tc=ib.port===8080?'tag-a':'tag-t';
+    for(const cs of(ib.clientStats||[])){
+      const ug=((cs.down||0)+(cs.up||0))/1073741824;
+      const lg=(cs.total||0)/1073741824;
+      const et=cs.expiryTime||0;const dead=et>0&&et<now;
+      const es=et>0?new Date(et).toLocaleDateString('th-TH'):'∞';
+      const st=cs.enable&&!dead?'<span class="bdg bdg-g">ON</span>':'<span class="bdg bdg-r">OFF</span>';
+      rows.push(`<tr><td style="color:var(--mu)">${idx++}</td><td><b style="color:var(--c)">${cs.email||'—'}</b></td>
+      <td><span class="ntag ${tc}">${nl}</span></td>
+      <td>${ug.toFixed(2)} / ${lg>0?lg.toFixed(2)+'GB':'∞'}</td>
+      <td style="color:${dead?'var(--r)':'var(--g)'}">${es}</td><td>${st}</td></tr>`);
+    }
+  }
+  tb.innerHTML=rows.join('')||'<tr><td colspan="6" style="text-align:center;color:var(--mu);padding:20px">ยังไม่มี VLESS users</td></tr>';
+}
+
+// STATUS
+async function loadStatus(){
+  const sl=document.getElementById('svc-list'),ci=document.getElementById('conn-info');
+  sl.innerHTML='<div style="text-align:center;padding:20px"><span class="spin"></span></div>';
+  const r=await sshAPI('GET','/api/status');
+  if(!r||r.error){sl.innerHTML=`<div style="color:var(--r);text-align:center;padding:20px">❌ ${r?.error||'ไม่สามารถเชื่อมต่อ SSH API'}</div>`;return;}
+  const sv=r.services||{};
+  const SVCS=[{k:'sshws',n:'WS-Stunnel (Port 80)',ic:'🔌'},{k:'dropbear',n:'Dropbear SSH (143/109)',ic:'🐻'},
+    {k:'nginx',n:'Nginx (Port 81)',ic:'🌐'},{k:'badvpn',n:'BadVPN UDPGW (7300)',ic:'🎮'},{k:'tunnel',n:'SSH Tunnel',ic:'🚇'}];
+  sl.innerHTML=SVCS.map(s=>`<div class="svc"><div class="svc-d ${sv[s.k]?'on':'off'}"></div>
+    <span style="font-size:1.05rem">${s.ic}</span><span class="svc-n">${s.n}</span>
+    <span class="svc-s ${sv[s.k]?'on':'off'}">${sv[s.k]?'RUNNING':'STOPPED'}</span></div>`).join('');
+  const info=await sshAPI('GET','/api/info');
+  const host=(info&&!info.error)?(info.host||S.host):S.host;
+  ci.innerHTML=`<div class="ig">
+    <div class="igi"><div class="ig-k">Host / IP</div><div class="ig-v" style="color:var(--c)">${host}</div></div>
+    <div class="igi"><div class="ig-k">Total Connections</div><div class="ig-v">${r.connections||0}</div></div>
+    <div class="igi"><div class="ig-k">Online Users</div><div class="ig-v" style="color:var(--g)">${r.online_count||r.online||0}</div></div>
+    <div class="igi"><div class="ig-k">SSH Users Total</div><div class="ig-v">${r.total_users||0}</div></div>
+    <div class="igi"><div class="ig-k">Port 80</div><div class="ig-v">${r.conn_80||0} conns</div></div>
+    <div class="igi"><div class="ig-k">Port 143</div><div class="ig-v">${r.conn_143||0} conns</div></div>
+    <div class="igi"><div class="ig-k">Port 109</div><div class="ig-v">${r.conn_109||0} conns</div></div>
+    <div class="igi"><div class="ig-k">Port 22</div><div class="ig-v">${r.conn_22||0} conns</div></div>
+  </div>`;
+}
+
+['l-host','l-xport','l-user','l-pass','l-token'].forEach(id=>{
+  document.getElementById(id)?.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+});
+</script>
+</body>
+</html>
