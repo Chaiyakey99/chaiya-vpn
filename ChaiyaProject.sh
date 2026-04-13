@@ -3626,23 +3626,27 @@ xui_login() {
   local p u pw bp
   p=$(xui_port); u=$(xui_user); pw=$(xui_pass)
   bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
-  # normalize: ถ้าเป็น "/" หรือว่าง → ใช้ "" (root path ไม่มี prefix)
-  [[ "$bp" == "/" || -z "$bp" ]] && bp="" || bp=$(echo "$bp" | sed 's|/$||')
+  # normalize trailing slash: "/abc/" → "/abc", "/" → ""(root), "" → ""
+  if [[ "$bp" == "/" || -z "$bp" ]]; then
+    bp=""
+  else
+    bp=$(echo "$bp" | sed 's|/$||')
+  fi
   local _cookie="/etc/chaiya/xui-cookie.jar"
   rm -f "$_cookie"
 
   local _r _url
-  # ลำดับ try: https+bp → http+bp → https root → http root
+  # [FIX] ลอง root path ก่อนเสมอ เพราะ 3x-ui ใหม่ webBasePath="/" = ไม่มี prefix
+  # ลำดับ: http root → https root → http+bp → https+bp
   local _tries=(
-    "https://127.0.0.1:${p}${bp}/login"
-    "http://127.0.0.1:${p}${bp}/login"
-    "https://127.0.0.1:${p}/login"
     "http://127.0.0.1:${p}/login"
+    "https://127.0.0.1:${p}/login"
+    "http://127.0.0.1:${p}${bp}/login"
+    "https://127.0.0.1:${p}${bp}/login"
   )
-  # dedup ถ้า bp ว่าง (จะซ้ำกับ root)
+  # dedup กรณี bp ว่าง (root ซ้ำ)
   local _seen=()
   for _url in "${_tries[@]}"; do
-    # skip ซ้ำ
     local _dup=0
     for _s in "${_seen[@]}"; do [[ "$_s" == "$_url" ]] && _dup=1; done
     [[ "$_dup" == "1" ]] && continue
@@ -4072,7 +4076,9 @@ detect_xui_basepath() {
       "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;" \
       2>/dev/null || true)
     bp=$(echo "$bp" | tr -d '[:space:]')
-    if [[ -n "$bp" && "$bp" != "/" ]]; then
+    # [FIX] 3x-ui version ใหม่ webBasePath="/" เป็นค่าที่ถูกต้อง — ไม่ discard
+    # คืนค่าทันทีที่มีค่าใดก็ได้ (ว่างหมายถึง db ยัง lock อยู่ → retry)
+    if [[ -n "$bp" ]]; then
       echo "$bp"; return
     fi
     sleep 1
@@ -4196,12 +4202,12 @@ menu_1() {
   rgb_bar 40 "อ่าน basepath จาก db..."
   local _basepath
   _basepath=$(detect_xui_basepath 5)
-  if [[ -z "$_basepath" || "$_basepath" == "/" ]]; then
-    # installer version เก่าไม่มี basepath → ใช้ "/" (ไม่ต้อง generate เอง)
+  # [FIX] "/" เป็นค่าที่ถูกต้องสำหรับ 3x-ui ใหม่ — ไม่ treat เป็น "ไม่มี"
+  if [[ -z "$_basepath" ]]; then
     _basepath="/"
     printf "  ${YE}⚠ installer ไม่ได้ตั้ง basepath — ใช้ root path${RS}\n"
   else
-    printf "  ${GR}✔ basepath จาก installer: ${WH}%s${RS}\n" "$_basepath"
+    printf "  ${GR}✔ basepath จาก db: ${WH}%s${RS}\n" "$_basepath"
   fi
   echo "$_basepath" > /etc/chaiya/xui-basepath.conf
 
@@ -4407,7 +4413,14 @@ print(json.dumps(payload))
   # ════════════════════════════════════════════════════════════
   # สรุปผล — กระชับ
   # ════════════════════════════════════════════════════════════
-  local _bp_clean; _bp_clean=$(echo "$_basepath" | sed 's|/$||')
+  # [FIX] basepath "/" → URL = "http://IP:2053/" (ไม่ต้องมี prefix เพิ่ม)
+  # basepath "/abc" → URL = "http://IP:2053/abc/"
+  local _bp_clean
+  if [[ "$_basepath" == "/" || -z "$_basepath" ]]; then
+    _bp_clean=""
+  else
+    _bp_clean=$(echo "$_basepath" | sed 's|/$||')
+  fi
   local _proto; _proto=$(xui_proto)
   # ใช้โดเมนถ้ามี ไม่งั้นใช้ IP
   local _host_display
