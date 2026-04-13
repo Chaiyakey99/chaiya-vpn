@@ -4072,18 +4072,52 @@ detect_xui_basepath() {
   if ! command -v sqlite3 &>/dev/null; then echo "/"; return; fi
   if [[ ! -f "$db_path" ]];            then echo "/"; return; fi
   for _dbtry in $(seq 1 "$max_try"); do
+    # [FIX] 3x-ui version ใหม่ใช้ key='secret' แทน 'webBasePath'
+    # ลองอ่าน webBasePath ก่อน ถ้าไม่มีให้ลอง secret
     bp=$(sqlite3 "$db_path" \
       "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;" \
       2>/dev/null || true)
     bp=$(echo "$bp" | tr -d '[:space:]')
-    # [FIX] 3x-ui version ใหม่ webBasePath="/" เป็นค่าที่ถูกต้อง — ไม่ discard
-    # คืนค่าทันทีที่มีค่าใดก็ได้ (ว่างหมายถึง db ยัง lock อยู่ → retry)
-    if [[ -n "$bp" ]]; then
+    if [[ -n "$bp" && "$bp" != "/" ]]; then
       echo "$bp"; return
+    fi
+    # ลอง key='secret' (3x-ui v2.x+)
+    local _secret
+    _secret=$(sqlite3 "$db_path" \
+      "SELECT value FROM settings WHERE key='secret' LIMIT 1;" \
+      2>/dev/null || true)
+    _secret=$(echo "$_secret" | tr -d '[:space:]')
+    if [[ -n "$_secret" ]]; then
+      echo "/${_secret}"; return
     fi
     sleep 1
   done
   echo "/"
+}
+
+# อ่าน secret token โดยตรง (สำหรับแสดง URL)
+detect_xui_secret() {
+  local db_path="/etc/x-ui/x-ui.db"
+  if ! command -v sqlite3 &>/dev/null; then echo ""; return; fi
+  if [[ ! -f "$db_path" ]];            then echo ""; return; fi
+  sqlite3 "$db_path" "SELECT value FROM settings WHERE key='secret' LIMIT 1;" 2>/dev/null | tr -d '[:space:]'
+}
+
+# อ่าน port จาก x-ui process จริง (3x-ui ใหม่ไม่เก็บ webPort ใน settings)
+detect_xui_port() {
+  # ลองอ่านจาก db ก่อน
+  local db_path="/etc/x-ui/x-ui.db"
+  local _p=""
+  if command -v sqlite3 &>/dev/null && [[ -f "$db_path" ]]; then
+    _p=$(sqlite3 "$db_path" "SELECT value FROM settings WHERE key='webPort' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')
+  fi
+  # ถ้าไม่มีใน db ให้อ่านจาก process ที่รันอยู่
+  if [[ -z "$_p" ]]; then
+    _p=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K[0-9]+' | head -1)
+  fi
+  # fallback
+  [[ -z "$_p" ]] && _p="2053"
+  echo "$_p"
 }
 
 menu_1() {
@@ -4093,6 +4127,17 @@ menu_1() {
   printf "${R1}┌──────────────────────────────────────────────────┐${RS}\n"
   printf "${R1}│${RS}  ☠️  ${R2}${BLD}ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ${RS}           ${R1}│${RS}\n"
   printf "${R1}└──────────────────────────────────────────────────┘${RS}\n\n"
+
+  # [FIX] ตรวจและติดตั้ง sqlite3 ก่อนใช้งาน — จำเป็นสำหรับอ่าน/เขียน x-ui.db
+  if ! command -v sqlite3 &>/dev/null; then
+    printf "  ${YE}⏳ ติดตั้ง sqlite3...${RS}\n"
+    apt-get install -y -qq sqlite3 2>/dev/null || apt-get install -y sqlite3 2>/dev/null || true
+    if ! command -v sqlite3 &>/dev/null; then
+      printf "  ${RD}✗ ติดตั้ง sqlite3 ไม่สำเร็จ — ตรวจ apt แล้วลองใหม่${RS}\n"
+      read -rp "  Enter..."; return
+    fi
+    printf "  ${GR}✔ ติดตั้ง sqlite3 สำเร็จ${RS}\n\n"
+  fi
 
   # ── ถ้า x-ui รันอยู่แล้ว ให้ลบออกอัตโนมัติก่อน ─────────────
   if systemctl is-active --quiet x-ui 2>/dev/null; then
@@ -4153,10 +4198,14 @@ menu_1() {
   fi
 
   # ── 15% รัน installer ──────────────────────────────────────────
-  # ส่ง "y" เดียว — ปล่อยให้ installer ใช้ค่า default ทั้งหมด
-  # เราจะ overwrite ทุกอย่างด้วย sqlite3 หลัง install เสร็จ
+  # [FIX] installer ใหม่ถาม 5 คำถาม ต้องตอบครบ:
+  #   y     = ยืนยันติดตั้ง
+  #   2053  = panel port
+  #   2     = ใช้ IP แทนโดเมน (สำหรับ SSL cert)
+  #   ""    = Enter (webBasePath = /)
+  #   80    = HTTP port สำหรับ cert challenge
   rgb_bar 15 "กำลังติดตั้ง 3x-ui (อาจใช้ 1-3 นาที)..."
-  printf "y\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
+  printf "y\n2053\n2\n\n80\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
   rm -f "$_xui_sh"
 
   # ── 25% รอให้ installer เสร็จ + x-ui ขึ้นจริง ──────────────────
@@ -4197,15 +4246,25 @@ menu_1() {
     read -rp "  Enter..."; return
   fi
 
-  # ── 40% อ่าน basepath จาก db ที่ installer สร้างไว้ ─────────────
+  # ── 40% อ่าน basepath/secret จาก db ที่ installer สร้างไว้ ──────
   # ต้องอ่านตอนที่ x-ui หยุดอยู่ — db ไม่ถูก lock
-  rgb_bar 40 "อ่าน basepath จาก db..."
-  local _basepath
+  rgb_bar 40 "อ่าน basepath/secret จาก db..."
+  local _basepath _xui_secret _xui_real_port
   _basepath=$(detect_xui_basepath 5)
-  # [FIX] "/" เป็นค่าที่ถูกต้องสำหรับ 3x-ui ใหม่ — ไม่ treat เป็น "ไม่มี"
+  _xui_secret=$(detect_xui_secret)
+  _xui_real_port=$(detect_xui_port)
+
   if [[ -z "$_basepath" ]]; then
     _basepath="/"
-    printf "  ${YE}⚠ installer ไม่ได้ตั้ง basepath — ใช้ root path${RS}\n"
+  fi
+
+  # แสดงข้อมูลที่อ่านได้
+  if [[ -n "$_xui_secret" ]]; then
+    printf "  ${GR}✔ 3x-ui ใหม่ — secret token: ${WH}%s${RS}\n" "$_xui_secret"
+    printf "  ${GR}✔ Panel URL: ${WH}http://IP:%s/%s/${RS}\n" "$_xui_real_port" "$_xui_secret"
+    # บันทึก secret ไว้ใช้ทีหลัง
+    echo "$_xui_secret" > /etc/chaiya/xui-secret.conf
+    _basepath="/${_xui_secret}"
   else
     printf "  ${GR}✔ basepath จาก db: ${WH}%s${RS}\n" "$_basepath"
   fi
@@ -4235,7 +4294,10 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
     >> /var/log/chaiya-xui-install.log 2>&1 || true
   printf "  ${GR}✔ Set credential ผ่าน x-ui CLI สำเร็จ${RS}\n"
 
-  # force port 2053 — เขียนทับค่าที่ installer ตั้งมา
+  # [FIX] 3x-ui version ใหม่ใช้ port จาก config file ไม่ใช่ settings table
+  # ลอง set ผ่าน CLI ก่อน แล้วค่อย sqlite3 เป็น fallback
+  /usr/local/x-ui/x-ui setting -port 2053 \
+    >> /var/log/chaiya-xui-install.log 2>&1 || true
   sqlite3 "$_xui_db" \
     "INSERT OR REPLACE INTO settings(key,value) VALUES('webPort','2053');" 2>/dev/null || true
   echo "2053" > /etc/chaiya/xui-port.conf
@@ -4245,6 +4307,8 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
   local _db_port _db_user
   _db_port=$(sqlite3 "$_xui_db" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
   _db_user=$(sqlite3 "$_xui_db" "SELECT username FROM users WHERE id=1;" 2>/dev/null)
+  [[ -z "$_db_port" ]] && _db_port="(ใช้ CLI)" || true
+  [[ -z "$_db_user" ]] && _db_user="(ใช้ CLI)" || true
   printf "  ${CY}→ db verify: port=%s user=%s${RS}\n" "$_db_port" "$_db_user"
 
   # ── 60% start x-ui พร้อม config ใหม่ ───────────────────────────
@@ -4413,16 +4477,7 @@ print(json.dumps(payload))
   # ════════════════════════════════════════════════════════════
   # สรุปผล — กระชับ
   # ════════════════════════════════════════════════════════════
-  # [FIX] basepath "/" → URL = "http://IP:2053/" (ไม่ต้องมี prefix เพิ่ม)
-  # basepath "/abc" → URL = "http://IP:2053/abc/"
-  local _bp_clean
-  if [[ "$_basepath" == "/" || -z "$_basepath" ]]; then
-    _bp_clean=""
-  else
-    _bp_clean=$(echo "$_basepath" | sed 's|/$||')
-  fi
   local _proto; _proto=$(xui_proto)
-  # ใช้โดเมนถ้ามี ไม่งั้นใช้ IP
   local _host_display
   _host_display="$MY_IP"
   if [[ -f "$DOMAIN_FILE" ]]; then
@@ -4431,13 +4486,28 @@ print(json.dumps(payload))
       _host_display="$_d_chk"
     fi
   fi
-  local _panel_url="${_proto}://${_host_display}:${_panel_port}${_bp_clean}/"
-  local _api_url="${_proto}://${_host_display}:${_panel_port}${_bp_clean}/panel/api"
+
+  # [FIX] 3x-ui ใหม่ใช้ secret token → URL = http://IP:PORT/SECRET/
+  # อ่าน port จริงที่ x-ui ฟัง (อาจไม่ใช่ 2053 ถ้า CLI set ไม่ได้)
+  local _actual_port; _actual_port=$(detect_xui_port)
+  local _secret_tok; _secret_tok=$(cat /etc/chaiya/xui-secret.conf 2>/dev/null | tr -d '[:space:]')
+
+  local _panel_url _api_url
+  if [[ -n "$_secret_tok" ]]; then
+    _panel_url="${_proto}://${_host_display}:${_actual_port}/${_secret_tok}/"
+    _api_url="${_proto}://${_host_display}:${_actual_port}/${_secret_tok}/panel/api"
+  else
+    local _bp_clean
+    [[ "$_basepath" == "/" || -z "$_basepath" ]] && _bp_clean="" || _bp_clean=$(echo "$_basepath" | sed 's|/$||')
+    _panel_url="${_proto}://${_host_display}:${_actual_port}${_bp_clean}/"
+    _api_url="${_proto}://${_host_display}:${_actual_port}${_bp_clean}/panel/api"
+  fi
 
   printf "${R1}┌──────────────────────────────────────────────────┐${RS}\n"
   printf "${R1}│${RS}  🌐 Panel  : ${WH}%s${RS}\n" "$_panel_url"
   printf "${R1}│${RS}  🔗 API    : ${WH}%s${RS}\n" "$_api_url"
   printf "${R1}│${RS}  👤 User   : ${WH}%s${RS}  🔑 Pass: ${WH}%s${RS}\n" "$_u" "$_pw"
+  [[ -n "$_secret_tok" ]] && printf "${R1}│${RS}  🔐 Secret : ${WH}%s${RS}\n" "$_secret_tok"
   printf "${R1}├──────────────────────────────────────────────────┤${RS}\n"
   for _r in "${_ib_results[@]}"; do
     printf "${R1}│${RS}  $(printf "${_r}")\n"
