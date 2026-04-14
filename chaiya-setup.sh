@@ -47,10 +47,23 @@ while true; do
 done
 [[ ${#PANEL_PASS} -lt 6 ]] && err "Password ต้องมีอย่างน้อย 6 ตัวอักษร"
 
+# ── XUI CREDENTIALS ──────────────────────────────────────────
+echo ""
+echo -e "${YELLOW}กำหนด Username / Password สำหรับ 3x-ui${NC}"
+read -rp "  3x-ui Username: " XUI_USER
+[[ -z "$XUI_USER" ]] && XUI_USER="admin"
+while true; do
+  read -rsp "  3x-ui Password: " XUI_PASS; echo
+  read -rsp "  Confirm 3x-ui Password: " XUI_PASS2; echo
+  [[ "$XUI_PASS" == "$XUI_PASS2" ]] && break
+  warn "Password ไม่ตรงกัน ลองอีกครั้ง"
+done
+[[ ${#XUI_PASS} -lt 6 ]] && err "3x-ui Password ต้องมีอย่างน้อย 6 ตัวอักษร"
+
 # ── PORTS ────────────────────────────────────────────────────
 SSH_API_PORT=2095
-XUI_PORT=2053
-PANEL_PORT=8080
+XUI_PORT=80
+PANEL_PORT=8888
 DROPBEAR_PORT1=143
 DROPBEAR_PORT2=109
 BADVPN_PORT=7300
@@ -265,9 +278,58 @@ systemctl start chaiya-ssh-api
 ok "SSH API พร้อม (port $SSH_API_PORT)"
 
 # ── 3X-UI ────────────────────────────────────────────────────
+info "ตรวจสอบ x-ui เก่า..."
+if command -v x-ui &>/dev/null || systemctl list-units --all | grep -q x-ui; then
+  warn "พบ x-ui เก่า กำลังลบ..."
+  systemctl stop x-ui &>/dev/null || true
+  systemctl disable x-ui &>/dev/null || true
+  bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) uninstall &>/dev/null || true
+  rm -rf /usr/local/x-ui /etc/x-ui /usr/bin/x-ui &>/dev/null || true
+  ok "ลบ x-ui เก่าเสร็จแล้ว"
+fi
 info "ติดตั้ง 3x-ui..."
 echo "y" | bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) &>/dev/null
+ok "3x-ui ติดตั้งเสร็จ"
+
+info "ตั้งค่า 3x-ui port, user, password และ webBasePath..."
+sleep 3
+if [ -f /etc/x-ui/x-ui.db ]; then
+  sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings (key,value) VALUES ('webBasePath','/');"
+  sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings (key,value) VALUES ('port','$XUI_PORT');"
+  sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings (key,value) VALUES ('username','$XUI_USER');"
+  sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings (key,value) VALUES ('password','$XUI_PASS');"
+  ok "ตั้งค่า 3x-ui สำเร็จ (port: $XUI_PORT, user: $XUI_USER, webBasePath: /)"
+else
+  warn "ไม่พบ x-ui.db — ลองตั้งค่าผ่าน command"
+fi
+x-ui restart &>/dev/null
+sleep 3
 ok "3x-ui พร้อม (port $XUI_PORT)"
+
+# ── สร้าง VLESS INBOUNDS ──────────────────────────────────────
+info "สร้าง Inbound AIS และ TRUE ผ่าน 3x-ui API..."
+sleep 3
+
+xui_login() {
+  curl -s -c /tmp/xui_cookie.txt -X POST     "http://127.0.0.1:${XUI_PORT}/login"     -H "Content-Type: application/x-www-form-urlencoded"     --data-urlencode "username=${XUI_USER}"     --data-urlencode "password=${XUI_PASS}"     -m 10 2>/dev/null
+}
+
+xui_add_inbound() {
+  local remark="$1" port="$2" sni="$3"
+  curl -s -b /tmp/xui_cookie.txt -X POST     "http://127.0.0.1:${XUI_PORT}/panel/api/inbounds/add"     -H "Content-Type: application/json"     -m 15     -d "{\"remark\":\"${remark}\",\"enable\":true,\"listen\":\"\",\"port\":${port},\"protocol\":\"vless\",\"settings\":\"{\\\"clients\\\":[],\\\"decryption\\\":\\\"none\\\"}\",\"streamSettings\":\"{\\\"network\\\":\\\"ws\\\",\\\"security\\\":\\\"none\\\",\\\"wsSettings\\\":{\\\"path\\\":\\\"/vless\\\",\\\"headers\\\":{\\\"Host\\\":\\\"${sni}\\\"}}}\",\"sniffing\":\"{\\\"enabled\\\":true,\\\"destOverride\\\":[\\\"http\\\",\\\"tls\\\"]}\"}"}" 2>/dev/null
+}
+
+LOGIN_RES=$(xui_login)
+if echo "$LOGIN_RES" | grep -q '"success":true'; then
+  ok "Login x-ui API สำเร็จ"
+  RES1=$(xui_add_inbound "AIS-กันรั่ว" 8080 "cj-ebb.speedtest.net")
+  echo "$RES1" | grep -q '"success":true' && ok "สร้าง AIS Inbound สำเร็จ" || warn "AIS: $RES1"
+  RES2=$(xui_add_inbound "TRUE-VDO" 8880 "true-internet.zoom.xyz.services")
+  echo "$RES2" | grep -q '"success":true' && ok "สร้าง TRUE Inbound สำเร็จ" || warn "TRUE: $RES2"
+else
+  warn "Login x-ui API ไม่สำเร็จ กรุณาสร้าง Inbound เองใน panel"
+fi
+rm -f /tmp/xui_cookie.txt
 
 # ── PANEL DIR + config.js ─────────────────────────────────────
 info "สร้าง Panel files..."
@@ -282,8 +344,8 @@ window.CHAIYA_CONFIG = {
   host:         "$SERVER_IP",
   ssh_api_port: $SSH_API_PORT,
   xui_port:     $XUI_PORT,
-  xui_user:     "admin",
-  xui_pass:     "admin",
+  xui_user:     "$XUI_USER",
+  xui_pass:     "$XUI_PASS",
   ssh_token:    "",
   panel_pass:   "$PASS_HASH"
 };
@@ -322,7 +384,7 @@ ufw --force reset &>/dev/null
 ufw default deny incoming &>/dev/null
 ufw default allow outgoing &>/dev/null
 for port in 22 80 $PANEL_PORT $DROPBEAR_PORT1 $DROPBEAR_PORT2 \
-            $SSH_API_PORT $XUI_PORT $BADVPN_PORT $OPENVPN_PORT; do
+            $SSH_API_PORT $XUI_PORT $BADVPN_PORT $OPENVPN_PORT 8080 8880; do
   ufw allow $port &>/dev/null
 done
 ufw --force enable &>/dev/null
@@ -343,6 +405,7 @@ echo -e "  🌐 Panel URL      : ${CYAN}http://$SERVER_IP:$PANEL_PORT${NC}"
 echo -e "  🔑 Panel Password : ${YELLOW}$PANEL_PASS${NC}"
 echo -e "  🔧 SSH API        : ${CYAN}http://$SERVER_IP:$SSH_API_PORT${NC}"
 echo -e "  📊 3x-ui Panel    : ${CYAN}http://$SERVER_IP:$XUI_PORT${NC}"
+echo -e "  👤 3x-ui Username : ${YELLOW}$XUI_USER${NC}"
 echo -e "  🐻 Dropbear       : ${CYAN}port $DROPBEAR_PORT1, $DROPBEAR_PORT2${NC}"
 echo -e "  🎮 BadVPN         : ${CYAN}port $BADVPN_PORT${NC}"
 echo ""
