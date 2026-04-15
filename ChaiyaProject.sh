@@ -4887,7 +4887,6 @@ menu_3() {
   local TOTAL_BYTES=$(( DATA_GB * 1073741824 ))
   local EXP_MS=$(( $(date -d "$EXP" +%s) * 1000 ))
   local SEC="none"
-  [[ -f "$DOMAIN_FILE" ]] && SEC="tls"
 
   rgb_bar 20 "ตรวจสอบ 3x-ui API..."; printf "\n\n"
 
