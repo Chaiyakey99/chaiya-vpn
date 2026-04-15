@@ -3978,24 +3978,16 @@ async function fetchTraffic(){
     var txtEl   = document.getElementById('data-txt');
     var pctEl   = document.getElementById('bar-pct');
 
-    if(limGb > 0){
-      // มี limit — แสดง used/limit + bar
-      txtEl.textContent = usedGb.toFixed(2) + ' / ' + limGb + ' GB';
-      var bc = barColor(pct);
-      barEl.classList.remove('bar-rgb');
-      barEl.style.background = 'linear-gradient(90deg,'+bc+','+bc+'88)';
-      barEl.style.boxShadow  = '0 0 8px '+bc+'66';
-      barEl.style.width      = pct+'%';
-      pctEl.textContent      = pct+'%';
-      pctEl.style.color      = bc+'aa';
+    var downGb = d.down_gb || 0;
+    var upGb   = d.up_gb   || 0;
 
-      // ── หมดโควต้า: แสดงข้อความเตือนและ disable ปุ่ม ──
+    if(limGb > 0){
+      // มี limit — แสดง used/limit + ↓↑ แยก + bar
       if(pct >= 100 || d.over_limit){
-        txtEl.textContent = '\u26a0\ufe0f Data หมดแล้ว! ' + usedGb.toFixed(2) + ' / ' + limGb + ' GB';
+        txtEl.textContent = '\u26a0\ufe0f Data หมดแล้ว! ' + usedGb.toFixed(2) + ' / ' + limGb + ' GB  \u2193'+downGb.toFixed(2)+' \u2191'+upGb.toFixed(2)+' GB';
         txtEl.style.color = '#ff4060';
         pctEl.textContent = '100% — หมด';
         pctEl.style.color = '#ff4060';
-        // Notify server ให้ kick (ถ้า API รองรับ)
         if(!fetchTraffic._kicked){
           fetchTraffic._kicked = true;
           fetch('/sshws-api/api/kick',{
@@ -4005,20 +3997,26 @@ async function fetchTraffic(){
           }).catch(function(){});
         }
       } else {
+        txtEl.textContent = usedGb.toFixed(2) + ' / ' + limGb + ' GB  \u2193'+downGb.toFixed(2)+' \u2191'+upGb.toFixed(2)+' GB';
         txtEl.style.color = '';
         fetchTraffic._kicked = false;
       }
+      var bc = barColor(pct);
+      barEl.classList.remove('bar-rgb');
+      barEl.style.background = 'linear-gradient(90deg,'+bc+','+bc+'88)';
+      barEl.style.boxShadow  = '0 0 8px '+bc+'66';
+      barEl.style.width      = pct+'%';
+      pctEl.textContent      = pct+'%';
+      pctEl.style.color      = bc+'aa';
     } else {
-      // ไม่จำกัด
-      var downGb = d.down_gb || 0;
-      var upGb   = d.up_gb   || 0;
-      txtEl.textContent = '↓ '+downGb.toFixed(2)+' ↑ '+upGb.toFixed(2)+' GB';
+      // ไม่จำกัด — แสดง ↓↑ เสมอ
+      txtEl.textContent = '\u2193 '+downGb.toFixed(2)+' GB  \u2191 '+upGb.toFixed(2)+' GB';
       txtEl.style.color = '';
       barEl.style.width      = '100%';
       barEl.style.background = '';
       barEl.style.boxShadow  = '';
       barEl.classList.add('bar-rgb');
-      pctEl.textContent      = '∞ ไม่จำกัด';
+      pctEl.textContent      = '\u221e ไม่จำกัด';
       pctEl.style.color      = '#00ff8088';
     }
   } catch(e){}
