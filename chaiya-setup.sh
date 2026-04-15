@@ -185,24 +185,53 @@ n
 XUIEOF
 fi
 
-# ตั้งค่า x-ui: port, username, password (เขียนตรงลง SQLite DB — เชื่อถือได้ทุก version)
-sleep 3
+# ตั้งค่า x-ui: หยุดก่อนแก้ DB เพื่อป้องกัน race condition
 systemctl stop x-ui 2>/dev/null || true
-sleep 1
+sleep 2
+
 XUI_DB="/etc/x-ui/x-ui.db"
+
+# วิธีที่ 1: x-ui CLI (ถูกต้องที่สุด — จัดการ hash เองถูกต้อง)
+x-ui setting -port "$XUI_PORT"        2>/dev/null || true
+x-ui setting -username "$XUI_USER"    2>/dev/null || true
+x-ui setting -password "$XUI_PASS"    2>/dev/null || true
+x-ui setting -secret  ""              2>/dev/null || true
+
+# วิธีที่ 2: เขียนตรงลง SQLite เป็น fallback (รองรับทั้ง plain text และ hashed)
 if [[ -f "$XUI_DB" ]]; then
-  sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS}' WHERE id=1;" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_PORT}' WHERE key='webPort';" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_USER}' WHERE key='webUsername';" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_PASS}' WHERE key='webPassword';" 2>/dev/null || true
-else
-  # fallback: ใช้ x-ui setting command (3x-ui เก่า)
-  x-ui setting -port $XUI_PORT 2>/dev/null || true
-  x-ui setting -username "$XUI_USER" 2>/dev/null || true
-  x-ui setting -password "$XUI_PASS" 2>/dev/null || true
+  # ตรวจว่า 3x-ui version นี้ใช้ plain text หรือ hash
+  DB_PASS=$(sqlite3 "$XUI_DB" "SELECT password FROM users WHERE id=1;" 2>/dev/null)
+  if echo "$DB_PASS" | grep -qE '^\$2[aby]\$|^\$argon2'; then
+    # password เป็น bcrypt/argon2 hash — ใช้ CLI เท่านั้น (ทำไปแล้วข้างบน)
+    info "x-ui ใช้ hashed password — ตั้งค่าผ่าน CLI เรียบร้อย"
+  else
+    # plain text — เขียนตรงได้เลย
+    sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS}' WHERE id=1;" 2>/dev/null || true
+  fi
+  # ตั้ง port และ webUsername/webPassword ใน settings table เสมอ
+  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_PORT}'  WHERE key='webPort';"     2>/dev/null || true
+  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_USER}' WHERE key='webUsername';"  2>/dev/null || true
+  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_PASS}' WHERE key='webPassword';"  2>/dev/null || true
+  # ถ้า row ไม่มีให้ INSERT
+  sqlite3 "$XUI_DB" "INSERT OR IGNORE INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"    2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR IGNORE INTO settings(key,value) VALUES('webUsername','${XUI_USER}');" 2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR IGNORE INTO settings(key,value) VALUES('webPassword','${XUI_PASS}');" 2>/dev/null || true
 fi
+
 systemctl start x-ui 2>/dev/null || true
 sleep 3
+
+# ยืนยันว่า username/password ถูกตั้งแล้ว
+VERIFY_USER=$(sqlite3 "$XUI_DB" "SELECT username FROM users WHERE id=1;" 2>/dev/null)
+if [[ "$VERIFY_USER" == "$XUI_USER" ]]; then
+  ok "x-ui credentials ตั้งค่าสำเร็จ (username: $XUI_USER)"
+else
+  warn "x-ui username อาจยังเป็น '${VERIFY_USER}' — ลองตั้งซ้ำผ่าน CLI..."
+  systemctl stop x-ui 2>/dev/null || true; sleep 1
+  x-ui setting -username "$XUI_USER" 2>/dev/null || true
+  x-ui setting -password "$XUI_PASS" 2>/dev/null || true
+  systemctl start x-ui 2>/dev/null || true; sleep 2
+fi
 
 # ตรวจ port จริงที่ x-ui ใช้ (อ่านจาก DB โดยตรง เชื่อถือได้กว่า ss grep)
 REAL_XUI_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null | tr -d '[:space:]')
@@ -936,7 +965,9 @@ window.CHAIYA_CONFIG = {
 };
 EOF
 
+
 # ── PANEL INDEX.HTML ───────────────────────────────────────────
+# config.js โหลดเป็น <script src> ใน HTML — ไม่ใช้ dynamic inject
 cat > /opt/chaiya-panel/index.html << 'HTMLEOF'
 <!DOCTYPE html>
 <html lang="th">
@@ -944,8 +975,10 @@ cat > /opt/chaiya-panel/index.html << 'HTMLEOF'
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CHAIYA VPN PANEL</title>
+<!-- config.js โหลดก่อน script หลัก — ป้องกัน race condition -->
+<script src="config.js"></script>
 <style>
-  :root{--bg:#0a0d14;--bg2:#0f1520;--panel:#111827;--border:#1e2d45;
+  :root{--bg:#0a0d14;--panel:#111827;--border:#1e2d45;
     --green:#4dffa0;--cyan:#80ffdd;--purple:#b8a0ff;--yellow:#ffe680;
     --red:#ff6b8a;--text:#c8ddd0;--muted:#7a9aaa;}
   *{margin:0;padding:0;box-sizing:border-box;}
@@ -963,39 +996,30 @@ cat > /opt/chaiya-panel/index.html << 'HTMLEOF'
     border-radius:10px;padding:.75rem 1rem;text-align:center;margin-bottom:1.5rem;}
   .server-box .lbl{font-size:.7rem;letter-spacing:.2em;color:var(--muted);margin-bottom:.3rem;}
   .server-box .ip{color:var(--cyan);font-size:1.1rem;font-weight:700;font-family:monospace;}
-  .field-lbl{font-size:.72rem;letter-spacing:.1em;color:var(--muted);margin-bottom:.4rem;
-    display:flex;align-items:center;gap:.4rem;}
-  .field-lbl .ico{font-size:.9rem;}
+  .field-lbl{font-size:.72rem;letter-spacing:.1em;color:var(--muted);margin-bottom:.4rem;}
   input[type=password]{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--border);
-    border-radius:8px;padding:.75rem 1rem;color:var(--text);font-size:.95rem;
-    outline:none;transition:border .2s;}
+    border-radius:8px;padding:.75rem 1rem;color:var(--text);font-size:.95rem;outline:none;transition:border .2s;}
   input[type=password]:focus{border-color:var(--cyan);}
   .btn{width:100%;padding:.85rem;border:none;border-radius:10px;font-size:.9rem;
-    font-weight:700;letter-spacing:.1em;cursor:pointer;margin-top:1rem;
-    background:linear-gradient(135deg,var(--green),var(--cyan));color:#0a0d14;
-    transition:opacity .2s,transform .1s;}
-  .btn:hover{opacity:.9;}
-  .btn:active{transform:scale(.98);}
+    font-weight:700;cursor:pointer;margin-top:1rem;
+    background:linear-gradient(135deg,var(--green),var(--cyan));color:#0a0d14;transition:opacity .2s;}
   .btn:disabled{opacity:.5;cursor:not-allowed;}
-  .msg{text-align:center;font-size:.82rem;padding:.6rem;border-radius:8px;
-    margin-top:.8rem;display:none;}
+  .msg{text-align:center;font-size:.82rem;padding:.6rem;border-radius:8px;margin-top:.8rem;display:none;}
   .msg.err{background:rgba(255,107,138,.1);color:var(--red);border:1px solid rgba(255,107,138,.3);}
   .msg.ok{background:rgba(77,255,160,.1);color:var(--green);border:1px solid rgba(77,255,160,.3);}
   .dots{display:flex;justify-content:center;gap:.4rem;margin-top:.8rem;}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:background .3s;}
   .dot.lit{background:var(--cyan);}
-  /* Dashboard */
   #dashboard{display:none;}
   .nav{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1.5rem;}
   .nav-btn{padding:.45rem .9rem;border:1px solid var(--border);border-radius:8px;
     background:transparent;color:var(--muted);font-size:.78rem;cursor:pointer;transition:.2s;}
-  .nav-btn.active,.nav-btn:hover{border-color:var(--cyan);color:var(--cyan);background:rgba(128,255,221,.06);}
+  .nav-btn.active{border-color:var(--cyan);color:var(--cyan);background:rgba(128,255,221,.06);}
   .page{display:none;}.page.active{display:block;}
   .stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.8rem;margin-bottom:1rem;}
-  .stat{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;
-    padding:.8rem;text-align:center;}
+  .stat{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;padding:.8rem;text-align:center;}
   .stat .val{font-size:1.6rem;font-weight:900;color:var(--cyan);}
-  .stat .lbl{font-size:.68rem;color:var(--muted);margin-top:.2rem;letter-spacing:.1em;}
+  .stat .lbl{font-size:.68rem;color:var(--muted);margin-top:.2rem;}
   .svc-list{display:flex;flex-direction:column;gap:.5rem;}
   .svc-row{display:flex;justify-content:space-between;align-items:center;
     padding:.6rem .8rem;background:rgba(255,255,255,.03);border-radius:8px;}
@@ -1006,63 +1030,46 @@ cat > /opt/chaiya-panel/index.html << 'HTMLEOF'
   .form-g label{display:block;font-size:.72rem;color:var(--muted);margin-bottom:.3rem;}
   .form-g input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--border);
     border-radius:8px;padding:.6rem .8rem;color:var(--text);font-size:.85rem;outline:none;}
-  .form-g input:focus{border-color:var(--cyan);}
   .btn2{padding:.6rem 1.2rem;border:none;border-radius:8px;font-size:.8rem;font-weight:700;
     cursor:pointer;background:linear-gradient(135deg,var(--green),var(--cyan));color:#0a0d14;}
   table{width:100%;border-collapse:collapse;font-size:.78rem;}
   th,td{padding:.5rem .6rem;text-align:left;border-bottom:1px solid var(--border);}
-  th{color:var(--muted);font-size:.68rem;letter-spacing:.1em;}
+  th{color:var(--muted);font-size:.68rem;}
   .del-btn{background:rgba(255,107,138,.15);color:var(--red);border:1px solid rgba(255,107,138,.3);
     border-radius:6px;padding:.2rem .5rem;font-size:.68rem;cursor:pointer;}
-  #alert{font-size:.8rem;padding:.5rem .8rem;border-radius:8px;margin-top:.5rem;display:none;}
-  #alert.ok{background:rgba(77,255,160,.1);color:var(--green);}
-  #alert.err{background:rgba(255,107,138,.1);color:var(--red);}
 </style>
 </head>
 <body>
 
-<!-- ═══ LOGIN ═══ -->
 <div class="wrap" id="login">
-  <div class="logo">
-    <div style="font-size:2.5rem;margin-bottom:.5rem">🛸</div>
-    <h1>CHAIYA VPN</h1>
-    <p>MANAGEMENT PANEL</p>
-  </div>
+  <div class="logo"><h1>CHAIYA</h1><p>VPN PANEL</p></div>
   <div class="card">
     <div class="server-box">
       <div class="lbl">VPS SERVER</div>
-      <div class="ip" id="server-ip-disp">กำลังโหลด...</div>
+      <div class="ip" id="server-ip-disp">-</div>
     </div>
-    <div class="field-lbl"><span class="ico">🔑</span> PANEL PASSWORD</div>
+    <div class="field-lbl">🔑 PANEL PASSWORD</div>
     <input type="password" id="pass-input" placeholder="••••••••" onkeyup="if(event.key==='Enter')doLogin()">
     <button class="btn" id="login-btn" onclick="doLogin()">CONNECT</button>
     <div class="msg" id="msg"></div>
     <div class="dots">
-      <div class="dot" id="d1"></div>
-      <div class="dot" id="d2"></div>
-      <div class="dot" id="d3"></div>
-      <div class="dot" id="d4"></div>
-      <div class="dot" id="d5"></div>
+      <div class="dot" id="d1"></div><div class="dot" id="d2"></div>
+      <div class="dot" id="d3"></div><div class="dot" id="d4"></div><div class="dot" id="d5"></div>
     </div>
   </div>
 </div>
 
-<!-- ═══ DASHBOARD ═══ -->
 <div style="width:100%;max-width:680px;margin:0 auto;padding:1.5rem" id="dashboard">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
     <h2 style="color:var(--cyan);font-size:1.1rem">🛸 CHAIYA VPN PANEL</h2>
-    <button onclick="doLogout()" style="background:rgba(255,107,138,.15);color:var(--red);
-      border:1px solid rgba(255,107,138,.3);border-radius:8px;padding:.35rem .8rem;
-      font-size:.75rem;cursor:pointer;">Logout</button>
+    <button onclick="doLogout()" style="background:rgba(255,107,138,.15);color:var(--red);border:1px solid rgba(255,107,138,.3);border-radius:8px;padding:.35rem .8rem;font-size:.75rem;cursor:pointer;">Logout</button>
   </div>
-
   <div class="nav">
-    <button class="nav-btn active" onclick="showPage('dashboard')">📊 Dashboard</button>
-    <button class="nav-btn" onclick="showPage('users')">👤 Users</button>
-    <button class="nav-btn" onclick="showPage('services')">⚙️ Services</button>
+    <button class="nav-btn active" id="nb-dashboard" onclick="showPage('dashboard',this)">📊 Dashboard</button>
+    <button class="nav-btn" id="nb-users" onclick="showPage('users',this)">👤 Users</button>
+    <button class="nav-btn" id="nb-services" onclick="showPage('services',this)">⚙️ Services</button>
   </div>
 
-  <!-- Dashboard Page -->
   <div id="page-dashboard" class="page active">
     <div class="stat-grid">
       <div class="stat"><div class="val" id="s-conn">-</div><div class="lbl">CONNECTIONS</div></div>
@@ -1074,7 +1081,6 @@ cat > /opt/chaiya-panel/index.html << 'HTMLEOF'
     <div style="text-align:right;font-size:.65rem;color:var(--muted);margin-top:.8rem" id="last-upd"></div>
   </div>
 
-  <!-- Users Page -->
   <div id="page-users" class="page">
     <div class="card" style="margin-bottom:1rem">
       <h3 style="font-size:.85rem;margin-bottom:.8rem;color:var(--cyan)">➕ เพิ่ม User</h3>
@@ -1082,25 +1088,24 @@ cat > /opt/chaiya-panel/index.html << 'HTMLEOF'
       <div class="form-g"><label>Password</label><input type="password" id="new-pass" placeholder="password"></div>
       <div class="form-g"><label>จำนวนวัน</label><input id="new-days" type="number" value="30"></div>
       <button class="btn2" onclick="createUser()">➕ สร้าง User</button>
-      <div id="alert"></div>
+      <div id="u-alert" style="margin-top:.5rem;font-size:.8rem;display:none"></div>
     </div>
     <div class="card">
       <h3 style="font-size:.85rem;margin-bottom:.8rem;color:var(--cyan)">📋 รายชื่อ Users</h3>
       <div style="overflow-x:auto">
         <table>
           <thead><tr><th>#</th><th>Username</th><th>หมดอายุ</th><th>สถานะ</th><th>NPV</th><th></th></tr></thead>
-          <tbody id="user-tbody"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1rem">กำลังโหลด...</td></tr></tbody>
+          <tbody id="user-tbody"></tbody>
         </table>
       </div>
     </div>
   </div>
 
-  <!-- Services Page -->
   <div id="page-services" class="page">
     <div class="card">
       <h3 style="font-size:.85rem;margin-bottom:.8rem;color:var(--cyan)">⚙️ Services</h3>
       <div class="svc-list" id="svc-detail"></div>
-      <div style="display:flex;gap:.5rem;margin-top:1rem;flex-wrap:wrap">
+      <div style="margin-top:1rem">
         <button class="btn2" onclick="svcAll('restart')">🔄 Restart All</button>
       </div>
     </div>
@@ -1108,91 +1113,78 @@ cat > /opt/chaiya-panel/index.html << 'HTMLEOF'
 </div>
 
 <script>
-// ══════════════ CONFIG ══════════════
-let CFG = null;
-let API_BASE = '';
-let loggedIn = false;
+// API ชี้ที่ /api/ บน same-origin (nginx proxy) — ไม่มี CORS ปัญหาเลย
+var API = '/api';
+var CFG = window.CHAIYA_CONFIG || {};
+var loggedIn = false;
 
-async function loadConfig() {
+// แสดง IP จาก config.js ที่โหลดเป็น <script src> แล้ว (synchronous)
+document.getElementById('server-ip-disp').textContent = CFG.host || location.hostname;
+
+// ── SHA256 ──────────────────────────────────────────────────
+async function sha256hex(s) {
   try {
-    // โหลด config.js แบบ dynamic
-    await new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = 'config.js?v=' + Date.now();
-      s.onload = res;
-      s.onerror = rej;
-      document.head.appendChild(s);
-    });
-    CFG = window.CHAIYA_CONFIG;
-    document.getElementById('server-ip-disp').textContent = CFG.host;
-    API_BASE = `http://${CFG.host}:${CFG.ssh_api_port}`;
-  } catch(e) {
-    document.getElementById('server-ip-disp').textContent = 'ไม่พบ config.js';
-  }
+    var b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+    return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0');}).join('');
+  } catch(e) { return null; }
 }
 
-// ══════════════ SHA256 ══════════════
-async function sha256hex(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+// ── fetch with timeout (รองรับทุก browser) ───────────────────
+function ftch(url, opts, ms) {
+  return new Promise(function(res, rej) {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var t = setTimeout(function(){ if(ctrl) ctrl.abort(); rej(new Error('timeout')); }, ms || 10000);
+    var o = Object.assign({}, opts);
+    if (ctrl) o.signal = ctrl.signal;
+    fetch(url, o).then(function(r){ clearTimeout(t); res(r); }).catch(function(e){ clearTimeout(t); rej(e); });
+  });
 }
 
-// ══════════════ LOGIN ══════════════
+// ── UI helpers ───────────────────────────────────────────────
 function setDots(on) {
-  for(let i=1;i<=5;i++) {
-    const d = document.getElementById('d'+i);
-    if(on) setTimeout(()=>d.classList.add('lit'), i*100);
-    else d.classList.remove('lit');
+  for (var i=1;i<=5;i++) {
+    (function(el,on,delay){
+      if(on) setTimeout(function(){el.classList.add('lit');}, delay);
+      else el.classList.remove('lit');
+    })(document.getElementById('d'+i), on, i*100);
   }
 }
-
-function showMsg(text, type) {
-  const el = document.getElementById('msg');
-  el.textContent = text;
-  el.className = 'msg ' + type;
-  el.style.display = 'block';
+function showMsg(txt, type) {
+  var el = document.getElementById('msg');
+  el.textContent = txt; el.className = 'msg '+type; el.style.display = 'block';
 }
 
+// ── LOGIN ────────────────────────────────────────────────────
 async function doLogin() {
-  if(!CFG) return showMsg('ไม่พบ config — ตรวจสอบ config.js', 'err');
-  const pw = document.getElementById('pass-input').value;
-  if(!pw) return showMsg('กรุณาใส่ Password', 'err');
-
-  const btn = document.getElementById('login-btn');
-  btn.disabled = true;
-  btn.textContent = 'CONNECTING...';
-  setDots(true);
-  document.getElementById('msg').style.display = 'none';
-
+  var pw = document.getElementById('pass-input').value;
+  if (!pw) return showMsg('กรุณาใส่ Password', 'err');
+  var btn = document.getElementById('login-btn');
+  btn.disabled = true; btn.textContent = 'CONNECTING...';
+  setDots(true); document.getElementById('msg').style.display = 'none';
   try {
-    // เช็ค hash ใน browser ก่อน (ไม่ต้องเรียก API)
-    const hash = await sha256hex(pw);
-    if(CFG.panel_pass && hash !== CFG.panel_pass) {
-      setDots(false);
-      btn.disabled = false;
-      btn.textContent = 'CONNECT';
+    // 1. ตรวจ hash ฝั่ง browser ก่อน (fast fail)
+    var hash = await sha256hex(pw);
+    if (hash && CFG.panel_pass && hash !== CFG.panel_pass) {
       return showMsg('❌ Password ไม่ถูกต้อง', 'err');
     }
-
-    // ทดสอบ API เชื่อมต่อได้ไหม
-    const r = await fetch(`${API_BASE}/api/status`, {signal: AbortSignal.timeout(8000)});
-    const d = await r.json();
-    if(d.ok !== undefined || d.connections !== undefined) {
-      // Login สำเร็จ
-      loggedIn = true;
-      document.getElementById('login').style.display = 'none';
-      document.getElementById('dashboard').style.display = 'block';
-      loadDashboard();
-      setInterval(loadDashboard, 15000);
-    } else {
-      showMsg('❌ API ตอบสนองผิดปกติ', 'err');
-    }
+    // 2. verify กับ API (same-origin — ไม่มี CORS)
+    var r = await ftch(API + '/verify', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw})
+    }, 8000);
+    var d = await r.json();
+    if (!d.ok) return showMsg('❌ Password ไม่ถูกต้อง', 'err');
+    // สำเร็จ
+    loggedIn = true;
+    document.getElementById('login').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    document.body.style.display = 'block';
+    loadDashboard();
+    if (!window._dt) window._dt = setInterval(function(){ if(loggedIn && document.getElementById('page-dashboard').classList.contains('active')) loadDashboard(); }, 15000);
   } catch(e) {
-    showMsg('❌ เชื่อมต่อ API ไม่ได้: ' + e.message, 'err');
+    showMsg('❌ เชื่อมต่อไม่ได้: ' + e.message, 'err');
   } finally {
-    setDots(false);
-    btn.disabled = false;
-    btn.textContent = 'CONNECT';
+    setDots(false); btn.disabled = false; btn.textContent = 'CONNECT';
   }
 }
 
@@ -1203,175 +1195,106 @@ function doLogout() {
   document.getElementById('pass-input').value = '';
 }
 
-// ══════════════ NAV ══════════════
-function showPage(name) {
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+// ── NAV ──────────────────────────────────────────────────────
+function showPage(name, btn) {
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active');});
+  document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active');});
   document.getElementById('page-'+name).classList.add('active');
-  event.target.classList.add('active');
-  if(name==='users') loadUsers();
-  if(name==='services') loadServices();
+  if (btn) btn.classList.add('active');
+  if (name==='users')    loadUsers();
+  if (name==='services') loadServices();
 }
 
-// ══════════════ API CALL ══════════════
-async function api(method, path, body=null) {
+// ── API helper ───────────────────────────────────────────────
+async function api(method, path, body) {
   try {
-    const opts = {
-      method,
-      headers: {'Content-Type': 'application/json'},
-      signal: AbortSignal.timeout(10000)
-    };
-    if(body) opts.body = JSON.stringify(body);
-    const r = await fetch(API_BASE + path, opts);
+    var o = {method:method, headers:{'Content-Type':'application/json'}};
+    if (body) o.body = JSON.stringify(body);
+    var r = await ftch(API + path, o, 10000);
     return await r.json();
-  } catch(e) {
-    return {error: e.message};
-  }
+  } catch(e) { return {error: e.message}; }
 }
 
-// ══════════════ DASHBOARD ══════════════
+// ── DASHBOARD ────────────────────────────────────────────────
 async function loadDashboard() {
-  const d = await api('GET', '/api/status');
-  if(d.error) return;
-  document.getElementById('s-conn').textContent  = d.connections ?? '-';
-  document.getElementById('s-users').textContent = d.total_users ?? '-';
-  document.getElementById('s-online').textContent= d.online_count ?? d.online ?? '-';
-  document.getElementById('s-80').textContent    = d.conn_80 ?? '-';
-  document.getElementById('last-upd').textContent= 'อัพเดท ' + new Date().toLocaleTimeString('th-TH');
-
-  const svcs = d.services || {};
-  const list = document.getElementById('svc-list');
-  list.innerHTML = Object.entries(svcs).filter(([k])=>!['started'].includes(k)).map(([k,v])=>`
-    <div class="svc-row">
-      <span style="font-size:.8rem">${svcIcon(k)} ${k}</span>
-      <span class="badge ${v?'on':'off'}">${v?'RUNNING':'STOPPED'}</span>
-    </div>`).join('');
+  var d = await api('GET', '/status');
+  if (d.error) { document.getElementById('last-upd').textContent = '⚠ ' + d.error; return; }
+  document.getElementById('s-conn').textContent   = d.connections   != null ? d.connections   : '-';
+  document.getElementById('s-users').textContent  = d.total_users   != null ? d.total_users   : '-';
+  document.getElementById('s-online').textContent = d.online_count  != null ? d.online_count  : '-';
+  document.getElementById('s-80').textContent     = d.conn_80       != null ? d.conn_80       : '-';
+  document.getElementById('last-upd').textContent = 'อัพเดท ' + new Date().toLocaleTimeString('th-TH');
+  var svcs = d.services || {};
+  document.getElementById('svc-list').innerHTML = Object.entries(svcs).map(function(kv){
+    return '<div class="svc-row"><span>'+svcIcon(kv[0])+' '+kv[0]+'</span>'+
+      '<span class="badge '+(kv[1]?'on':'off')+'">'+(kv[1]?'RUNNING':'STOPPED')+'</span></div>';
+  }).join('');
 }
+function svcIcon(k){var m={ssh:'🔑',dropbear:'🐻',nginx:'🌐',badvpn:'🎮',sshws:'🚇',xui:'📊',tunnel:'🔗'};return m[k]||'⚙️';}
 
-function svcIcon(k) {
-  const m = {ssh:'🔑',dropbear:'🐻',nginx:'🌐',badvpn:'🎮',sshws:'🚇',xui:'📊',tunnel:'🔗'};
-  return m[k] || '⚙️';
-}
-
-// ══════════════ USERS ══════════════
+// ── USERS ────────────────────────────────────────────────────
 async function loadUsers() {
-  const d = await api('GET', '/api/users');
-  const tbody = document.getElementById('user-tbody');
-  if(d.error || !d.users) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red)">${d.error||'โหลดไม่ได้'}</td></tr>`;
-    return;
-  }
-  if(!d.users.length) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1rem">ไม่มี Users</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = d.users.map((u,i)=>{
-    const npvBtn = u.uuid
-      ? `<button class="del-btn" style="color:var(--cyan);border-color:rgba(128,255,221,.3);font-size:.65rem;padding:.2rem .5rem"
-           onclick="copyNpv('${u.user}','${u.uuid}')">📋 NPV</button>`
-      : `<span style="color:var(--muted);font-size:.65rem">-</span>`;
-    return `<tr>
-      <td>${i+1}</td>
-      <td>${u.user}</td>
-      <td style="font-size:.7rem">${u.exp||'-'}</td>
-      <td><span class="badge ${u.active?'on':'off'}">${u.active?'ACTIVE':'EXPIRED'}</span></td>
-      <td>${npvBtn}</td>
-      <td><button class="del-btn" onclick="delUser('${u.user}')">🗑</button></td>
-    </tr>`;
+  var d = await api('GET', '/users');
+  var tb = document.getElementById('user-tbody');
+  if (d.error || !d.users) { tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--red)">'+(d.error||'โหลดไม่ได้')+'</td></tr>'; return; }
+  if (!d.users.length) { tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1rem">ไม่มี Users</td></tr>'; return; }
+  tb.innerHTML = d.users.map(function(u,i){
+    var npv = u.uuid ? '<button class="del-btn" style="color:var(--cyan);border-color:rgba(128,255,221,.3)" onclick="copyNpv(\''+u.user+'\',\''+u.uuid+'\')">📋 NPV</button>' : '-';
+    return '<tr><td>'+(i+1)+'</td><td>'+u.user+'</td><td style="font-size:.7rem">'+(u.exp||'-')+'</td>'+
+      '<td><span class="badge '+(u.active?'on':'off')+'">'+(u.active?'ACTIVE':'EXPIRED')+'</span></td>'+
+      '<td>'+npv+'</td><td><button class="del-btn" onclick="delUser(\''+u.user+'\')">🗑</button></td></tr>';
   }).join('');
 }
 
-function copyNpv(user, userUuid) {
-  if(!CFG) return;
-  const host = CFG.host || location.hostname;
-  const sshConfig = {
-    server: host, port: 80, username: user,
-    protocol: 'ssh', transport: 'ws', ws_path: '/', remarks: user
-  };
-  const b64 = btoa(JSON.stringify(sshConfig));
-  const link = `npvt-ssh://${b64}`;
-  navigator.clipboard.writeText(link).then(()=>{
-    showMsg(`✅ คัดลอก NPV link ของ ${user} แล้ว`, 'ok');
-  }).catch(()=>{
-    prompt('NPV Import Link:', link);
-  });
+function copyNpv(user, uid) {
+  var host = CFG.host || location.hostname;
+  var link = 'npvt-ssh://'+btoa(JSON.stringify({server:host,port:80,username:user,protocol:'ssh',transport:'ws',ws_path:'/',remarks:user}));
+  if (navigator.clipboard) navigator.clipboard.writeText(link).then(function(){showMsg('✅ คัดลอก NPV link แล้ว','ok');}).catch(function(){prompt('NPV:',link);});
+  else prompt('NPV:', link);
 }
 
 async function createUser() {
-  const user = document.getElementById('new-user').value.trim();
-  const pass = document.getElementById('new-pass').value;
-  const days = parseInt(document.getElementById('new-days').value) || 30;
-  const alert = document.getElementById('alert');
-  if(!user || !pass) {
-    alert.textContent = 'กรุณาใส่ Username และ Password';
-    alert.className = 'err'; alert.style.display = 'block'; return;
-  }
-  const d = await api('POST', '/api/create', {user, pass, days});
-  alert.style.display = 'block';
-  if(d.ok) {
-    let msg = `✅ สร้าง ${user} สำเร็จ (หมดอายุ ${d.exp})`;
-    if(d.uuid) msg += ` | UUID: ${d.uuid.substring(0,8)}...`;
-    alert.textContent = msg;
-    alert.className = 'ok';
-    document.getElementById('new-user').value = '';
-    document.getElementById('new-pass').value = '';
-    loadUsers();
-  } else {
-    alert.textContent = '❌ ' + (d.error || 'ล้มเหลว');
-    alert.className = 'err';
-  }
+  var user = document.getElementById('new-user').value.trim();
+  var pass = document.getElementById('new-pass').value;
+  var days = parseInt(document.getElementById('new-days').value) || 30;
+  var al = document.getElementById('u-alert');
+  if (!user||!pass) { al.textContent='กรุณาใส่ Username และ Password'; al.style.cssText='display:block;color:var(--red)'; return; }
+  var d = await api('POST', '/create', {user:user, pass:pass, days:days});
+  al.style.display = 'block';
+  if (d.ok) { al.textContent='✅ สร้าง '+user+' สำเร็จ (หมดอายุ '+d.exp+')'; al.style.cssText='display:block;color:var(--green)'; document.getElementById('new-user').value=''; document.getElementById('new-pass').value=''; loadUsers(); }
+  else { al.textContent='❌ '+(d.error||'ล้มเหลว'); al.style.cssText='display:block;color:var(--red)'; }
 }
 
 async function delUser(user) {
-  if(!confirm(`ลบ ${user}?`)) return;
-  const d = await api('POST', '/api/delete', {user});
-  if(d.ok) loadUsers();
-  else alert('ลบไม่ได้: ' + (d.error||''));
+  if (!confirm('ลบ '+user+'?')) return;
+  var d = await api('POST', '/delete', {user:user});
+  if (d.ok) loadUsers(); else alert('ลบไม่ได้: '+(d.error||''));
 }
 
-// ══════════════ SERVICES ══════════════
+// ── SERVICES ─────────────────────────────────────────────────
 async function loadServices() {
-  const d = await api('GET', '/api/status');
-  if(d.error) return;
-  const svcs = d.services || {};
-  document.getElementById('svc-detail').innerHTML = Object.entries(svcs)
-    .filter(([k])=>!['started'].includes(k))
-    .map(([k,v])=>`
-    <div class="svc-row">
-      <span style="font-size:.8rem">${svcIcon(k)} <b>${k}</b></span>
-      <div style="display:flex;gap:.4rem;align-items:center">
-        <span class="badge ${v?'on':'off'}">${v?'RUNNING':'STOPPED'}</span>
-        <button onclick="svc1('${k}','restart')" class="del-btn" style="color:var(--cyan);border-color:rgba(128,255,221,.3)">🔄</button>
-      </div>
-    </div>`).join('');
+  var d = await api('GET', '/status');
+  if (d.error) return;
+  var svcs = d.services || {};
+  document.getElementById('svc-detail').innerHTML = Object.entries(svcs).map(function(kv){
+    var k=kv[0],v=kv[1];
+    return '<div class="svc-row"><span>'+svcIcon(k)+' <b>'+k+'</b></span>'+
+      '<div style="display:flex;gap:.4rem;align-items:center">'+
+      '<span class="badge '+(v?'on':'off')+'">'+(v?'RUNNING':'STOPPED')+'</span>'+
+      '<button onclick="svc1(\''+k+'\',\'restart\')" class="del-btn" style="color:var(--cyan);border-color:rgba(128,255,221,.3)">🔄</button>'+
+      '</div></div>';
+  }).join('');
 }
-
-async function svc1(svc, action) {
-  await api('POST', '/api/service', {service: svc, action});
-  setTimeout(loadServices, 1500);
-}
-
-async function svcAll(action) {
-  for(const svc of ['dropbear','nginx','chaiya-sshws','chaiya-badvpn']) {
-    await api('POST', '/api/service', {service: svc, action});
-  }
-  setTimeout(loadDashboard, 2000);
-}
-
-// ══════════════ INIT ══════════════
-window.addEventListener('DOMContentLoaded', async () => {
-  await loadConfig();
-});
+async function svc1(svc,action){ await api('POST','/service',{service:svc,action:action}); setTimeout(loadServices,1500); }
+async function svcAll(action){ var s=['dropbear','nginx','chaiya-sshws','chaiya-badvpn']; for(var i=0;i<s.length;i++) await api('POST','/service',{service:s[i],action:action}); setTimeout(loadDashboard,2000); }
 </script>
 </body>
 </html>
 HTMLEOF
 ok "Panel HTML พร้อม"
 
-# ── NGINX ────────────────────────────────────────────────────
+# ── NGINX — proxy /api/ ไปที่ SSH API (same-origin แก้ CORS) ──
 info "ตั้งค่า Nginx..."
-
-# ลบ default config และ config ที่ชน port 80
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 for f in /etc/nginx/sites-enabled/*; do
   [[ "$f" == *"chaiya"* ]] && continue
@@ -1384,17 +1307,31 @@ server {
     server_name _;
     root /opt/chaiya-panel;
     index index.html;
-    add_header Access-Control-Allow-Origin *;
+
+    # Static files (HTML, config.js)
     location / {
         try_files \$uri \$uri/ =404;
+        add_header Cache-Control "no-store";
+    }
+
+    # Proxy /api/* → SSH API (same-origin — แก้ปัญหา CORS/mixed content)
+    location /api/ {
+        proxy_pass http://127.0.0.1:${SSH_API_PORT}/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 30s;
+        proxy_connect_timeout 5s;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Content-Type" always;
     }
 }
 EOF
 
 ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/
 nginx -t &>/dev/null && systemctl restart nginx
-ok "Nginx พร้อม (port $PANEL_PORT)"
-
+ok "Nginx พร้อม (port $PANEL_PORT, proxy /api/ → :$SSH_API_PORT)"
 # ── FIREWALL ─────────────────────────────────────────────────
 info "ตั้งค่า Firewall..."
 ufw --force reset &>/dev/null
