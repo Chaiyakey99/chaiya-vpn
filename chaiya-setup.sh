@@ -176,7 +176,6 @@ mkdir -p /etc/chaiya
 # บันทึก credentials ก่อน install
 echo "$XUI_USER" > /etc/chaiya/xui-user.conf
 echo "$XUI_PASS" > /etc/chaiya/xui-pass.conf
-echo "$XUI_PORT" > /etc/chaiya/xui-port.conf
 chmod 600 /etc/chaiya/xui-user.conf /etc/chaiya/xui-pass.conf
 
 # ตรวจว่า x-ui ติดตั้งแล้วหรือยัง
@@ -186,19 +185,166 @@ n
 XUIEOF
 fi
 
-# ตั้งค่า x-ui: port, username, password
+# ตั้งค่า x-ui: port, username, password (เขียนตรงลง SQLite DB — เชื่อถือได้ทุก version)
 sleep 3
-x-ui setting -port $XUI_PORT 2>/dev/null || true
-x-ui setting -username "$XUI_USER" 2>/dev/null || true
-x-ui setting -password "$XUI_PASS" 2>/dev/null || true
-systemctl restart x-ui 2>/dev/null || true
+systemctl stop x-ui 2>/dev/null || true
+sleep 1
+XUI_DB="/etc/x-ui/x-ui.db"
+if [[ -f "$XUI_DB" ]]; then
+  sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS}' WHERE id=1;" 2>/dev/null || true
+  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_PORT}' WHERE key='webPort';" 2>/dev/null || true
+  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_USER}' WHERE key='webUsername';" 2>/dev/null || true
+  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_PASS}' WHERE key='webPassword';" 2>/dev/null || true
+else
+  # fallback: ใช้ x-ui setting command (3x-ui เก่า)
+  x-ui setting -port $XUI_PORT 2>/dev/null || true
+  x-ui setting -username "$XUI_USER" 2>/dev/null || true
+  x-ui setting -password "$XUI_PASS" 2>/dev/null || true
+fi
+systemctl start x-ui 2>/dev/null || true
 sleep 3
 
-# ตรวจ port จริงที่ x-ui ใช้
-REAL_XUI_PORT=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K\d+' | head -1)
+# ตรวจ port จริงที่ x-ui ใช้ (อ่านจาก DB โดยตรง เชื่อถือได้กว่า ss grep)
+REAL_XUI_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null | tr -d '[:space:]')
+[[ -z "$REAL_XUI_PORT" || "$REAL_XUI_PORT" == "0" ]] && \
+  REAL_XUI_PORT=$(x-ui setting -show 2>/dev/null | grep -iP 'port\s*[:=]\s*\K\d+' | head -1)
 [[ -z "$REAL_XUI_PORT" ]] && REAL_XUI_PORT=$XUI_PORT
 echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
 ok "3x-ui พร้อม (port $REAL_XUI_PORT)"
+
+# ── สร้าง Inbounds ครบชุดใน x-ui ───────────────────────────
+# Port map (ตาม ChaiyaProject):
+#   8080 → VMess + WebSocket
+#   8880 → VLESS + WebSocket
+info "สร้าง Inbounds ใน x-ui (VMess-WS:8080, VLESS-WS:8880)..."
+XUI_BASE="http://127.0.0.1:${REAL_XUI_PORT}"
+XUI_COOKIE=$(mktemp)
+
+LOGIN_RESP=$(curl -s -c "$XUI_COOKIE" -X POST "${XUI_BASE}/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "username=${XUI_USER}" \
+  --data-urlencode "password=${XUI_PASS}" 2>/dev/null)
+
+LOGIN_OK=$(echo "$LOGIN_RESP" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); print(str(d.get('success',False)).lower())" 2>/dev/null)
+
+# ── helper: ดึง port list ที่มีอยู่แล้ว ──────────────────────
+_get_existing_ports() {
+  curl -s -b "$XUI_COOKIE" "${XUI_BASE}/xui/API/inbounds" 2>/dev/null | \
+    python3 -c "
+import sys,json
+try:
+  d=json.load(sys.stdin)
+  print(' '.join(str(x.get('port','')) for x in d.get('obj',[])))
+except: print('')
+" 2>/dev/null
+}
+
+# ── helper: POST inbound ──────────────────────────────────────
+_add_inbound() {
+  curl -s -b "$XUI_COOKIE" -X POST "${XUI_BASE}/xui/API/inbounds/add" \
+    -H "Content-Type: application/json" -d "$1" >/dev/null 2>&1
+}
+
+if [[ "$LOGIN_OK" == "true" ]]; then
+  EXISTING_PORTS=$(_get_existing_ports)
+
+  VMESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+  VLESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+  echo "$VMESS_UUID" > /etc/chaiya/vmess-uuid.conf
+  echo "$VLESS_UUID" > /etc/chaiya/vless-uuid.conf
+  chmod 600 /etc/chaiya/vmess-uuid.conf /etc/chaiya/vless-uuid.conf
+
+  # ── 1. VMess + WebSocket  port 8080 ──────────────────────────
+  if ! echo "$EXISTING_PORTS" | grep -qw "8080"; then
+    PAYLOAD=$(python3 -c "
+import json
+p = {
+  'up':0,'down':0,'total':0,'remark':'CHAIYA-VMess-WS',
+  'enable':True,'expiryTime':0,'listen':'','port':8080,'protocol':'vmess',
+  'settings': json.dumps({
+    'clients':[{'id':'${VMESS_UUID}','alterId':0,'email':'chaiya-default',
+      'limitIpCount':2,'totalGB':0,'expiryTime':0,'enable':True,'tgId':'','subId':''}]
+  }),
+  'streamSettings': json.dumps({
+    'network':'ws','security':'none',
+    'wsSettings':{'path':'/chaiya','headers':{}}
+  }),
+  'sniffing': json.dumps({'enabled':True,'destOverride':['http','tls','quic','fakedns']}),
+  'tag':'inbound-8080'
+}
+print(json.dumps(p))
+")
+    _add_inbound "$PAYLOAD"
+    ok "VMess-WS inbound พร้อม (port 8080, path /chaiya)"
+  else
+    VMESS_UUID=$(curl -s -b "$XUI_COOKIE" "${XUI_BASE}/xui/API/inbounds" 2>/dev/null | \
+      python3 -c "
+import sys,json
+try:
+  d=json.load(sys.stdin)
+  for x in d.get('obj',[]):
+    if x.get('port')==8080:
+      s=json.loads(x.get('settings','{}'))
+      cl=s.get('clients',[])
+      if cl: print(cl[0].get('id',''))
+except: pass
+" 2>/dev/null)
+    [[ -n "$VMESS_UUID" ]] && echo "$VMESS_UUID" > /etc/chaiya/vmess-uuid.conf
+    ok "VMess-WS มีอยู่แล้ว (port 8080)"
+  fi
+
+  # ── 2. VLESS + WebSocket  port 8880 ──────────────────────────
+  if ! echo "$EXISTING_PORTS" | grep -qw "8880"; then
+    PAYLOAD=$(python3 -c "
+import json
+p = {
+  'up':0,'down':0,'total':0,'remark':'CHAIYA-VLESS-WS',
+  'enable':True,'expiryTime':0,'listen':'','port':8880,'protocol':'vless',
+  'settings': json.dumps({
+    'clients':[{'id':'${VLESS_UUID}','flow':'','email':'chaiya-default',
+      'limitIpCount':2,'totalGB':0,'expiryTime':0,'enable':True,'tgId':'','subId':''}],
+    'decryption':'none','fallbacks':[]
+  }),
+  'streamSettings': json.dumps({
+    'network':'ws','security':'none',
+    'wsSettings':{'path':'/chaiya','headers':{}}
+  }),
+  'sniffing': json.dumps({'enabled':True,'destOverride':['http','tls','quic','fakedns']}),
+  'tag':'inbound-8880'
+}
+print(json.dumps(p))
+")
+    _add_inbound "$PAYLOAD"
+    ok "VLESS-WS inbound พร้อม (port 8880, path /chaiya)"
+  else
+    VLESS_UUID=$(curl -s -b "$XUI_COOKIE" "${XUI_BASE}/xui/API/inbounds" 2>/dev/null | \
+      python3 -c "
+import sys,json
+try:
+  d=json.load(sys.stdin)
+  for x in d.get('obj',[]):
+    if x.get('port')==8880:
+      s=json.loads(x.get('settings','{}'))
+      cl=s.get('clients',[])
+      if cl: print(cl[0].get('id',''))
+except: pass
+" 2>/dev/null)
+    [[ -n "$VLESS_UUID" ]] && echo "$VLESS_UUID" > /etc/chaiya/vless-uuid.conf
+    ok "VLESS-WS มีอยู่แล้ว (port 8880)"
+  fi
+
+  systemctl restart x-ui 2>/dev/null || true
+  sleep 2
+
+else
+  warn "Login x-ui ไม่สำเร็จ — ข้าม inbound setup (ตั้งค่าเองใน x-ui panel ได้)"
+  VMESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+  VLESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+  echo "$VMESS_UUID" > /etc/chaiya/vmess-uuid.conf
+  echo "$VLESS_UUID" > /etc/chaiya/vless-uuid.conf
+fi
+rm -f "$XUI_COOKIE"
 
 # ── SSH API (Python) ──────────────────────────────────────────
 info "ติดตั้ง SSH API..."
@@ -207,22 +353,118 @@ mkdir -p /opt/chaiya-ssh-api /etc/chaiya/exp
 cat > /opt/chaiya-ssh-api/app.py << 'PYEOF'
 #!/usr/bin/env python3
 """
-Chaiya SSH API v3 — แก้ไข body() อ่านซ้ำ, thread-safe, CORS ถูกต้อง
+Chaiya SSH API v4 — SSH user + x-ui client sync, NPV link support
 """
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import json, subprocess, os, datetime, socket, threading, socketserver, hmac
+import json, subprocess, os, datetime, socket, threading, socketserver, hmac, uuid, sqlite3
+
+XUI_DB = '/etc/x-ui/x-ui.db'
+VLESS_UUID_FILE = '/etc/chaiya/vless-uuid.conf'
 
 def run_cmd(cmd):
     r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
     return r.returncode == 0, r.stdout.strip(), r.stderr.strip()
 
+def get_xui_inbound_id(port=443):
+    """ดึง inbound id ของ port 443 จาก x-ui DB"""
+    try:
+        con = sqlite3.connect(XUI_DB)
+        row = con.execute("SELECT id FROM inbounds WHERE port=?", (port,)).fetchone()
+        con.close()
+        return row[0] if row else None
+    except:
+        return None
+
+def get_xui_clients():
+    """ดึง client list จาก VMess inbound port 8080"""
+    try:
+        con = sqlite3.connect(XUI_DB)
+        row = con.execute("SELECT settings FROM inbounds WHERE port=8080").fetchone()
+        con.close()
+        if not row: return []
+        s = json.loads(row[0])
+        return s.get('clients', [])
+    except:
+        return []
+
+def add_xui_client(email, user_uuid=None):
+    """เพิ่ม client ใน VMess inbound port 8080"""
+    if user_uuid is None:
+        user_uuid = str(uuid.uuid4())
+    try:
+        con = sqlite3.connect(XUI_DB)
+        row = con.execute("SELECT id, settings FROM inbounds WHERE port=8080").fetchone()
+        if not row:
+            con.close()
+            return None
+        inbound_id, settings_str = row
+        settings = json.loads(settings_str)
+        clients = settings.get('clients', [])
+        clients = [c for c in clients if c.get('email') != email]
+        clients.append({
+            'id': user_uuid,
+            'alterId': 0,
+            'email': email,
+            'limitIpCount': 2,
+            'totalGB': 0,
+            'expiryTime': 0,
+            'enable': True,
+            'tgId': '',
+            'subId': ''
+        })
+        settings['clients'] = clients
+        con.execute("UPDATE inbounds SET settings=? WHERE id=?",
+                    (json.dumps(settings), inbound_id))
+        con.commit()
+        con.close()
+        return user_uuid
+    except Exception as e:
+        return None
+
+def remove_xui_client(email):
+    """ลบ client จาก VMess inbound port 8080 และ VLESS port 8880"""
+    for port in (8080, 8880):
+        try:
+            con = sqlite3.connect(XUI_DB)
+            row = con.execute("SELECT id, settings FROM inbounds WHERE port=?", (port,)).fetchone()
+            if not row:
+                con.close()
+                continue
+            inbound_id, settings_str = row
+            settings = json.loads(settings_str)
+            settings['clients'] = [c for c in settings.get('clients', [])
+                                    if c.get('email') != email]
+            con.execute("UPDATE inbounds SET settings=? WHERE id=?",
+                        (json.dumps(settings), inbound_id))
+            con.commit()
+            con.close()
+        except:
+            pass
+    subprocess.run("systemctl restart x-ui", shell=True, capture_output=True, timeout=15)
+
+def build_npv_link(host, user_uuid, remark):
+    """สร้าง npvt-ssh:// import link สำหรับ NapsternetV"""
+    import base64
+    # SSH over WebSocket (port 80)
+    ssh_config = {
+        "server": host,
+        "port": 80,
+        "username": remark,
+        "protocol": "ssh",
+        "transport": "ws",
+        "ws_path": "/",
+        "remarks": remark
+    }
+    b64 = base64.b64encode(json.dumps(ssh_config).encode()).decode()
+    return f"npvt-ssh://{b64}"
+
 def get_connections():
     counts = {"total": 0}
     for port in ["80", "143", "109", "22", "2095"]:
-        out, _ = subprocess.run(
+        out = subprocess.run(
             f"ss -tn state established 2>/dev/null | grep -c ':{port}[^0-9]' || echo 0",
             shell=True, capture_output=True, text=True
-        ).stdout.strip(), None
+        ).stdout.strip()
         try:
             c = int(out.split()[0]) if out.strip() else 0
         except:
@@ -233,6 +475,22 @@ def get_connections():
 
 def list_users():
     users = []
+    xui_clients = {c['email']: c['id'] for c in get_xui_clients()}
+
+    # อ่าน users.db (format: user days exp data_gb ip_limit)
+    db_map = {}
+    db_path = '/etc/chaiya/sshws-users/users.db'
+    if os.path.exists(db_path):
+        for line in open(db_path):
+            parts = line.strip().split()
+            if len(parts) >= 3:
+                db_map[parts[0]] = {
+                    'days':     int(parts[1]) if len(parts) > 1 else 30,
+                    'exp':      parts[2]      if len(parts) > 2 else '',
+                    'data_gb':  int(parts[3]) if len(parts) > 3 else 0,
+                    'ip_limit': int(parts[4]) if len(parts) > 4 else 2,
+                }
+
     try:
         with open('/etc/passwd') as f:
             for line in f:
@@ -240,16 +498,26 @@ def list_users():
                 if len(p) < 7: continue
                 uid = int(p[2])
                 if uid < 1000 or uid > 60000: continue
-                if p[6] not in ['/bin/bash', '/bin/sh', '/bin/false', '/usr/sbin/nologin']: continue
-                u = {'user': p[0], 'active': True, 'exp': None}
-                exp_f = f'/etc/chaiya/exp/{p[0]}'
+                if p[6] not in ['/bin/false', '/usr/sbin/nologin', '/bin/bash', '/bin/sh']: continue
+                uname = p[0]
+                u = {'user': uname, 'active': True, 'exp': None, 'uuid': None, 'ip_limit': 2, 'data_gb': 0}
+                # อ่าน expiry จาก exp file ก่อน
+                exp_f = f'/etc/chaiya/exp/{uname}'
                 if os.path.exists(exp_f):
                     u['exp'] = open(exp_f).read().strip()
+                # ถ้าไม่มี fallback ไปที่ users.db
+                if not u['exp'] and uname in db_map:
+                    u['exp'] = db_map[uname]['exp']
+                if uname in db_map:
+                    u['ip_limit'] = db_map[uname]['ip_limit']
+                    u['data_gb']  = db_map[uname]['data_gb']
+                if u['exp']:
                     try:
                         exp_date = datetime.date.fromisoformat(u['exp'])
                         u['active'] = exp_date >= datetime.date.today()
                     except:
                         pass
+                u['uuid'] = xui_clients.get(uname)
                 users.append(u)
     except Exception as e:
         pass
@@ -363,28 +631,105 @@ class Handler(BaseHTTPRequestHandler):
             respond(self, 200, {"ok": bool(stored) and hashed == stored})
 
         elif self.path == '/api/create':
-            user = data.get('user', '').strip()
-            pw   = data.get('pass', '').strip()
-            days = int(data.get('exp_days', data.get('days', 30)))
+            import re as _re
+            user     = data.get('user', '').strip()
+            pw       = data.get('pass', '').strip()
+            days     = int(data.get('exp_days', data.get('days', 30)))
+            data_gb  = int(data.get('data_gb', 0))
+            ip_limit = int(data.get('ip_limit', 2))
             if not user or not pw:
                 return respond(self, 400, {'error': 'user/pass required'})
-            ok1, _, e1 = run_cmd(f"useradd -m -s /bin/false {user}")
-            if not ok1 and 'already exists' not in e1:
-                return respond(self, 500, {'error': e1})
-            run_cmd(f"echo '{user}:{pw}' | chpasswd")
+            if not _re.match(r'^[a-z0-9_-]{1,32}$', user):
+                return respond(self, 400, {'error': 'username: a-z0-9_- เท่านั้น max 32 ตัว'})
+
+            # 1. สร้าง OS user (ตาม ChaiyaProject: -M -s /bin/false -e exp)
+            ok1, _, e1 = run_cmd(
+                f"userdel -f {user} 2>/dev/null; "
+                f"useradd -M -s /bin/false -e {(datetime.date.today() + datetime.timedelta(days=days)).isoformat()} {user}"
+            )
+            # ตั้ง password ปลอดภัย (ไม่ผ่าน shell)
+            import subprocess as _sp
+            _sp.run(['chpasswd'], input=f'{user}:{pw}\n', text=True, capture_output=True, timeout=10)
             exp = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
+            run_cmd(f"chage -E {exp} {user}")
+
+            # บันทึก expiry file
             os.makedirs('/etc/chaiya/exp', exist_ok=True)
             with open(f'/etc/chaiya/exp/{user}', 'w') as f:
                 f.write(exp)
-            run_cmd(f"chage -E {exp} {user}")
-            respond(self, 200, {'ok': True, 'user': user, 'exp': exp})
+
+            # บันทึก users.db (format: user days exp data_gb ip_limit)
+            os.makedirs('/etc/chaiya/sshws-users', exist_ok=True)
+            db = '/etc/chaiya/sshws-users/users.db'
+            # ลบ entry เดิมถ้ามี แล้วเขียนใหม่
+            existing_lines = []
+            if os.path.exists(db):
+                existing_lines = [l for l in open(db) if not l.strip().startswith(user + ' ')]
+            with open(db, 'w') as f:
+                f.writelines(existing_lines)
+                f.write(f"{user} {days} {exp} {data_gb} {ip_limit}\n")
+
+            # 2. สร้าง x-ui client (VMess port 8080 + VLESS port 8880)
+            user_uuid = add_xui_client(user)  # VMess port 8080
+
+            # VLESS port 8880
+            vless_uuid = None
+            try:
+                con = sqlite3.connect(XUI_DB)
+                row = con.execute("SELECT id, settings FROM inbounds WHERE port=8880").fetchone()
+                if row:
+                    inbound_id, settings_str = row
+                    settings = json.loads(settings_str)
+                    clients = settings.get('clients', [])
+                    clients = [c for c in clients if c.get('email') != user]
+                    import uuid as _uuid
+                    vless_uuid = str(_uuid.uuid4())
+                    clients.append({'id': vless_uuid, 'flow': '', 'email': user,
+                                    'limitIpCount': ip_limit, 'totalGB': data_gb * (1024**3) if data_gb else 0,
+                                    'expiryTime': 0, 'enable': True, 'tgId': '', 'subId': ''})
+                    settings['clients'] = clients
+                    con.execute("UPDATE inbounds SET settings=? WHERE id=?",
+                                (json.dumps(settings), inbound_id))
+                    con.commit()
+                con.close()
+            except:
+                pass
+
+            # restart x-ui เพื่อ reload inbound config
+            run_cmd("systemctl restart x-ui 2>/dev/null || true")
+
+            # 3. สร้าง NPV link (SSH over WS port 80)
+            host = ''
+            try:
+                host = open('/etc/chaiya/my_ip.conf').read().strip()
+            except:
+                pass
+            npv_link = build_npv_link(host, user_uuid, user) if host and user_uuid else None
+
+            respond(self, 200, {
+                'ok': True,
+                'user': user,
+                'exp': exp,
+                'uuid': user_uuid,
+                'vless_uuid': vless_uuid,
+                'ip_limit': ip_limit,
+                'data_gb': data_gb,
+                'npv_link': npv_link
+            })
 
         elif self.path == '/api/delete':
             user = data.get('user', '').strip()
             if not user:
                 return respond(self, 400, {'error': 'user required'})
-            run_cmd(f"userdel -r {user} 2>/dev/null")
+            run_cmd(f"userdel -f {user} 2>/dev/null")
             run_cmd(f"rm -f /etc/chaiya/exp/{user}")
+            # ลบจาก users.db
+            db = '/etc/chaiya/sshws-users/users.db'
+            if os.path.exists(db):
+                lines = [l for l in open(db) if not l.strip().startswith(user + ' ')]
+                with open(db, 'w') as f:
+                    f.writelines(lines)
+            remove_xui_client(user)
             respond(self, 200, {'ok': True})
 
         elif self.path == '/api/service':
@@ -743,8 +1088,8 @@ cat > /opt/chaiya-panel/index.html << 'HTMLEOF'
       <h3 style="font-size:.85rem;margin-bottom:.8rem;color:var(--cyan)">📋 รายชื่อ Users</h3>
       <div style="overflow-x:auto">
         <table>
-          <thead><tr><th>#</th><th>Username</th><th>หมดอายุ</th><th>สถานะ</th><th></th></tr></thead>
-          <tbody id="user-tbody"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1rem">กำลังโหลด...</td></tr></tbody>
+          <thead><tr><th>#</th><th>Username</th><th>หมดอายุ</th><th>สถานะ</th><th>NPV</th><th></th></tr></thead>
+          <tbody id="user-tbody"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1rem">กำลังโหลด...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -913,21 +1258,43 @@ async function loadUsers() {
   const d = await api('GET', '/api/users');
   const tbody = document.getElementById('user-tbody');
   if(d.error || !d.users) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red)">${d.error||'โหลดไม่ได้'}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red)">${d.error||'โหลดไม่ได้'}</td></tr>`;
     return;
   }
   if(!d.users.length) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1rem">ไม่มี Users</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1rem">ไม่มี Users</td></tr>`;
     return;
   }
-  tbody.innerHTML = d.users.map((u,i)=>`
-    <tr>
+  tbody.innerHTML = d.users.map((u,i)=>{
+    const npvBtn = u.uuid
+      ? `<button class="del-btn" style="color:var(--cyan);border-color:rgba(128,255,221,.3);font-size:.65rem;padding:.2rem .5rem"
+           onclick="copyNpv('${u.user}','${u.uuid}')">📋 NPV</button>`
+      : `<span style="color:var(--muted);font-size:.65rem">-</span>`;
+    return `<tr>
       <td>${i+1}</td>
       <td>${u.user}</td>
       <td style="font-size:.7rem">${u.exp||'-'}</td>
       <td><span class="badge ${u.active?'on':'off'}">${u.active?'ACTIVE':'EXPIRED'}</span></td>
+      <td>${npvBtn}</td>
       <td><button class="del-btn" onclick="delUser('${u.user}')">🗑</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+}
+
+function copyNpv(user, userUuid) {
+  if(!CFG) return;
+  const host = CFG.host || location.hostname;
+  const sshConfig = {
+    server: host, port: 80, username: user,
+    protocol: 'ssh', transport: 'ws', ws_path: '/', remarks: user
+  };
+  const b64 = btoa(JSON.stringify(sshConfig));
+  const link = `npvt-ssh://${b64}`;
+  navigator.clipboard.writeText(link).then(()=>{
+    showMsg(`✅ คัดลอก NPV link ของ ${user} แล้ว`, 'ok');
+  }).catch(()=>{
+    prompt('NPV Import Link:', link);
+  });
 }
 
 async function createUser() {
@@ -942,7 +1309,9 @@ async function createUser() {
   const d = await api('POST', '/api/create', {user, pass, days});
   alert.style.display = 'block';
   if(d.ok) {
-    alert.textContent = `✅ สร้าง ${user} สำเร็จ (หมดอายุ ${d.exp})`;
+    let msg = `✅ สร้าง ${user} สำเร็จ (หมดอายุ ${d.exp})`;
+    if(d.uuid) msg += ` | UUID: ${d.uuid.substring(0,8)}...`;
+    alert.textContent = msg;
     alert.className = 'ok';
     document.getElementById('new-user').value = '';
     document.getElementById('new-pass').value = '';
@@ -1056,6 +1425,8 @@ echo -e "  👤 3x-ui Username : ${YELLOW}$XUI_USER${NC}"
 echo -e "  🔒 3x-ui Password : ${YELLOW}$XUI_PASS${NC}"
 echo -e "  🐻 Dropbear       : ${CYAN}port $DROPBEAR_PORT1, $DROPBEAR_PORT2${NC}"
 echo -e "  🎮 BadVPN         : ${CYAN}port $BADVPN_PORT${NC}"
+echo -e "  📡 VMess-WS       : ${CYAN}port 8080, path /chaiya${NC}"
+echo -e "  📡 VLESS-WS       : ${CYAN}port 8880, path /chaiya${NC}"
 echo ""
 echo -e "  เปิดหน้า Panel ได้เลยที่:"
 echo -e "  ${CYAN}${BOLD}http://$SERVER_IP:$PANEL_PORT${NC}"
