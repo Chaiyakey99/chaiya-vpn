@@ -219,9 +219,34 @@ if [[ -f "$XUI_DB" ]]; then
 fi
 
 systemctl start x-ui 2>/dev/null || true
-sleep 3
 
-# ยืนยันว่า username/password ถูกตั้งแล้ว
+# ── รอ x-ui พร้อมจริงๆ (max 60 วินาที) ──────────────────────
+info "รอ x-ui เริ่มต้น..."
+REAL_XUI_PORT=""
+XUI_READY=0
+for _i in $(seq 1 30); do
+  sleep 2
+  # 1. อ่าน port จาก DB (วิธีที่น่าเชื่อถือที่สุด)
+  _dbport=$(sqlite3 /etc/x-ui/x-ui.db \
+    "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null | tr -d '[:space:]')
+  # 2. fallback: ดูจาก ss ว่า process x-ui listen port อะไรจริงๆ
+  if [[ -z "$_dbport" || "$_dbport" == "0" ]]; then
+    _dbport=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K\d+' | head -1)
+  fi
+  # 3. fallback สุดท้าย
+  [[ -z "$_dbport" || "$_dbport" == "0" ]] && _dbport=$XUI_PORT
+  REAL_XUI_PORT="$_dbport"
+  # ตรวจว่า x-ui ตอบสนอง HTTP แล้ว
+  _http=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" \
+    "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null)
+  if [[ "$_http" =~ ^[123] ]]; then
+    XUI_READY=1; break
+  fi
+done
+[[ -z "$REAL_XUI_PORT" ]] && REAL_XUI_PORT=$XUI_PORT
+echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
+
+# ── ยืนยัน credentials (หลัง x-ui ready) ────────────────────
 VERIFY_USER=$(sqlite3 "$XUI_DB" "SELECT username FROM users WHERE id=1;" 2>/dev/null)
 if [[ "$VERIFY_USER" == "$XUI_USER" ]]; then
   ok "x-ui credentials ตั้งค่าสำเร็จ (username: $XUI_USER)"
@@ -230,16 +255,21 @@ else
   systemctl stop x-ui 2>/dev/null || true; sleep 1
   x-ui setting -username "$XUI_USER" 2>/dev/null || true
   x-ui setting -password "$XUI_PASS" 2>/dev/null || true
-  systemctl start x-ui 2>/dev/null || true; sleep 2
+  systemctl start x-ui 2>/dev/null || true
+  # รอ x-ui กลับมาอีกครั้ง
+  for _j in $(seq 1 15); do
+    sleep 2
+    _http=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" \
+      "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null)
+    [[ "$_http" =~ ^[123] ]] && break
+  done
 fi
 
-# ตรวจ port จริงที่ x-ui ใช้ (อ่านจาก DB โดยตรง เชื่อถือได้กว่า ss grep)
-REAL_XUI_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null | tr -d '[:space:]')
-[[ -z "$REAL_XUI_PORT" || "$REAL_XUI_PORT" == "0" ]] && \
-  REAL_XUI_PORT=$(x-ui setting -show 2>/dev/null | grep -iP 'port\s*[:=]\s*\K\d+' | head -1)
-[[ -z "$REAL_XUI_PORT" ]] && REAL_XUI_PORT=$XUI_PORT
-echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
-ok "3x-ui พร้อม (port $REAL_XUI_PORT)"
+if [[ $XUI_READY -eq 1 ]]; then
+  ok "3x-ui พร้อม (port $REAL_XUI_PORT)"
+else
+  warn "3x-ui อาจยังไม่พร้อม (port $REAL_XUI_PORT) — ตรวจสอบด้วย: systemctl status x-ui"
+fi
 
 # ── สร้าง Inbounds ครบชุดใน x-ui ───────────────────────────
 # Port map (ตาม ChaiyaProject):
@@ -249,13 +279,23 @@ info "สร้าง Inbounds ใน x-ui (VMess-WS:8080, VLESS-WS:8880)..."
 XUI_BASE="http://127.0.0.1:${REAL_XUI_PORT}"
 XUI_COOKIE=$(mktemp)
 
-LOGIN_RESP=$(curl -s -c "$XUI_COOKIE" -X POST "${XUI_BASE}/login" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  --data-urlencode "username=${XUI_USER}" \
-  --data-urlencode "password=${XUI_PASS}" 2>/dev/null)
-
-LOGIN_OK=$(echo "$LOGIN_RESP" | python3 -c \
-  "import sys,json; d=json.load(sys.stdin); print(str(d.get('success',False)).lower())" 2>/dev/null)
+LOGIN_OK="false"
+for _attempt in 1 2 3; do
+  LOGIN_RESP=$(curl -s --max-time 10 -c "$XUI_COOKIE" -X POST "${XUI_BASE}/login" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "username=${XUI_USER}" \
+    --data-urlencode "password=${XUI_PASS}" 2>/dev/null)
+  LOGIN_OK=$(echo "$LOGIN_RESP" | python3 -c \
+"import sys,json
+try:
+  d=json.load(sys.stdin)
+  print(str(d.get('success',False)).lower())
+except:
+  print('false')
+" 2>/dev/null)
+  [[ "$LOGIN_OK" == "true" ]] && break
+  [[ $_attempt -lt 3 ]] && sleep 3
+done
 
 # ── helper: ดึง port list ที่มีอยู่แล้ว ──────────────────────
 _get_existing_ports() {
@@ -589,11 +629,11 @@ class Handler(BaseHTTPRequestHandler):
             xui_port_f = '/etc/chaiya/xui-port.conf'
             xui_port = open(xui_port_f).read().strip() if os.path.exists(xui_port_f) else '2053'
 
-            ok1, _, _ = run_cmd("systemctl is-active dropbear")
-            ok2, _, _ = run_cmd("systemctl is-active nginx")
-            ok3, udp, _ = run_cmd("pgrep -f badvpn-udpgw")
-            ok4, ws, _  = run_cmd("pgrep -f ws-stunnel")
-            ok5, xui, _ = run_cmd("systemctl is-active x-ui")
+            _, svc_dropbear, _ = run_cmd("systemctl is-active dropbear")
+            _, svc_nginx,    _ = run_cmd("systemctl is-active nginx")
+            _, svc_xui,      _ = run_cmd("systemctl is-active x-ui")
+            _, udp, _          = run_cmd("pgrep -x badvpn-udpgw")
+            _, ws,  _          = run_cmd("pgrep -f ws-stunnel")
 
             conns = get_connections()
             users = list_users()
@@ -610,11 +650,11 @@ class Handler(BaseHTTPRequestHandler):
                 "total_users": len(users),
                 "services": {
                     "ssh":      True,
-                    "dropbear": ok1 == "active" if isinstance(ok1, str) else bool(ok1),
-                    "nginx":    ok2 == "active" if isinstance(ok2, str) else bool(ok2),
+                    "dropbear": svc_dropbear.strip() == "active",
+                    "nginx":    svc_nginx.strip()    == "active",
                     "badvpn":   bool(udp.strip()),
                     "sshws":    bool(ws.strip()),
-                    "xui":      xui == "active" if isinstance(xui, str) else bool(xui),
+                    "xui":      svc_xui.strip()      == "active",
                     "tunnel":   bool(ws.strip()),
                 }
             })
