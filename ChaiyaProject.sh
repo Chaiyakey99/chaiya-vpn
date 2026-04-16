@@ -3697,16 +3697,21 @@ xui_api() {
 
   _r=$(_call_api "$_proto")
 
-  # session หมด → login ใหม่แล้วลองซ้ำ
-  if echo "$_r" | grep -qi 'unauthorized\|please login'; then
+  # [FIX] session หมด หรือ response ว่าง → login ใหม่แล้วลองซ้ำ
+  if echo "$_r" | grep -qi 'unauthorized\|please login' || [[ -z "$_r" ]]; then
+    rm -f "$_cookie"
     xui_login 2>/dev/null || true
     _r=$(_call_api "$_proto")
   fi
 
-  # ถ้ายังไม่มี success → ลอง proto อีกตัว
+  # ถ้ายังไม่มี success → ลอง proto อีกตัว (http↔https)
   if ! echo "$_r" | grep -q '"success"'; then
     local _proto2="https"; [[ "$_proto" == "https" ]] && _proto2="http"
-    _r=$(_call_api "$_proto2")
+    _r2=$(_call_api "$_proto2")
+    # ถ้า proto อีกตัวดีกว่าให้ใช้
+    if echo "$_r2" | grep -q '"success"'; then
+      _r="$_r2"
+    fi
   fi
 
   echo "$_r"
@@ -4882,15 +4887,26 @@ menu_3() {
   esac
 
   EXP=$(date -d "+${DAYS} days" +"%Y-%m-%d")
-  local TOTAL_BYTES=$(( DATA_GB * 1073741824 ))
   local EXP_MS=$(( $(date -d "$EXP" +%s) * 1000 ))
   local SEC="none"
 
   rgb_bar 20 "ตรวจสอบ 3x-ui API..."; printf "\n\n"
 
+  # [FIX] force fresh login ทุกครั้งก่อนเรียก API — ป้องกัน stale cookie
+  rm -f /etc/chaiya/xui-cookie.jar
+  if ! xui_login 2>/dev/null; then
+    printf "${RD}❌ login x-ui ไม่สำเร็จ — ตรวจสอบ port/user/pass ด้วย: cat /etc/chaiya/xui-*.conf${RS}\n"
+    read -rp "  Enter ย้อนกลับ..."; return
+  fi
+
   # ── ตรวจว่า inbound port มีอยู่แล้วหรือยัง ────────────────
   local _inbound_list
   _inbound_list=$(xui_api GET "/panel/api/inbounds/list" 2>/dev/null)
+  # ถ้า inbound list ว่าง/ไม่ success ให้แจ้งเตือนแต่ไม่หยุด (อาจไม่มี inbound เลยก็ได้)
+  if ! echo "$_inbound_list" | grep -q '"success":true'; then
+    printf "  ${YE}⚠ ดึง inbound list ไม่ได้ — จะสร้าง inbound ใหม่ทั้งหมด${RS}\n"
+    _inbound_list='{"success":true,"obj":[]}'
+  fi
 
   local _created_count=0
   local _step=0
@@ -4922,6 +4938,7 @@ print('')
     local API_RESULT=""
     if [[ -n "$_inbound_id" ]]; then
       # เพิ่ม client เข้า inbound เดิม — settings ต้องเป็น JSON string
+      # [FIX] totalGB ส่งเป็น GB ตรงๆ (3x-ui รับ GB ไม่ใช่ bytes)
       local _client_payload
       _client_payload=$(python3 -c "
 import json, sys
@@ -4940,10 +4957,17 @@ payload = {
   'settings': json.dumps({'clients': [client]})
 }
 print(json.dumps(payload))
-" "$UUID" "$UNAME" "$TOTAL_BYTES" "$EXP_MS" "$_inbound_id")
+" "$UUID" "$UNAME" "$DATA_GB" "$EXP_MS" "$_inbound_id")
       API_RESULT=$(xui_api POST "/panel/api/inbounds/addClient" "$_client_payload" 2>/dev/null)
+      # [FIX] ถ้า fail → fresh login แล้ว retry
+      if ! echo "$API_RESULT" | grep -q '"success":true'; then
+        rm -f /etc/chaiya/xui-cookie.jar
+        xui_login 2>/dev/null || true
+        API_RESULT=$(xui_api POST "/panel/api/inbounds/addClient" "$_client_payload" 2>/dev/null)
+      fi
     else
       # ไม่มี inbound — สร้างใหม่พร้อม client
+      # [FIX] totalGB ส่งเป็น GB ตรงๆ (3x-ui รับ GB ไม่ใช่ bytes)
       local _vless_payload
       _vless_payload=$(python3 -c "
 import json, sys
@@ -4977,8 +5001,14 @@ payload = {
   'sniffing': sniff
 }
 print(json.dumps(payload))
-" "$UUID" "$UNAME" "$TOTAL_BYTES" "$EXP_MS" "$SEC" "$_sni" "$_vport")
+" "$UUID" "$UNAME" "$DATA_GB" "$EXP_MS" "$SEC" "$_sni" "$_vport")
       API_RESULT=$(xui_api POST "/panel/api/inbounds/add" "$_vless_payload" 2>/dev/null)
+      # [FIX] ถ้า fail → fresh login แล้ว retry
+      if ! echo "$API_RESULT" | grep -q '"success":true'; then
+        rm -f /etc/chaiya/xui-cookie.jar
+        xui_login 2>/dev/null || true
+        API_RESULT=$(xui_api POST "/panel/api/inbounds/add" "$_vless_payload" 2>/dev/null)
+      fi
       ufw allow "${_vport}"/tcp 2>/dev/null || true
     fi
 
