@@ -4382,7 +4382,7 @@ import json, sys
 uid, remark, port, sni = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 settings_obj = {
   'clients': [{'id': uid, 'flow': '', 'email': 'chaiya-' + remark,
-               'limitIp': 0, 'total_flow': 0, 'expiryTime': 0,
+               'limitIp': 0, 'totalGB': 0, 'expiryTime': 0,
                'enable': True, 'comment': '', 'reset': 0}],
   'decryption': 'none'
 }
@@ -4946,7 +4946,6 @@ client = {
   'id': sys.argv[1],
   'email': sys.argv[2],
   'limitIp': 2,
-  'total_flow': int(sys.argv[3]) * 1024 * 1024 * 1024,
   'totalGB': int(sys.argv[3]),
   'expiryTime': int(sys.argv[4]),
   'enable': True,
@@ -4977,7 +4976,6 @@ settings = json.dumps({
     'id': sys.argv[1],
     'email': sys.argv[2],
     'limitIp': 2,
-    'total_flow': int(sys.argv[3]) * 1024 * 1024 * 1024,
     'totalGB': int(sys.argv[3]),
     'expiryTime': int(sys.argv[4]),
     'enable': True,
@@ -5236,15 +5234,9 @@ try:
     for c in clients:
       idx += 1
       email    = c.get('email', c.get('id', '-'))[:18]
-      # total_flow เก็บเป็น bytes, totalGB เก็บเป็น GB
-      _tf = c.get('total_flow', 0)
+      # totalGB เก็บเป็น GB โดยตรง
       _tgb = c.get('totalGB', 0)
-      if _tf > 0:
-        total_gb = _tf  # bytes จาก total_flow
-      elif _tgb > 0:
-        total_gb = _tgb * 1073741824  # GB → bytes จาก totalGB
-      else:
-        total_gb = 0
+      total_gb = _tgb * 1073741824 if _tgb > 0 else 0
       exp_ms   = c.get('expiryTime', 0)
       active   = c.get('enable', True) and enable
 
