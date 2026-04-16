@@ -4947,6 +4947,7 @@ client = {
   'email': sys.argv[2],
   'limitIp': 2,
   'total_flow': int(sys.argv[3]) * 1024 * 1024 * 1024,
+  'totalGB': int(sys.argv[3]),
   'expiryTime': int(sys.argv[4]),
   'enable': True,
   'comment': '',
@@ -4977,6 +4978,7 @@ settings = json.dumps({
     'email': sys.argv[2],
     'limitIp': 2,
     'total_flow': int(sys.argv[3]) * 1024 * 1024 * 1024,
+    'totalGB': int(sys.argv[3]),
     'expiryTime': int(sys.argv[4]),
     'enable': True,
     'comment': '',
@@ -5234,12 +5236,15 @@ try:
     for c in clients:
       idx += 1
       email    = c.get('email', c.get('id', '-'))[:18]
-      total_gb = c.get('total_flow', c.get('totalGB', 0))
-      # total_flow เก็บเป็น bytes, totalGB เก็บเป็น GB (fallback เผื่อ version เก่า)
-      if total_gb > 1073741824:
-        total_gb = total_gb  # bytes — แปลงทีหลัง
+      # total_flow เก็บเป็น bytes, totalGB เก็บเป็น GB
+      _tf = c.get('total_flow', 0)
+      _tgb = c.get('totalGB', 0)
+      if _tf > 0:
+        total_gb = _tf  # bytes จาก total_flow
+      elif _tgb > 0:
+        total_gb = _tgb * 1073741824  # GB → bytes จาก totalGB
       else:
-        total_gb = total_gb * 1073741824  # GB → bytes (version เก่า)
+        total_gb = 0
       exp_ms   = c.get('expiryTime', 0)
       active   = c.get('enable', True) and enable
 
