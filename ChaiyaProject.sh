@@ -4382,7 +4382,7 @@ import json, sys
 uid, remark, port, sni = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 settings_obj = {
   'clients': [{'id': uid, 'flow': '', 'email': 'chaiya-' + remark,
-               'limitIp': 0, 'totalGB': 0, 'expiryTime': 0,
+               'limitIp': 0, 'total_flow': 0, 'expiryTime': 0,
                'enable': True, 'comment': '', 'reset': 0}],
   'decryption': 'none'
 }
@@ -4938,7 +4938,7 @@ print('')
     local API_RESULT=""
     if [[ -n "$_inbound_id" ]]; then
       # เพิ่ม client เข้า inbound เดิม — settings ต้องเป็น JSON string
-      # [FIX] totalGB ส่งเป็น GB ตรงๆ (3x-ui รับ GB ไม่ใช่ bytes)
+      # [FIX] total_flow ส่งเป็น bytes (GB * 1024^3) — 3x-ui ใช้ total_flow ไม่ใช่ totalGB
       local _client_payload
       _client_payload=$(python3 -c "
 import json, sys
@@ -4946,7 +4946,7 @@ client = {
   'id': sys.argv[1],
   'email': sys.argv[2],
   'limitIp': 2,
-  'totalGB': int(sys.argv[3]),
+  'total_flow': int(sys.argv[3]) * 1024 * 1024 * 1024,
   'expiryTime': int(sys.argv[4]),
   'enable': True,
   'comment': '',
@@ -4967,7 +4967,7 @@ print(json.dumps(payload))
       fi
     else
       # ไม่มี inbound — สร้างใหม่พร้อม client
-      # [FIX] totalGB ส่งเป็น GB ตรงๆ (3x-ui รับ GB ไม่ใช่ bytes)
+      # [FIX] total_flow ส่งเป็น bytes (GB * 1024^3) — 3x-ui ใช้ total_flow ไม่ใช่ totalGB
       local _vless_payload
       _vless_payload=$(python3 -c "
 import json, sys
@@ -4976,7 +4976,7 @@ settings = json.dumps({
     'id': sys.argv[1],
     'email': sys.argv[2],
     'limitIp': 2,
-    'totalGB': int(sys.argv[3]),
+    'total_flow': int(sys.argv[3]) * 1024 * 1024 * 1024,
     'expiryTime': int(sys.argv[4]),
     'enable': True,
     'comment': '',
@@ -5234,7 +5234,12 @@ try:
     for c in clients:
       idx += 1
       email    = c.get('email', c.get('id', '-'))[:18]
-      total_gb = c.get('totalGB', 0)
+      total_gb = c.get('total_flow', c.get('totalGB', 0))
+      # total_flow เก็บเป็น bytes, totalGB เก็บเป็น GB (fallback เผื่อ version เก่า)
+      if total_gb > 1073741824:
+        total_gb = total_gb  # bytes — แปลงทีหลัง
+      else:
+        total_gb = total_gb * 1073741824  # GB → bytes (version เก่า)
       exp_ms   = c.get('expiryTime', 0)
       active   = c.get('enable', True) and enable
 
