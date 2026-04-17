@@ -2110,14 +2110,25 @@ def _fetch_xui_traffic_map():
                 if not tdata.get("success"):
                     continue
                 for ib in tdata.get("obj", []):
+                    # [FIX] อ่าน totalGB จาก settings.clients[] — หน่วย GB จริงๆ
+                    # clientStats.total = bytes (นับจริง) ห้ามใช้เป็น limit!
+                    _settings_clients = {}
+                    try:
+                        for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
+                            _em = cl.get("email","").lower()
+                            if _em:
+                                # totalGB = GB ที่ admin ตั้ง (0 = unlimited)
+                                _settings_clients[_em] = float(cl.get("totalGB", 0) or 0)
+                    except Exception:
+                        pass
                     for cs in ib.get("clientStats") or []:
                         email = cs.get("email", "").lower()
                         if not email:
                             continue
-                        used_bytes  = cs.get("down", 0) + cs.get("up", 0)
-                        total_limit = cs.get("total", 0)
-                        used_gb  = round(used_bytes / (1024**3), 2)
-                        limit_gb = round(total_limit / (1024**3), 2) if total_limit > 0 else 0
+                        used_bytes = cs.get("down", 0) + cs.get("up", 0)
+                        used_gb    = round(used_bytes / (1024**3), 2)
+                        # limit_gb อ่านจาก settings.clients[].totalGB (หน่วย GB) ไม่ต้องหารอีก
+                        limit_gb   = _settings_clients.get(email, 0)
                         traffic_map[email] = (used_gb, limit_gb)
                 return traffic_map  # สำเร็จ ออกได้เลย
             except Exception:
@@ -2466,24 +2477,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         if not tdata.get("success"):
                             continue
                         # หา client traffic ที่ตรง email
-                        used_down = used_up = total_limit = 0
+                        used_down = used_up = 0
+                        limit_gb  = 0
                         found = False
                         for ib in tdata.get("obj", []):
                             # clientStats อยู่ใน inbound obj โดยตรง
                             for cs in ib.get("clientStats") or []:
                                 if cs.get("email","").lower() == email.lower():
-                                    used_down  = cs.get("down", 0)
-                                    used_up    = cs.get("up", 0)
-                                    total_limit = cs.get("total", 0)
+                                    used_down = cs.get("down", 0)
+                                    used_up   = cs.get("up", 0)
                                     found = True
                                     break
                             if found:
+                                # [FIX] อ่าน totalGB จาก settings.clients[] เท่านั้น
+                                # clientStats.total = bytes สะสม ไม่ใช่ limit!
+                                try:
+                                    for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
+                                        if cl.get("email","").lower() == email.lower():
+                                            limit_gb = float(cl.get("totalGB", 0) or 0)
+                                            break
+                                except Exception:
+                                    pass
                                 break
                         used_bytes = used_down + used_up
                         used_gb    = round(used_bytes / (1024**3), 2)
-                        limit_gb   = round(total_limit / (1024**3), 2) if total_limit > 0 else 0
+                        # limit_gb มาจาก totalGB แล้ว (หน่วย GB) ไม่ต้องหารอีก
 
-                        # ── Fallback: ถ้า xui ไม่ได้ set total → อ่านจาก datalimit.conf ──
+                        # ── Fallback: ถ้า xui ไม่ได้ set totalGB → อ่านจาก datalimit.conf ──
                         if limit_gb == 0:
                             dl_file = "/etc/chaiya/datalimit.conf"
                             if os.path.exists(dl_file):
@@ -2497,10 +2517,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                             pass
                                         break
 
-                        pct = min(100, round(used_gb / limit_gb * 100, 1)) if limit_gb > 0 else 0
+                        pct = min(100, round(used_gb / limit_gb * 100, 1)) if limit_gb >= 1.0 else 0
 
                         # ── Auto-enforce: disable xui client เมื่อใช้ครบ limit ──
-                        if limit_gb > 0 and used_gb >= limit_gb:
+                        # [FIX] ต้องมี limit >= 1 GB ถึงจะ enforce — กัน 0 bytes หารแล้วเป็น 0.000x
+                        if limit_gb >= 1.0 and used_gb >= limit_gb:
                             try:
                                 # หา inbound id + client id แล้ว disable
                                 for ib2 in tdata.get("obj", []):
@@ -2537,7 +2558,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             "pct": pct,
                             "down_gb": round(used_down/(1024**3),2),
                             "up_gb":   round(used_up/(1024**3),2),
-                            "over_limit": limit_gb > 0 and used_gb >= limit_gb
+                            "over_limit": limit_gb >= 1.0 and used_gb >= limit_gb
                         })
                     except Exception:
                         continue
@@ -3225,14 +3246,28 @@ for _proto in ("http", "https"):
 
         for ib in tdata.get("obj", []):
             ib_id = ib.get("id")
+            # [FIX] อ่าน totalGB จาก settings.clients[] — หน่วย GB จริงๆ
+            _cl_totalgb = {}
+            try:
+                for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
+                    _em = cl.get("email","").lower()
+                    if _em:
+                        _cl_totalgb[_em] = float(cl.get("totalGB", 0) or 0)
+            except Exception:
+                pass
             for cs in ib.get("clientStats") or []:
                 email     = cs.get("email","").lower()
                 if email not in limits:
+                    # ตรวจว่า totalGB ของ xui ตรงกับ limits หรือเปล่า
+                    tgb = _cl_totalgb.get(email, 0)
+                    if tgb <= 0:
+                        continue
+                limit_gb  = limits.get(email, _cl_totalgb.get(email, 0))
+                if limit_gb <= 0:
                     continue
-                limit_gb  = limits[email]
                 used_bytes = cs.get("down",0) + cs.get("up",0)
                 used_gb    = used_bytes / (1024**3)
-                if used_gb >= limit_gb:
+                if limit_gb >= 1.0 and used_gb >= limit_gb:
                     log(f"⚠ {email}: ใช้ {used_gb:.2f} GB / {limit_gb} GB — กำลัง disable...")
                     try:
                         settings_obj = json.loads(ib.get("settings","{}"))
@@ -3976,9 +4011,9 @@ async function fetchTraffic(){
 
     var usedGb  = d.used_gb  || 0;
     // ใช้ limit จาก API ก่อน ถ้า 0 ให้ fallback ใช้ค่าที่ฝังไว้ใน HTML
-    var limGb   = (d.limit_gb && d.limit_gb > 0) ? d.limit_gb : (DATA_LIMIT_GB || 0);
+    var limGb   = (d.limit_gb && d.limit_gb >= 1) ? d.limit_gb : (DATA_LIMIT_GB >= 1 ? DATA_LIMIT_GB : 0);
     // คำนวณ pct ใหม่ถ้า limit มาจาก fallback
-    var pct     = (limGb > 0) ? Math.min(100, Math.round(usedGb / limGb * 100 * 10) / 10) : (d.pct || 0);
+    var pct     = (limGb >= 1) ? Math.min(100, Math.round(usedGb / limGb * 100 * 10) / 10) : (d.pct || 0);
     var barEl   = document.getElementById('bar-fill');
     var txtEl   = document.getElementById('data-txt');
     var pctEl   = document.getElementById('bar-pct');
@@ -3986,7 +4021,7 @@ async function fetchTraffic(){
     var downGb = d.down_gb || 0;
     var upGb   = d.up_gb   || 0;
 
-    if(limGb > 0){
+    if(limGb >= 1){
       // มี limit — แสดง used/limit + ↓↑ แยก + bar
       if(pct >= 100 || d.over_limit){
         txtEl.textContent = '\u26a0\ufe0f Data หมดแล้ว! ' + usedGb.toFixed(2) + ' / ' + limGb + ' GB  \u2193'+downGb.toFixed(2)+' \u2191'+upGb.toFixed(2)+' GB';
