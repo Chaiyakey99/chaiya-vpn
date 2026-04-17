@@ -76,7 +76,7 @@ dpkg --configure -a 2>/dev/null || true
 apt-get update -y -qq
 apt-get install -y -qq curl wget python3 bc qrencode ufw nginx \
   certbot python3-certbot-nginx python3-pip fail2ban sqlite3 \
-  jq openssl net-tools screen iptables-persistent netfilter-persistent 2>/dev/null || true
+  jq openssl net-tools screen iptables-persistent netfilter-persistent expect 2>/dev/null || true
 
 pip3 install bcrypt --break-system-packages -q 2>/dev/null || true
 
@@ -379,8 +379,7 @@ if ! systemctl is-active --quiet dropbear 2>/dev/null; then
 fi
 
 # ── badvpn-udpgw — ดาวน์โหลดพร้อม fallback หลาย source ──────
-# SHA256 checksum ของ binary ที่รู้จัก (NevermoreSSH/Blueblue newudpgw)
-_BADVPN_SHA256="b1e1c4b1b2c8a1c4e2f3a4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5"
+# ตรวจสอบ binary ด้วยการรัน --help จริง (ไม่ hardcode SHA256 เพราะ binary อัพเดทได้)
 _verify_badvpn() {
   [[ -f /usr/bin/badvpn-udpgw ]] || return 1
   # ทดสอบว่ารันได้จริง (เป็น ELF binary ที่ valid)
@@ -584,7 +583,17 @@ class ConnectionHandler(threading.Thread):
                 elif len(PASS) != 0 and passwd != PASS:
                     self.client.send(b'HTTP/1.1 400 WrongPass!\r\n\r\n')
                 elif hostPort.startswith('127.0.0.1') or hostPort.startswith('localhost'):
-                    self.method_CONNECT(hostPort)
+                    # [FIX] security: อนุญาตเฉพาะ port 143, 109 (Dropbear) เท่านั้น
+                    # ป้องกัน client ส่ง X-Real-Host: 127.0.0.1:22 หรือ 127.0.0.1:6789
+                    ALLOWED_LOCAL_PORTS = {143, 109}
+                    try:
+                        _hp_port = int(hostPort.split(':')[1]) if ':' in hostPort else 143
+                    except (ValueError, IndexError):
+                        _hp_port = -1
+                    if _hp_port in ALLOWED_LOCAL_PORTS:
+                        self.method_CONNECT(hostPort)
+                    else:
+                        self.client.send(b'HTTP/1.1 403 Forbidden!\r\n\r\n')
                 else:
                     self.client.send(b'HTTP/1.1 403 Forbidden!\r\n\r\n')
             else:
@@ -3257,12 +3266,10 @@ for _proto in ("http", "https"):
                 pass
             for cs in ib.get("clientStats") or []:
                 email     = cs.get("email","").lower()
-                if email not in limits:
-                    # ตรวจว่า totalGB ของ xui ตรงกับ limits หรือเปล่า
-                    tgb = _cl_totalgb.get(email, 0)
-                    if tgb <= 0:
-                        continue
-                limit_gb  = limits.get(email, _cl_totalgb.get(email, 0))
+                # [FIX] ใช้ limit จาก datalimit.conf ก่อน ถ้าไม่มีให้ fallback ไป totalGB ใน xui
+                # เดิม: ถ้า email ไม่อยู่ใน limits และ tgb <= 0 → skip ทั้งที่ xui set quota ไว้แล้ว
+                tgb = _cl_totalgb.get(email, 0)
+                limit_gb = limits.get(email, tgb)
                 if limit_gb <= 0:
                     continue
                 used_bytes = cs.get("down",0) + cs.get("up",0)
@@ -3574,9 +3581,17 @@ except: print(999)
     # ลบ key file ที่ผิด เพื่อให้วนกลับไปถามใหม่
     rm -f "$LICENSE_FILE" 2>/dev/null
 
-    # ถ้า key หมดอายุ / ถูก disable / ip_limit → ไม่มีทางแก้โดยพิมพ์ key เดิม → exit
-    if [[ "$msg" == "key_expired" || "$msg" == "key_disabled" || "$msg" == "ip_limit" ]]; then
+    # ถ้า key หมดอายุ / ถูก disable → ไม่มีทางแก้โดยพิมพ์ key เดิม → exit
+    if [[ "$msg" == "key_expired" || "$msg" == "key_disabled" ]]; then
       exit 1
+    fi
+    # ip_limit → อาจเกิดจาก VPS เปลี่ยน IP (reboot/NAT) → ให้ retry ได้
+    if [[ "$msg" == "ip_limit" ]]; then
+      printf "\n  ${YE}ถ้า VPS นี้เพิ่ง reboot หรือเปลี่ยน IP ให้กด Enter เพื่อลองใหม่${RS}\n"
+      printf "  ${YE}หรือกด Ctrl+C เพื่อออก${RS}\n"
+      read -rp "" _dummy
+      rm -f "$LICENSE_FILE" 2>/dev/null
+      continue
     fi
 
     # invalid_key หรือ network error → ให้ใส่ key ใหม่ได้เลย (loop ต่อ)
@@ -4212,14 +4227,28 @@ menu_1() {
   fi
 
   # ── 15% รัน installer ──────────────────────────────────────────
-  # [FIX] installer ใหม่ถาม 5 คำถาม ต้องตอบครบ:
-  #   y     = ยืนยันติดตั้ง
-  #   2053  = panel port
-  #   2     = ใช้ IP แทนโดเมน (สำหรับ SSL cert)
-  #   ""    = Enter (webBasePath = /)
-  #   80    = HTTP port สำหรับ cert challenge
+  # [FIX v2] ไม่ใช้ pipe คงที่ "y\n2053\n2\n\n80\n" อีกต่อไป
+  # เพราะ installer เวอร์ชันใหม่เปลี่ยนลำดับ/จำนวนคำถามได้
+  # วิธีใหม่: ใช้ expect ถ้ามี หรือ timeout-based stdin feeding
   rgb_bar 15 "กำลังติดตั้ง 3x-ui (อาจใช้ 1-3 นาที)..."
-  printf "y\n2053\n2\n\n80\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
+  if command -v expect &>/dev/null; then
+    expect -c "
+      set timeout 180
+      spawn bash $_xui_sh
+      expect {
+        -re {(?i)(confirm|proceed|install|continue).*\[y/n\]} { send \"y\r\"; exp_continue }
+        -re {(?i)port.*panel}                                  { send \"2053\r\"; exp_continue }
+        -re {(?i)(domain|ip|option 2)}                         { send \"2\r\"; exp_continue }
+        -re {(?i)(basepath|web.*path|enter.*path)}             { send \"\r\"; exp_continue }
+        -re {(?i)(http.*port|port.*80|challenge)}              { send \"80\r\"; exp_continue }
+        eof
+      }
+    " >> /var/log/chaiya-xui-install.log 2>&1 || true
+  else
+    # fallback: ป้อน input ครอบคลุมมากขึ้น (y + port + ตัวเลือก IP + enter + port 80)
+    # ส่ง y เพิ่มพิเศษ 3 ตัว และ enter เพิ่มเผื่อคำถามเพิ่มขึ้น
+    printf "y\ny\n2053\n2\n\n80\ny\n\n\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
+  fi
   rm -f "$_xui_sh"
 
   # ── 25% รอให้ installer เสร็จ + x-ui ขึ้นจริง ──────────────────
