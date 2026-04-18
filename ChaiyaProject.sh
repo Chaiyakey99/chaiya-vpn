@@ -2095,7 +2095,10 @@ def validate_username(u):
     return bool(u and _re_user.match(r'^[a-z0-9_-]{1,32}$', u))
 
 def _fetch_xui_traffic_map():
-    """ดึง traffic ทั้งหมดจาก x-ui แล้วคืนเป็น dict {email: (used_gb, limit_gb)}"""
+    """ดึง traffic ทั้งหมดจาก x-ui — dict {email: (used_gb, limit_gb)}
+    วิธี 1: อ่านจาก clientStats ใน /inbounds/list (รวดเร็ว)
+    วิธี 2: per-email /getClientTrafficByEmail/{email} (fallback สำหรับ x-ui version ใหม่)
+    """
     import urllib.request as _ureq, urllib.parse as _up, http.cookiejar as _cj
     traffic_map = {}
     try:
@@ -2111,35 +2114,52 @@ def _fetch_xui_traffic_map():
                 login_data = _up.urlencode({"username": xu, "password": xpw}).encode()
                 req = _ureq.Request(f"{_base}/login", data=login_data)
                 req.add_header("Content-Type", "application/x-www-form-urlencoded")
-                resp = opener.open(req, timeout=5)
-                if '"success":true' not in resp.read().decode():
+                if '"success":true' not in opener.open(req, timeout=5).read().decode():
                     continue
+
+                # ดึง inbound list — ใช้สำหรับ limit (totalGB) และ clientStats
                 tresp = opener.open(_ureq.Request(f"{_base}/panel/api/inbounds/list"), timeout=8)
                 tdata = json.loads(tresp.read().decode())
                 if not tdata.get("success"):
                     continue
+
+                # รวบรวม email ทั้งหมดและ limit จาก settings.clients[]
+                all_emails   = {}  # email -> limit_gb
                 for ib in tdata.get("obj", []):
-                    # [FIX] อ่าน totalGB จาก settings.clients[] — หน่วย GB จริงๆ
-                    # clientStats.total = bytes (นับจริง) ห้ามใช้เป็น limit!
-                    _settings_clients = {}
                     try:
                         for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                             _em = cl.get("email","").lower()
                             if _em:
-                                # totalGB = GB ตรงๆ (3x-ui model: Total traffic limit in GB)
-                                _settings_clients[_em] = float(cl.get("totalGB", 0) or 0)
+                                all_emails[_em] = float(cl.get("totalGB", 0) or 0)
                     except Exception:
                         pass
+                    # วิธี 1: อ่าน traffic จาก clientStats (x-ui เก่า/กลาง)
                     for cs in ib.get("clientStats") or []:
-                        email = cs.get("email", "").lower()
-                        if not email:
+                        _em = cs.get("email","").lower()
+                        if not _em:
                             continue
-                        used_bytes = cs.get("down", 0) + cs.get("up", 0)
-                        used_gb    = round(used_bytes / (1024**3), 2)
-                        # limit_gb อ่านจาก settings.clients[].totalGB (หน่วย GB) ไม่ต้องหารอีก
-                        limit_gb   = _settings_clients.get(email, 0)
-                        traffic_map[email] = (used_gb, limit_gb)
-                return traffic_map  # สำเร็จ ออกได้เลย
+                        _ub = (cs.get("down", 0) or 0) + (cs.get("up", 0) or 0)
+                        _lgb = all_emails.get(_em, 0)
+                        traffic_map[_em] = (round(_ub / (1024**3), 2), _lgb)
+
+                # วิธี 2: fallback per-email สำหรับ email ที่ยังไม่มี traffic (clientStats ว่าง)
+                for _em, _lgb in all_emails.items():
+                    if _em not in traffic_map or traffic_map[_em][0] == 0.0:
+                        try:
+                            er = opener.open(
+                                _ureq.Request(f"{_base}/panel/api/inbounds/getClientTrafficByEmail/{_em}"),
+                                timeout=5
+                            )
+                            ed = json.loads(er.read().decode())
+                            if ed.get("success") and ed.get("obj"):
+                                obj = ed["obj"]
+                                _ub2 = (obj.get("down",0) or 0) + (obj.get("up",0) or 0)
+                                if _ub2 > 0 or _em not in traffic_map:
+                                    traffic_map[_em] = (round(_ub2/(1024**3), 2), _lgb)
+                        except Exception:
+                            pass
+
+                return traffic_map  # สำเร็จ
             except Exception:
                 continue
     except Exception:
@@ -2454,119 +2474,122 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not email:
                 return self.send_json(400, {"error":"email required"})
             try:
-                import urllib.request as _ureq, http.cookiejar as _cj
-                # อ่าน config
-                xui_port_f = "/etc/chaiya/xui-port.conf"
-                xui_user_f = "/etc/chaiya/xui-user.conf"
-                xui_pass_f = "/etc/chaiya/xui-pass.conf"
-                xui_bp_f   = "/etc/chaiya/xui-basepath.conf"
-                xp   = open(xui_port_f).read().strip() if os.path.exists(xui_port_f) else "2053"
-                xu   = open(xui_user_f).read().strip() if os.path.exists(xui_user_f) else "admin"
-                xpw  = open(xui_pass_f).read().strip() if os.path.exists(xui_pass_f) else ""
-                xbp  = open(xui_bp_f).read().strip().rstrip("/") if os.path.exists(xui_bp_f) else ""
-                # ลอง http ก่อน fallback https
+                import urllib.request as _ureq, http.cookiejar as _cj, urllib.parse as _up
+                xp  = open("/etc/chaiya/xui-port.conf").read().strip()  if os.path.exists("/etc/chaiya/xui-port.conf")  else "2053"
+                xu  = open("/etc/chaiya/xui-user.conf").read().strip()  if os.path.exists("/etc/chaiya/xui-user.conf")  else "admin"
+                xpw = open("/etc/chaiya/xui-pass.conf").read().strip()  if os.path.exists("/etc/chaiya/xui-pass.conf")  else ""
+                xbp = open("/etc/chaiya/xui-basepath.conf").read().strip().rstrip("/") if os.path.exists("/etc/chaiya/xui-basepath.conf") else ""
+
                 for _proto in ("http", "https"):
                     try:
                         _base = f"{_proto}://127.0.0.1:{xp}{xbp}"
-                        cj   = _cj.CookieJar()
+                        cj = _cj.CookieJar()
                         opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj))
                         # login
-                        import urllib.parse as _up
                         login_data = _up.urlencode({"username": xu, "password": xpw}).encode()
                         req = _ureq.Request(f"{_base}/login", data=login_data)
-                        req.add_header("Content-Type","application/x-www-form-urlencoded")
-                        resp = opener.open(req, timeout=5)
-                        lr = resp.read().decode()
+                        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+                        lr = opener.open(req, timeout=5).read().decode()
                         if '"success":true' not in lr:
                             continue
-                        # ดึง traffic list
-                        treq = _ureq.Request(f"{_base}/panel/api/inbounds/list")
-                        tresp = opener.open(treq, timeout=8)
-                        tdata = json.loads(tresp.read().decode())
-                        if not tdata.get("success"):
-                            continue
-                        # หา client traffic ที่ตรง email
+
+                        # ── วิธีที่ 1: getClientTrafficByEmail (รองรับทุก x-ui version) ──
                         used_down = used_up = 0
                         limit_gb  = 0
-                        found = False
-                        for ib in tdata.get("obj", []):
-                            # clientStats อยู่ใน inbound obj โดยตรง
-                            for cs in ib.get("clientStats") or []:
-                                if cs.get("email","").lower() == email.lower():
-                                    used_down = cs.get("down", 0)
-                                    used_up   = cs.get("up", 0)
-                                    found = True
-                                    break
-                            if found:
-                                # [FIX] อ่าน totalGB จาก settings.clients[] เท่านั้น
-                                # clientStats.total = bytes สะสม ไม่ใช่ limit!
-                                try:
-                                    for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
-                                        if cl.get("email","").lower() == email.lower():
-                                            limit_gb = float(cl.get("totalGB", 0) or 0)
-                                            break
-                                except Exception:
-                                    pass
-                                break
-                        used_bytes = used_down + used_up
-                        used_gb    = round(used_bytes / (1024**3), 2)
-                        # limit_gb มาจาก totalGB (bytes) หารแล้วเป็น GB
+                        found     = False
+                        try:
+                            er = opener.open(
+                                _ureq.Request(f"{_base}/panel/api/inbounds/getClientTrafficByEmail/{email}"),
+                                timeout=5
+                            )
+                            ed = json.loads(er.read().decode())
+                            if ed.get("success") and ed.get("obj"):
+                                obj = ed["obj"]
+                                used_down = obj.get("down", 0) or 0
+                                used_up   = obj.get("up",   0) or 0
+                                found = True
+                        except Exception:
+                            pass
 
-                        # ── Fallback: ถ้า xui ไม่ได้ set totalGB → อ่านจาก datalimit.conf ──
-                        if limit_gb == 0:
-                            dl_file = "/etc/chaiya/datalimit.conf"
-                            if os.path.exists(dl_file):
-                                for dl_line in open(dl_file):
-                                    dl_parts = dl_line.strip().split()
-                                    # format: email data_gb
-                                    if len(dl_parts) >= 2 and dl_parts[0].lower() == email.lower():
-                                        try:
-                                            limit_gb = float(dl_parts[1])
-                                        except:
-                                            pass
+                        # ── วิธีที่ 2: fallback อ่านจาก clientStats ใน inbounds/list ──
+                        if not found:
+                            tresp = opener.open(_ureq.Request(f"{_base}/panel/api/inbounds/list"), timeout=8)
+                            tdata = json.loads(tresp.read().decode())
+                            if tdata.get("success"):
+                                for ib in tdata.get("obj", []):
+                                    for cs in ib.get("clientStats") or []:
+                                        if cs.get("email","").lower() == email.lower():
+                                            used_down = cs.get("down", 0) or 0
+                                            used_up   = cs.get("up",   0) or 0
+                                            found = True
+                                            break
+                                    if found:
                                         break
 
-                        pct = min(100, round(used_gb / limit_gb * 100, 1)) if limit_gb >= 1.0 else 0
+                        # ── อ่าน totalGB (limit) จาก inbounds/list settings.clients[] ──
+                        try:
+                            if not found or limit_gb == 0:
+                                tresp2 = opener.open(_ureq.Request(f"{_base}/panel/api/inbounds/list"), timeout=8)
+                                tdata2 = json.loads(tresp2.read().decode())
+                            else:
+                                # reuse tdata ถ้า fallback ใช้อยู่แล้ว
+                                tdata2 = tdata if 'tdata' in dir() else {}
+                            for ib in tdata2.get("obj", []):
+                                for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
+                                    if cl.get("email","").lower() == email.lower():
+                                        limit_gb = float(cl.get("totalGB", 0) or 0)
+                                        break
+                                if limit_gb > 0:
+                                    break
+                        except Exception:
+                            pass
 
-                        # ── Auto-enforce: disable xui client เมื่อใช้ครบ limit ──
-                        # [FIX] ต้องมี limit >= 1 GB ถึงจะ enforce — กัน 0 bytes หารแล้วเป็น 0.000x
+                        # ── Fallback limit: datalimit.conf ──
+                        if limit_gb == 0 and os.path.exists("/etc/chaiya/datalimit.conf"):
+                            for dl_line in open("/etc/chaiya/datalimit.conf"):
+                                dl_parts = dl_line.strip().split()
+                                if len(dl_parts) >= 2 and dl_parts[0].lower() == email.lower():
+                                    try: limit_gb = float(dl_parts[1])
+                                    except: pass
+                                    break
+
+                        used_bytes = used_down + used_up
+                        used_gb    = round(used_bytes / (1024**3), 2)
+                        pct        = min(100, round(used_gb / limit_gb * 100, 1)) if limit_gb >= 1.0 else 0
+
+                        # ── Auto-enforce: disable client เมื่อใช้ครบ limit ──
                         if limit_gb >= 1.0 and used_gb >= limit_gb:
                             try:
-                                # หา inbound id + client id แล้ว disable
-                                for ib2 in tdata.get("obj", []):
+                                td = tdata2 if 'tdata2' in dir() else {}
+                                for ib2 in td.get("obj", []):
                                     ib_id = ib2.get("id")
-                                    for cs2 in ib2.get("clientStats") or []:
-                                        if cs2.get("email","").lower() == email.lower():
-                                            # ดึง client settings เพื่อหา uuid
-                                            try:
-                                                import json as _json2
-                                                settings_obj = _json2.loads(ib2.get("settings","{}"))
-                                                for cl in settings_obj.get("clients",[]):
-                                                    if cl.get("email","").lower() == email.lower():
-                                                        cl["enable"] = False
-                                                        disable_data = _json2.dumps({
-                                                            "id": ib_id,
-                                                            "settings": _json2.dumps({"clients":[cl]})
-                                                        }).encode()
-                                                        dreq = _ureq.Request(
-                                                            f"{_base}/panel/api/inbounds/updateClient/{cl.get('id',cl.get('email',''))}",
-                                                            data=disable_data
-                                                        )
-                                                        dreq.add_header("Content-Type","application/json")
-                                                        opener.open(dreq, timeout=5)
-                                            except:
-                                                pass
-                            except:
+                                    settings_obj = json.loads(ib2.get("settings","{}"))
+                                    for cl in settings_obj.get("clients",[]):
+                                        if cl.get("email","").lower() == email.lower():
+                                            if cl.get("enable", True):
+                                                cl["enable"] = False
+                                                disable_data = json.dumps({
+                                                    "id": ib_id,
+                                                    "settings": json.dumps({"clients":[cl]})
+                                                }).encode()
+                                                dreq = _ureq.Request(
+                                                    f"{_base}/panel/api/inbounds/updateClient/{cl.get('id',email)}",
+                                                    data=disable_data
+                                                )
+                                                dreq.add_header("Content-Type","application/json")
+                                                opener.open(dreq, timeout=5)
+                                            break
+                            except Exception:
                                 pass
 
                         return self.send_json(200, {
-                            "ok": True,
-                            "email": email,
-                            "used_gb": used_gb,
-                            "limit_gb": limit_gb,
-                            "pct": pct,
-                            "down_gb": round(used_down/(1024**3),2),
-                            "up_gb":   round(used_up/(1024**3),2),
+                            "ok":         True,
+                            "email":      email,
+                            "used_gb":    used_gb,
+                            "limit_gb":   limit_gb,
+                            "pct":        pct,
+                            "down_gb":    round(used_down / (1024**3), 2),
+                            "up_gb":      round(used_up   / (1024**3), 2),
                             "over_limit": limit_gb >= 1.0 and used_gb >= limit_gb
                         })
                     except Exception:
@@ -4939,6 +4962,9 @@ menu_3() {
   read -rp "$(printf "  ${YE}📦 Data limit GB (0=ไม่จำกัด): ${RS}")" DATA_GB
   [[ -z "$DATA_GB" || ! "$DATA_GB" =~ ^[0-9]+$ ]] && DATA_GB=0
 
+  read -rp "$(printf "  ${YE}🔒 IP limit (default 2): ${RS}")" IP_LIMIT
+  [[ -z "$IP_LIMIT" || ! "$IP_LIMIT" =~ ^[0-9]+$ ]] && IP_LIMIT=2
+
   printf "\n  ${WH}🔌 เลือก Inbound (VMess WS):${RS}\n"
   printf "  ${R2}1.${RS} Port ${WH}8080${RS} — AIS  | SNI: ${YE}cj-ebb.speedtest.net${RS}\n"
   printf "  ${R3}2.${RS} Port ${WH}8880${RS} — TRUE | SNI: ${YE}true-internet.zoom.xyz.services${RS}\n"
@@ -5016,20 +5042,23 @@ print('')
 import json, sys
 client = {
   'id': sys.argv[1],
+  'flow': '',
   'email': sys.argv[2],
-  'limitIp': 2,
-  'totalGB': int(sys.argv[3]),
-  'expiryTime': int(sys.argv[4]),
+  'limitIp': int(sys.argv[3]),
+  'totalGB': int(sys.argv[4]),
+  'expiryTime': int(sys.argv[5]),
   'enable': True,
+  'tgId': '',
+  'subId': '',
   'comment': '',
   'reset': 0
 }
 payload = {
-  'id': int(sys.argv[5]),
+  'id': int(sys.argv[6]),
   'settings': json.dumps({'clients': [client]})
 }
 print(json.dumps(payload))
-" "$UUID" "$UNAME" "$DATA_GB" "$EXP_MS" "$_inbound_id")
+" "$UUID" "$UNAME" "$IP_LIMIT" "$DATA_GB" "$EXP_MS" "$_inbound_id")
       API_RESULT=$(xui_api POST "/panel/api/inbounds/addClient" "$_client_payload" 2>/dev/null)
       # [FIX] ถ้า fail → fresh login แล้ว retry
       if ! echo "$API_RESULT" | grep -q '"success":true'; then
@@ -5046,11 +5075,14 @@ import json, sys
 settings = json.dumps({
   'clients': [{
     'id': sys.argv[1],
+    'flow': '',
     'email': sys.argv[2],
-    'limitIp': 2,
-    'totalGB': int(sys.argv[3]),
-    'expiryTime': int(sys.argv[4]),
+    'limitIp': int(sys.argv[3]),
+    'totalGB': int(sys.argv[4]),
+    'expiryTime': int(sys.argv[5]),
     'enable': True,
+    'tgId': '',
+    'subId': '',
     'comment': '',
     'reset': 0
   }],
@@ -5058,22 +5090,22 @@ settings = json.dumps({
 })
 stream = json.dumps({
   'network': 'ws',
-  'security': sys.argv[5],
-  'wsSettings': {'path': '/vless', 'headers': {'Host': sys.argv[6]}}
+  'security': sys.argv[6],
+  'wsSettings': {'path': '/vless', 'headers': {'Host': sys.argv[7]}}
 })
 sniff = json.dumps({'enabled': True, 'destOverride': ['http','tls']})
 payload = {
   'remark': 'CHAIYA-' + sys.argv[2],
   'enable': True,
   'listen': '',
-  'port': int(sys.argv[7]),
+  'port': int(sys.argv[8]),
   'protocol': 'vless',
   'settings': settings,
   'streamSettings': stream,
   'sniffing': sniff
 }
 print(json.dumps(payload))
-" "$UUID" "$UNAME" "$DATA_GB" "$EXP_MS" "$SEC" "$_sni" "$_vport")
+" "$UUID" "$UNAME" "$IP_LIMIT" "$DATA_GB" "$EXP_MS" "$SEC" "$_sni" "$_vport")
       API_RESULT=$(xui_api POST "/panel/api/inbounds/add" "$_vless_payload" 2>/dev/null)
       # [FIX] ถ้า fail → fresh login แล้ว retry
       if ! echo "$API_RESULT" | grep -q '"success":true'; then
@@ -5095,24 +5127,19 @@ print(json.dumps(payload))
     # ── บันทึก data limit ลง datalimit.conf สำหรับ API fallback ──
     if [[ "$DATA_GB" -gt 0 ]]; then
       local _dl_conf="/etc/chaiya/datalimit.conf"
-      # ลบรายการเก่าของ user นี้ก่อน (ถ้ามี) แล้วเพิ่มใหม่
       sed -i "/^${UNAME} /d" "$_dl_conf" 2>/dev/null || true
       echo "${UNAME} ${DATA_GB}" >> "$_dl_conf"
     fi
+
+    # ── บันทึก IP limit ลง iplimit.conf ──
+    local _ipl_conf="/etc/chaiya/iplimit.conf"
+    sed -i "/^${UNAME}=/d" "$_ipl_conf" 2>/dev/null || true
+    echo "${UNAME}=${IP_LIMIT}:720" >> "$_ipl_conf"
 
     # เก็บผลสำหรับแสดง
     _RESULTS+=("$_vport|$_sni|$UUID|$VLESS_LINK|$API_RESULT")
     (( _created_count++ )) || true
   done
-
-  # ── ตั้งค่า IP limit enforcement (ban 12 ชั่วโมง) ────────────
-  rgb_bar 85 "ตั้งค่า IP limit 2 IP / แบน 12 ชั่วโมง..."; printf "\n\n"
-
-  # บันทึก config IP limit สำหรับ chaiya-iplimit daemon
-  local _ipl_conf="/etc/chaiya/iplimit.conf"
-  grep -q "^${UNAME}=" "$_ipl_conf" 2>/dev/null || \
-    echo "${UNAME}=2:720" >> "$_ipl_conf" 2>/dev/null || true
-  # format: user=max_ip:ban_minutes (720 min = 12 ชั่วโมง)
 
   # ── สร้างไฟล์ HTML (port แรกในรายการ) ───────────────────────
   if [[ ${#_RESULTS[@]} -gt 0 ]]; then
