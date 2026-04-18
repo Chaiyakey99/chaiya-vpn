@@ -2127,7 +2127,7 @@ def _fetch_xui_traffic_map():
                             _em = cl.get("email","").lower()
                             if _em:
                                 # totalGB = GB ตรงๆ (3x-ui model: Total traffic limit in GB)
-                                _settings_clients[_em] = float(cl.get("totalGB", 0) or 0)
+                                _settings_clients[_em] = float(cl.get("totalGB", 0) or 0)  # LOCKED: GB ตรงๆ
                     except Exception:
                         pass
                     for cs in ib.get("clientStats") or []:
@@ -2503,7 +2503,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                 try:
                                     for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                                         if cl.get("email","").lower() == email.lower():
-                                            limit_gb = float(cl.get("totalGB", 0) or 0)
+                                            limit_gb = float(cl.get("totalGB", 0) or 0)  # LOCKED: GB ตรงๆ
                                             break
                                 except Exception:
                                     pass
@@ -3261,7 +3261,7 @@ for _proto in ("http", "https"):
                 for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                     _em = cl.get("email","").lower()
                     if _em:
-                        _cl_totalgb[_em] = float(cl.get("totalGB", 0) or 0)
+                        _cl_totalgb[_em] = float(cl.get("totalGB", 0) or 0)  # LOCKED: GB ตรงๆ
             except Exception:
                 pass
             for cs in ib.get("clientStats") or []:
@@ -4220,11 +4220,16 @@ menu_1() {
   # ── 10% ดาวน์โหลด install script ──
   rgb_bar 10 "ดาวน์โหลด install script..."
   local _xui_sh; _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
-  if ! curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
+  # LOCKED: 3x-ui version v2.8.11 — ห้ามเปลี่ยนเป็น master หรือ latest
+  # API (totalGB=GB) ถูก verify กับ version นี้แล้ว
+  local _XUI_VERSION="v2.8.11"
+  local _XUI_INSTALL_URL="https://raw.githubusercontent.com/MHSanaei/3x-ui/${_XUI_VERSION}/install.sh"
+  if ! curl -Ls "$_XUI_INSTALL_URL" \
        -o "$_xui_sh" 2>/dev/null || [[ ! -s "$_xui_sh" ]]; then
-    printf "  ${RD}✗ ดาวน์โหลด install script ล้มเหลว${RS}\n"
+    printf "  ${RD}✗ ดาวน์โหลด install script v%s ล้มเหลว${RS}\n" "$_XUI_VERSION"
     read -rp "  Enter..."; return
   fi
+  printf "  ${GR}✔ ดาวน์โหลด 3x-ui %s สำเร็จ${RS}\n" "$_XUI_VERSION"
 
   # ── 15% รัน installer ──────────────────────────────────────────
   # [FIX v2] ไม่ใช้ pipe คงที่ "y\n2053\n2\n\n80\n" อีกต่อไป
@@ -5006,11 +5011,16 @@ print('')
       local _client_payload
       _client_payload=$(python3 -c "
 import json, sys
+# ════════════════════════════════════════════════════════
+# LOCKED: totalGB = GB (int) ตาม 3x-ui model.go
+# 'Total traffic limit in GB' — ห้ามคูณ/หาร 1073741824
+# ห้ามเปลี่ยน field เป็น 'total' เด็ดขาด
+# ════════════════════════════════════════════════════════
 client = {
   'id': sys.argv[1],
   'email': sys.argv[2],
   'limitIp': 2,
-  'totalGB': int(sys.argv[3]),
+  'totalGB': int(sys.argv[3]),  # GB ตรงๆ ห้ามแก้
   'expiryTime': int(sys.argv[4]),
   'enable': True,
   'comment': '',
@@ -5036,11 +5046,12 @@ print(json.dumps(payload))
       _vless_payload=$(python3 -c "
 import json, sys
 settings = json.dumps({
+  # LOCKED: totalGB = GB ตรงๆ ห้ามคูณ 1073741824 ห้ามเปลี่ยนเป็น 'total'
   'clients': [{
     'id': sys.argv[1],
     'email': sys.argv[2],
     'limitIp': 2,
-    'totalGB': int(sys.argv[3]),
+    'totalGB': int(sys.argv[3]),  # GB ตรงๆ ห้ามแก้
     'expiryTime': int(sys.argv[4]),
     'enable': True,
     'comment': '',
@@ -5299,7 +5310,7 @@ try:
       idx += 1
       email    = c.get('email', c.get('id', '-'))[:18]
       # totalGB เก็บเป็น GB โดยตรง
-      total_gb = float(c.get('totalGB', 0) or 0)
+      total_gb = float(c.get('totalGB', 0) or 0)  # LOCKED: GB ตรงๆ ห้ามหาร 1073741824
       exp_ms   = c.get('expiryTime', 0)
       active   = c.get('enable', True) and enable
 
