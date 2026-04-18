@@ -191,79 +191,49 @@ sleep 2
 
 XUI_DB="/etc/x-ui/x-ui.db"
 
-# วิธีที่ 1: x-ui CLI (ถูกต้องที่สุด — จัดการ hash เองถูกต้อง)
-x-ui setting -port "$XUI_PORT"        2>/dev/null || true
-x-ui setting -username "$XUI_USER"    2>/dev/null || true
-x-ui setting -password "$XUI_PASS"    2>/dev/null || true
-x-ui setting -secret  ""              2>/dev/null || true
+# ── สร้าง bcrypt hash ของ password ──────────────────────────
+XUI_PASS_HASH=$(python3 -c "
+import bcrypt, sys
+pw = sys.argv[1].encode()
+print(bcrypt.hashpw(pw, bcrypt.gensalt()).decode())
+" "$XUI_PASS" 2>/dev/null)
+# ถ้า bcrypt ไม่มีให้ใช้ plain text แทน (fallback)
+[[ -z "$XUI_PASS_HASH" ]] && XUI_PASS_HASH="$XUI_PASS"
 
-# วิธีที่ 2: เขียนตรงลง SQLite เป็น fallback (รองรับทั้ง plain text และ hashed)
+# ── เขียนลง DB โดยตรง (DELETE+INSERT เพื่อป้องกัน duplicate) ──
 if [[ -f "$XUI_DB" ]]; then
-  # ตรวจว่า 3x-ui version นี้ใช้ plain text หรือ hash
-  DB_PASS=$(sqlite3 "$XUI_DB" "SELECT password FROM users WHERE id=1;" 2>/dev/null)
-  if echo "$DB_PASS" | grep -qE '^\$2[aby]\$|^\$argon2'; then
-    # password เป็น bcrypt/argon2 hash — ใช้ CLI เท่านั้น (ทำไปแล้วข้างบน)
-    info "x-ui ใช้ hashed password — ตั้งค่าผ่าน CLI เรียบร้อย"
-  else
-    # plain text — เขียนตรงได้เลย
-    sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS}' WHERE id=1;" 2>/dev/null || true
-  fi
-  # ตั้ง port และ webUsername/webPassword ใน settings table เสมอ
-  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_PORT}'  WHERE key='webPort';"     2>/dev/null || true
-  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_USER}' WHERE key='webUsername';"  2>/dev/null || true
-  sqlite3 "$XUI_DB" "UPDATE settings SET value='${XUI_PASS}' WHERE key='webPassword';"  2>/dev/null || true
-  # ถ้า row ไม่มีให้ INSERT
-  sqlite3 "$XUI_DB" "INSERT OR IGNORE INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"    2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT OR IGNORE INTO settings(key,value) VALUES('webUsername','${XUI_USER}');" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT OR IGNORE INTO settings(key,value) VALUES('webPassword','${XUI_PASS}');" 2>/dev/null || true
+  # users table
+  sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS_HASH}' WHERE id=1;" 2>/dev/null || true
+
+  # settings table — DELETE ก่อนเสมอเพื่อป้องกัน duplicate rows
+  for _key in webPort webUsername webPassword; do
+    sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
+  done
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"       2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"   2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPassword','${XUI_PASS_HASH}');" 2>/dev/null || true
+  ok "x-ui credentials + port ตั้งค่าใน DB เรียบร้อย"
 fi
 
 systemctl start x-ui 2>/dev/null || true
 
-# ── รอ x-ui พร้อมจริงๆ (max 60 วินาที) ──────────────────────
+# ── รอ x-ui พร้อม (max 20 วินาที) ───────────────────────────
 info "รอ x-ui เริ่มต้น..."
-REAL_XUI_PORT=""
+REAL_XUI_PORT="$XUI_PORT"
 XUI_READY=0
-for _i in $(seq 1 30); do
+for _i in $(seq 1 10); do
   sleep 2
-  # 1. อ่าน port จาก DB (วิธีที่น่าเชื่อถือที่สุด)
-  _dbport=$(sqlite3 /etc/x-ui/x-ui.db \
-    "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null | tr -d '[:space:]')
-  # 2. fallback: ดูจาก ss ว่า process x-ui listen port อะไรจริงๆ
-  if [[ -z "$_dbport" || "$_dbport" == "0" ]]; then
-    _dbport=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K\d+' | head -1)
-  fi
-  # 3. fallback สุดท้าย
-  [[ -z "$_dbport" || "$_dbport" == "0" ]] && _dbport=$XUI_PORT
-  REAL_XUI_PORT="$_dbport"
+  # ดูจาก ss ว่า x-ui listen port อะไรจริงๆ
+  _ssport=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K\d+' | head -1)
+  [[ -n "$_ssport" ]] && REAL_XUI_PORT="$_ssport"
   # ตรวจว่า x-ui ตอบสนอง HTTP แล้ว
-  _http=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" \
-    "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null)
+  _http=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}"     "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null)
   if [[ "$_http" =~ ^[123] ]]; then
     XUI_READY=1; break
   fi
 done
 [[ -z "$REAL_XUI_PORT" ]] && REAL_XUI_PORT=$XUI_PORT
 echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
-
-# ── ยืนยัน credentials (หลัง x-ui ready) ────────────────────
-VERIFY_USER=$(sqlite3 "$XUI_DB" "SELECT username FROM users WHERE id=1;" 2>/dev/null)
-if [[ "$VERIFY_USER" == "$XUI_USER" ]]; then
-  ok "x-ui credentials ตั้งค่าสำเร็จ (username: $XUI_USER)"
-else
-  warn "x-ui username อาจยังเป็น '${VERIFY_USER}' — ลองตั้งซ้ำผ่าน CLI..."
-  systemctl stop x-ui 2>/dev/null || true; sleep 1
-  x-ui setting -username "$XUI_USER" 2>/dev/null || true
-  x-ui setting -password "$XUI_PASS" 2>/dev/null || true
-  systemctl start x-ui 2>/dev/null || true
-  # รอ x-ui กลับมาอีกครั้ง
-  for _j in $(seq 1 15); do
-    sleep 2
-    _http=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" \
-      "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null)
-    [[ "$_http" =~ ^[123] ]] && break
-  done
-fi
 
 if [[ $XUI_READY -eq 1 ]]; then
   ok "3x-ui พร้อม (port $REAL_XUI_PORT)"
