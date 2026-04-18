@@ -2126,8 +2126,8 @@ def _fetch_xui_traffic_map():
                         for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                             _em = cl.get("email","").lower()
                             if _em:
-                                # totalGB เก็บเป็น bytes (GB * 1073741824) → หารกลับเป็น GB
-                                _settings_clients[_em] = float(cl.get("totalGB", 0) or 0) / 1073741824
+                                # totalGB = GB ตรงๆ (3x-ui model: Total traffic limit in GB)
+                                _settings_clients[_em] = float(cl.get("totalGB", 0) or 0)
                     except Exception:
                         pass
                     for cs in ib.get("clientStats") or []:
@@ -2503,7 +2503,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                 try:
                                     for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                                         if cl.get("email","").lower() == email.lower():
-                                            limit_gb = float(cl.get("totalGB", 0) or 0) / 1073741824
+                                            limit_gb = float(cl.get("totalGB", 0) or 0)
                                             break
                                 except Exception:
                                     pass
@@ -3261,7 +3261,7 @@ for _proto in ("http", "https"):
                 for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                     _em = cl.get("email","").lower()
                     if _em:
-                        _cl_totalgb[_em] = float(cl.get("totalGB", 0) or 0) / 1073741824
+                        _cl_totalgb[_em] = float(cl.get("totalGB", 0) or 0)
             except Exception:
                 pass
             for cs in ib.get("clientStats") or []:
@@ -5002,7 +5002,7 @@ print('')
     local API_RESULT=""
     if [[ -n "$_inbound_id" ]]; then
       # เพิ่ม client เข้า inbound เดิม — settings ต้องเป็น JSON string
-      # [FIX] ส่ง totalGB เป็น bytes (GB * 1073741824) — 3x-ui field ชื่อ totalGB แต่รับ bytes
+      # totalGB รับค่าเป็น GB ตรงๆ ตาม 3x-ui model.go (Total traffic limit in GB)
       local _client_payload
       _client_payload=$(python3 -c "
 import json, sys
@@ -5010,7 +5010,7 @@ client = {
   'id': sys.argv[1],
   'email': sys.argv[2],
   'limitIp': 2,
-  'totalGB': int(sys.argv[3]) * 1073741824,
+  'totalGB': int(sys.argv[3]),
   'expiryTime': int(sys.argv[4]),
   'enable': True,
   'comment': '',
@@ -5031,7 +5031,7 @@ print(json.dumps(payload))
       fi
     else
       # ไม่มี inbound — สร้างใหม่พร้อม client
-      # [FIX] ส่ง totalGB เป็น bytes (GB * 1073741824) — 3x-ui field ชื่อ totalGB แต่รับ bytes
+      # totalGB รับค่าเป็น GB ตรงๆ ตาม 3x-ui model.go (Total traffic limit in GB)
       local _vless_payload
       _vless_payload=$(python3 -c "
 import json, sys
@@ -5040,7 +5040,7 @@ settings = json.dumps({
     'id': sys.argv[1],
     'email': sys.argv[2],
     'limitIp': 2,
-    'totalGB': int(sys.argv[3]) * 1073741824,
+    'totalGB': int(sys.argv[3]),
     'expiryTime': int(sys.argv[4]),
     'enable': True,
     'comment': '',
@@ -5299,12 +5299,11 @@ try:
       idx += 1
       email    = c.get('email', c.get('id', '-'))[:18]
       # totalGB เก็บเป็น GB โดยตรง
-      _tgb_bytes = c.get('totalGB', 0)
-      total_gb = _tgb_bytes / 1073741824 if _tgb_bytes > 0 else 0
+      total_gb = float(c.get('totalGB', 0) or 0)
       exp_ms   = c.get('expiryTime', 0)
       active   = c.get('enable', True) and enable
 
-      if _tgb_bytes == 0:
+      if total_gb == 0:
         data_str = 'Unlimited'
       else:
         data_str = f'{total_gb:.1f} GB'
