@@ -2130,7 +2130,7 @@ def _fetch_xui_traffic_map():
                         for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                             _em = cl.get("email","").lower()
                             if _em:
-                                all_emails[_em] = float(cl.get("totalGB", 0) or 0)
+                                all_emails[_em] = round(float(cl.get("totalGB", 0) or 0) / (1024**3), 2)
                     except Exception:
                         pass
                     # วิธี 1: อ่าน traffic จาก clientStats (x-ui เก่า/กลาง)
@@ -2537,7 +2537,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             for ib in tdata2.get("obj", []):
                                 for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                                     if cl.get("email","").lower() == email.lower():
-                                        limit_gb = float(cl.get("totalGB", 0) or 0)
+                                        limit_gb = round(float(cl.get("totalGB", 0) or 0) / (1024**3), 2)
                                         break
                                 if limit_gb > 0:
                                     break
@@ -3284,7 +3284,7 @@ for _proto in ("http", "https"):
                 for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                     _em = cl.get("email","").lower()
                     if _em:
-                        _cl_totalgb[_em] = float(cl.get("totalGB", 0) or 0)
+                        _cl_totalgb[_em] = round(float(cl.get("totalGB", 0) or 0) / (1024**3), 2)
             except Exception:
                 pass
             for cs in ib.get("clientStats") or []:
@@ -5045,7 +5045,7 @@ client = {
   'flow': '',
   'email': sys.argv[2],
   'limitIp': int(sys.argv[3]),
-  'totalGB': int(sys.argv[4]),
+  'totalGB': int(sys.argv[4]) * (1024**3),
   'expiryTime': int(sys.argv[5]),
   'enable': True,
   'tgId': '',
@@ -5078,7 +5078,7 @@ settings = json.dumps({
     'flow': '',
     'email': sys.argv[2],
     'limitIp': int(sys.argv[3]),
-    'totalGB': int(sys.argv[4]),
+    'totalGB': int(sys.argv[4]) * (1024**3),
     'expiryTime': int(sys.argv[5]),
     'enable': True,
     'tgId': '',
