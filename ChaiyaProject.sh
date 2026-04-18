@@ -110,7 +110,7 @@ MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null \
 #  81   → nginx dashboard + proxy → API:6789 (internal)
 #  109  → Dropbear SSH port 2
 #  143  → Dropbear SSH port 1
-#  443  → nginx SSL (ถ้ามี cert)
+#  443  → nginx SSL (SSH-WS-SSL self-signed + Dashboard HTTPS)
 #  2053 → 3x-ui panel
 #  6789 → chaiya-sshws-api (127.0.0.1 เท่านั้น — ห้าม expose)
 #  7300 → badvpn-udpgw (127.0.0.1 เท่านั้น)
@@ -126,7 +126,7 @@ MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null \
 #    81   → Dashboard web UI
 #    109  → Dropbear SSH port 2
 #    143  → Dropbear SSH port 1
-#    443  → HTTPS / SSL
+#    443  → SSH-WS-SSL (self-signed) + Dashboard HTTPS
 #    2053 → xui alt port
 #    2082 → xui alt port
 #    8080 → xui VMess
@@ -204,6 +204,21 @@ chmod 600 /etc/chaiya/xui-user.conf /etc/chaiya/xui-pass.conf 2>/dev/null || tru
 # ══════════════════════════════════════════════════════════════
 #  nginx config
 # ══════════════════════════════════════════════════════════════
+# ── สร้าง Self-Signed SSL Certificate สำหรับ port 443 ──────────
+echo -e "${YE}⏳ สร้าง SSL certificate (self-signed)...${RS}"
+mkdir -p /etc/chaiya/ssl
+if [[ ! -f /etc/chaiya/ssl/chaiya.crt ]] || [[ ! -f /etc/chaiya/ssl/chaiya.key ]]; then
+  openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout /etc/chaiya/ssl/chaiya.key \
+    -out    /etc/chaiya/ssl/chaiya.crt \
+    -subj "/C=TH/ST=Bangkok/L=Bangkok/O=ChaiyaVPN/CN=chaiya-vpn" \
+    2>/dev/null
+  chmod 600 /etc/chaiya/ssl/chaiya.key
+  echo -e "  ${GR}✅ สร้าง SSL certificate สำเร็จ (10 ปี)${RS}"
+else
+  echo -e "  ${GR}✅ SSL certificate มีอยู่แล้ว${RS}"
+fi
+
 cat > /etc/nginx/sites-available/chaiya << 'NGINXEOF'
 # ── Port 81: Web Panel (Dashboard + config download)
 server {
@@ -237,7 +252,6 @@ server {
         add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
     }
-    # xui-traffic: proxy ไปยัง 3x-ui local API (realtime traffic)
     location /xui-traffic/ {
         proxy_pass http://127.0.0.1:2053/;
         proxy_http_version 1.1;
@@ -247,8 +261,72 @@ server {
         proxy_read_timeout 30s;
     }
 }
+
+# ── Port 443: SSH-WS-SSL (Self-Signed) + Dashboard HTTPS ────────
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/chaiya/ssl/chaiya.crt;
+    ssl_certificate_key /etc/chaiya/ssl/chaiya.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # ── SSH WebSocket SSL — path /ssh/ → Dropbear:143 ────────────
+    location /ssh/ {
+        proxy_pass          http://127.0.0.1:143;
+        proxy_http_version  1.1;
+        proxy_set_header    Upgrade    $http_upgrade;
+        proxy_set_header    Connection "upgrade";
+        proxy_set_header    Host       $host;
+        proxy_set_header    X-Real-IP  $remote_addr;
+        proxy_read_timeout  3600s;
+        proxy_send_timeout  3600s;
+        proxy_buffering     off;
+        tcp_nodelay         on;
+    }
+
+    # ── Dashboard + API (HTTPS) ───────────────────────────────────
+    location /config/ {
+        alias /var/www/chaiya/config/;
+        try_files $uri =404;
+        default_type text/html;
+        add_header Content-Type "text/html; charset=UTF-8";
+        add_header Cache-Control "no-cache";
+    }
+    location /sshws/ {
+        alias /var/www/chaiya/;
+        index sshws.html;
+        try_files $uri $uri/ =404;
+    }
+    location /sshws-api/ {
+        proxy_pass http://127.0.0.1:6789/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Token $http_x_token;
+        proxy_set_header X-Auth-Token $http_x_auth_token;
+        proxy_set_header Authorization $http_authorization;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
+    }
+    location /xui-traffic/ {
+        proxy_pass http://127.0.0.1:2053/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Cookie $http_cookie;
+        proxy_read_timeout 30s;
+    }
+    location / { return 200 'Chaiya VPN OK'; add_header Content-Type text/plain; }
+}
 # หมายเหตุ: port 80 ถูกจัดการโดย ws-stunnel (HTTP CONNECT tunnel)
-# ไม่ใช้ nginx จัดการ port 80 เพราะจะชนกับ tunnel
 NGINXEOF
 
 ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya
@@ -1038,6 +1116,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
         <div class="svc-row"><span class="svc-ico">🌐</span><div class="svc-info"><div class="svc-name">nginx</div><div class="svc-desc">Web Server · Port 81 / 443</div></div><div id="svc-nginx" class="svc-badge off"><span class="bd"></span>...</div></div>
         <div class="svc-row"><span class="svc-ico">🎮</span><div class="svc-info"><div class="svc-name">badvpn-udpgw</div><div class="svc-desc">UDP Gateway · 127.0.0.1:7300</div></div><div id="svc-badvpn" class="svc-badge off"><span class="bd"></span>...</div></div>
         <div class="svc-row"><span class="svc-ico">🔌</span><div class="svc-info"><div class="svc-name">Port 80 Tunnel</div><div class="svc-desc">HTTP-CONNECT ws-stunnel</div></div><div id="svc-tunnel" class="svc-badge off"><span class="bd"></span>...</div></div>
+        <div class="svc-row"><span class="svc-ico">🔒</span><div class="svc-info"><div class="svc-name">Port 443 SSH-WS-SSL</div><div class="svc-desc">WebSocket SSL · Self-Signed</div></div><div id="svc-ssl443" class="svc-badge off"><span class="bd"></span>...</div></div>
       </div>
       <div class="btn-row">
         <button class="btn btn-g" onclick="svcAction('restart')">🔄 Restart All</button>
@@ -1375,7 +1454,7 @@ async function loadDashboard() {
   const s = await api('GET', '/api/status');
   if (!s.error) {
     const sv = s.services || {};
-    ['sshws','dropbear','nginx','badvpn','tunnel'].forEach(k => {
+    ['sshws','dropbear','nginx','badvpn','tunnel','ssl443'].forEach(k => {
       setSvcBadge('svc-'+k, sv[k]);
     });
     // รองรับ field name หลายรูปแบบที่ API อาจส่งมา
@@ -2418,6 +2497,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "nginx":    ng_on.strip()   == "active",
                     "badvpn":   bool(udpgw_on.strip()),
                     "tunnel":   bool(tunnel_on.strip()),
+                    "ssl443":   (ng_on.strip() == "active") and os.path.exists("/etc/chaiya/ssl/chaiya.crt"),
                     "started":  started
                 }
             })
@@ -6768,7 +6848,24 @@ _m18_add_ssh_user() {
   read -rsp "$(printf "${YE}Password : ${RS}")"   _p; echo ""
   read -rp "$(printf "${YE}วันหมดอายุ (วัน, default=30): ${RS}")" _d
   [[ -z "$_d" ]] && _d=30
+
+  # ── IP Limit ──────────────────────────────────────────────────
+  read -rp "$(printf "${YE}IP Limit (default=2): ${RS}")" _iplimit
+  [[ -z "$_iplimit" ]] && _iplimit=2
+
   [[ -z "$_u" || -z "$_p" ]] && { printf "${RD}❌ ต้องกรอก user และ password${RS}\n"; return 1; }
+
+  # ── เลือก Port ────────────────────────────────────────────────
+  printf "\n${CY}┌─[ เลือก Port ]──────────────────────────────────────┐${RS}\n"
+  printf "${CY}│${RS}  ${GR}1.${RS}  Port ${WH}80${RS}  — WS HTTP  (ไม่มี SSL)               ${CY}│${RS}\n"
+  printf "${CY}│${RS}  ${GR}2.${RS}  Port ${WH}443${RS} — WSS HTTPS (SSL self-signed) 🔒      ${CY}│${RS}\n"
+  printf "${CY}└──────────────────────────────────────────────────────┘${RS}\n"
+  read -rp "$(printf "${YE}เลือก [1-2, default=1]: ${RS}")" _port_choice
+  local _ssh_port=80 _ssh_proto="ws" _ssh_path="/"
+  case "${_port_choice:-1}" in
+    2) _ssh_port=443; _ssh_proto="wss"; _ssh_path="/ssh/" ;;
+    *) _ssh_port=80;  _ssh_proto="ws";  _ssh_path="/" ;;
+  esac
 
   local _exp; _exp=$(date -d "+${_d} days" +%Y-%m-%d 2>/dev/null \
                   || date -v+${_d}d +%Y-%m-%d 2>/dev/null || echo "")
@@ -6781,13 +6878,197 @@ _m18_add_ssh_user() {
     chage -E "$_exp" "$_u" 2>/dev/null || true
     # บันทึกลง DB
     sed -i "/^${_u} /d" "$DB" 2>/dev/null || true
-    echo "$_u $_d $_exp" >> "$DB"
+    echo "$_u $_d $_exp 0 $_iplimit" >> "$DB"
+
     printf "\n${GR}┌──────────────────────────────────────────────┐${RS}\n"
     printf "${GR}│${RS}  ✅ สร้าง SSH User สำเร็จ!                    ${GR}│${RS}\n"
     printf "${GR}│${RS}  ${YE}User   : ${WH}%-34s${GR}│${RS}\n" "$_u"
     printf "${GR}│${RS}  ${YE}Expire : ${WH}%-34s${GR}│${RS}\n" "$_exp"
+    printf "${GR}│${RS}  ${YE}Port   : ${WH}%-34s${GR}│${RS}\n" "$_ssh_port"
     printf "${GR}│${RS}  ${YE}Shell  : ${WH}/bin/false (tunnel only)         ${GR}│${RS}\n"
     printf "${GR}└──────────────────────────────────────────────┘${RS}\n"
+
+    # ── สร้าง HTML เฉพาะเมื่อเลือก port 443 ─────────────────────
+    if [[ "$_ssh_port" == "443" ]]; then
+      local _host; _host=$(cat /etc/chaiya/domain.conf 2>/dev/null | tr -d '[:space:]')
+      [[ -z "$_host" ]] && _host=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '"'"'{print $1}'"'"')
+      local _outfile="/var/www/chaiya/config/ssh-${_u}.html"
+      mkdir -p /var/www/chaiya/config
+
+      python3 << PYEOF2
+import os
+u       = """$_u"""
+pw      = """$_p"""
+ex      = """$_exp"""
+host    = """$_host"""
+iplimit = """$_iplimit"""
+outfile = """$_outfile"""
+
+tok = ""
+tok_f = "/etc/chaiya/sshws-token.conf"
+if os.path.exists(tok_f):
+    tok = open(tok_f).read().strip()
+
+copy_text = f"""Host/IP   : {host}
+Port      : 443
+Username  : {u}
+Password  : {pw}
+Expire    : {ex}
+IP Limit  : {iplimit}
+Path      : /ssh/
+Protocol  : SSH-WS-SSL (TLS)"""
+
+html = """<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHAIYA VPN — """ + u + """ (SSH-WS-SSL)</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0d;font-family:'Segoe UI',sans-serif;min-height:100vh;
+     display:flex;align-items:center;justify-content:center;padding:20px}
+.wrap{width:100%;max-width:420px}
+@keyframes rgbTxt{
+  0%{color:#ff0080}16%{color:#ff8000}33%{color:#ffee00}
+  50%{color:#00ff80}66%{color:#00d4ff}83%{color:#b400ff}100%{color:#ff0080}}
+@keyframes rgbLine{
+  0%{background:linear-gradient(90deg,#ff0080,#ff8000)}
+  25%{background:linear-gradient(90deg,#ffee00,#00ff80)}
+  50%{background:linear-gradient(90deg,#00d4ff,#b400ff)}
+  75%{background:linear-gradient(90deg,#ff0080,#ff8000)}
+  100%{background:linear-gradient(90deg,#ffee00,#00ff80)}}
+@keyframes rgbBorder{
+  0%{border-color:#ff0080}16%{border-color:#ff8000}33%{border-color:#ffee00}
+  50%{border-color:#00ff80}66%{border-color:#00d4ff}83%{border-color:#b400ff}100%{border-color:#ff0080}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
+@keyframes rgbBreath{
+  0%{background:rgba(255,0,128,0.4);box-shadow:0 0 8px rgba(255,0,128,0.3)}
+  50%{background:rgba(0,255,128,0.7);box-shadow:0 0 16px rgba(0,255,128,0.6)}
+  100%{background:rgba(255,0,128,0.4);box-shadow:0 0 8px rgba(255,0,128,0.3)}}
+@keyframes rgbBreathBorder{
+  0%{border-color:rgba(255,0,128,0.6)}50%{border-color:rgba(0,255,128,1)}
+  100%{border-color:rgba(255,0,128,0.6)}}
+.header{text-align:center;padding:22px 0 12px}
+.fire{font-size:34px;display:inline-block;animation:pulse 1.8s ease-in-out infinite}
+.title{font-size:22px;font-weight:800;letter-spacing:6px;margin-top:4px;animation:rgbTxt 3s linear infinite}
+.subtitle{margin-top:4px;font-size:11px;color:#5a8aaa;letter-spacing:2px}
+.username{margin-top:6px;font-size:14px;color:#5a8aaa}
+.username span{color:#00cfff;font-weight:600}
+.line{height:2px;border-radius:2px;margin:10px 0 16px;animation:rgbLine 3s linear infinite}
+.row{display:flex;align-items:center;justify-content:space-between;
+     padding:11px 4px;border-bottom:1px solid #1a1a2a}
+.row:last-of-type{border-bottom:none}
+.row-left{display:flex;align-items:center;gap:10px}
+.ico{font-size:18px}
+.lbl{font-size:13px;font-weight:500;letter-spacing:1px;animation:rgbTxt 3s linear infinite}
+.row-right{font-size:13px;color:#c0d0e0;text-align:right;word-break:break-all}
+.row-right.pass{font-family:monospace;letter-spacing:2px;color:#00ff80}
+.ssl-badge{display:inline-block;background:#00ff8022;border:1px solid #00ff8066;
+           color:#00ff80;font-size:10px;padding:2px 8px;border-radius:99px;margin-left:6px}
+.btn-copy{width:100%;padding:15px;border:2px solid rgba(255,0,128,0.8);
+          border-radius:12px;font-size:15px;font-weight:700;letter-spacing:1px;
+          cursor:pointer;color:#fff;margin-top:16px;
+          animation:rgbBreath 4s ease-in-out infinite,rgbBreathBorder 4s ease-in-out infinite;
+          transition:transform .1s,opacity .1s}
+.btn-copy:active{transform:scale(.97);opacity:.85}
+.notice{margin-top:14px;padding:10px 14px;border-radius:10px;
+        background:#001a00;border:1px solid #00ff4066;
+        font-size:12px;color:#00cc66;line-height:1.6;text-align:center}
+.notice b{color:#00ff80}
+.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%);
+       background:#00ff80;color:#000;padding:11px 28px;border-radius:22px;
+       font-weight:700;font-size:13px;opacity:0;transition:opacity .3s;
+       pointer-events:none;z-index:999}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="fire">🔥</div>
+    <div class="title">CHAIYA VPN</div>
+    <div class="subtitle">SSH · WS · SSL</div>
+    <div class="username">👤 <span>""" + u + """</span></div>
+  </div>
+  <div class="line"></div>
+
+  <div class="row">
+    <div class="row-left"><span class="ico">🌐</span><span class="lbl">Host/IP</span></div>
+    <div class="row-right">""" + host + """</div>
+  </div>
+  <div class="row">
+    <div class="row-left"><span class="ico">🔌</span><span class="lbl">Port</span></div>
+    <div class="row-right">443 <span class="ssl-badge">🔒 SSL</span></div>
+  </div>
+  <div class="row">
+    <div class="row-left"><span class="ico">👤</span><span class="lbl">Username</span></div>
+    <div class="row-right">""" + u + """</div>
+  </div>
+  <div class="row">
+    <div class="row-left"><span class="ico">🔑</span><span class="lbl">Password</span></div>
+    <div class="row-right pass">""" + pw + """</div>
+  </div>
+  <div class="row">
+    <div class="row-left"><span class="ico">📅</span><span class="lbl">หมดอายุ</span></div>
+    <div class="row-right">""" + ex + """</div>
+  </div>
+  <div class="row">
+    <div class="row-left"><span class="ico">📱</span><span class="lbl">IP Limit</span></div>
+    <div class="row-right">""" + iplimit + """ IP</div>
+  </div>
+  <div class="row">
+    <div class="row-left"><span class="ico">📡</span><span class="lbl">Protocol</span></div>
+    <div class="row-right">SSH · WS · SSL</div>
+  </div>
+  <div class="row">
+    <div class="row-left"><span class="ico">📂</span><span class="lbl">Path</span></div>
+    <div class="row-right">/ssh/</div>
+  </div>
+
+  <button class="btn-copy" onclick="copyAll()">📋&nbsp; Copy ข้อมูลทั้งหมด</button>
+
+  <div class="notice">
+    🔒 <b>SSL Self-Signed</b> — ใช้งานได้ปกติ<br>
+    ตั้งค่าแอพ: TLS=เปิด · Skip Verify=เปิด · Path=/ssh/
+  </div>
+</div>
+<div class="toast" id="toast">✔ Copied!</div>
+<script>
+var _copyText = """ + repr(copy_text) + """;
+function copyAll(){
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(_copyText).then(showToast).catch(fb);
+  } else { fb(); }
+}
+function fb(){
+  var ta=document.createElement('textarea');
+  ta.value=_copyText;document.body.appendChild(ta);
+  ta.select();document.execCommand('copy');
+  document.body.removeChild(ta);showToast();
+}
+function showToast(){
+  var el=document.getElementById('toast');
+  el.classList.add('show');
+  setTimeout(function(){el.classList.remove('show');},2000);
+}
+</script>
+</body></html>"""
+
+os.makedirs(os.path.dirname(outfile), exist_ok=True)
+with open(outfile, 'w', encoding='utf-8') as f:
+    f.write(html)
+print("OK:" + outfile)
+PYEOF2
+
+      if [[ $? -eq 0 ]]; then
+        local _cfg_host; _cfg_host=$(cat /etc/chaiya/domain.conf 2>/dev/null | tr -d '[:space:]')
+        [[ -z "$_cfg_host" ]] && _cfg_host=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+        printf "${CY}│${RS}  ${GR}🌐 HTML Config:${RS}
+"
+        printf "${CY}│${RS}  ${WH}http://%s:81/config/ssh-%s.html${RS}\n" "$_cfg_host" "$_u"
+      fi
+    fi
   else
     printf "${RD}❌ useradd ล้มเหลว${RS}\n"; return 1
   fi
