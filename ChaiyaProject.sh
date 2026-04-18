@@ -5148,7 +5148,7 @@ print(json.dumps(payload))
     local _fs; _fs=$(echo "$_first" | cut -d'|' -f2)
     local _fu; _fu=$(echo "$_first" | cut -d'|' -f3)
     local _fl; _fl=$(echo "$_first" | cut -d'|' -f4)
-    gen_vless_html "$UNAME" "$_fl" "$_fu" "$AUTO_HOST" "$_fp" "$_fs" "$EXP" "$DATA_GB" "$UNAME"
+    gen_vless_html "$UNAME" "$_fl" "$_fu" "$AUTO_HOST" "$_fp" "$_fs" "$EXP" "$DATA_GB" "chaiya-$UNAME"
   fi
 
   rgb_bar 100 "สร้าง User สำเร็จ! ✔"; printf "\n\n"
