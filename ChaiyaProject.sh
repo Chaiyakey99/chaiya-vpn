@@ -2126,8 +2126,8 @@ def _fetch_xui_traffic_map():
                         for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                             _em = cl.get("email","").lower()
                             if _em:
-                                # totalGB = GB ที่ admin ตั้ง (0 = unlimited)
-                                _settings_clients[_em] = float(cl.get("totalGB", 0) or 0)
+                                # totalGB เก็บเป็น bytes (GB * 1073741824) → หารกลับเป็น GB
+                                _settings_clients[_em] = float(cl.get("totalGB", 0) or 0) / 1073741824
                     except Exception:
                         pass
                     for cs in ib.get("clientStats") or []:
@@ -2503,14 +2503,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                 try:
                                     for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                                         if cl.get("email","").lower() == email.lower():
-                                            limit_gb = float(cl.get("totalGB", 0) or 0)
+                                            limit_gb = float(cl.get("totalGB", 0) or 0) / 1073741824
                                             break
                                 except Exception:
                                     pass
                                 break
                         used_bytes = used_down + used_up
                         used_gb    = round(used_bytes / (1024**3), 2)
-                        # limit_gb มาจาก totalGB แล้ว (หน่วย GB) ไม่ต้องหารอีก
+                        # limit_gb มาจาก totalGB (bytes) หารแล้วเป็น GB
 
                         # ── Fallback: ถ้า xui ไม่ได้ set totalGB → อ่านจาก datalimit.conf ──
                         if limit_gb == 0:
@@ -3261,7 +3261,7 @@ for _proto in ("http", "https"):
                 for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
                     _em = cl.get("email","").lower()
                     if _em:
-                        _cl_totalgb[_em] = float(cl.get("totalGB", 0) or 0)
+                        _cl_totalgb[_em] = float(cl.get("totalGB", 0) or 0) / 1073741824
             except Exception:
                 pass
             for cs in ib.get("clientStats") or []:
@@ -5002,7 +5002,7 @@ print('')
     local API_RESULT=""
     if [[ -n "$_inbound_id" ]]; then
       # เพิ่ม client เข้า inbound เดิม — settings ต้องเป็น JSON string
-      # [FIX] total_flow ส่งเป็น bytes (GB * 1024^3) — 3x-ui ใช้ total_flow ไม่ใช่ totalGB
+      # [FIX] ส่ง totalGB เป็น bytes (GB * 1073741824) — 3x-ui field ชื่อ totalGB แต่รับ bytes
       local _client_payload
       _client_payload=$(python3 -c "
 import json, sys
@@ -5010,8 +5010,7 @@ client = {
   'id': sys.argv[1],
   'email': sys.argv[2],
   'limitIp': 2,
-  'totalGB': int(sys.argv[3]),
-  'total': int(sys.argv[3]) * 1073741824,
+  'totalGB': int(sys.argv[3]) * 1073741824,
   'expiryTime': int(sys.argv[4]),
   'enable': True,
   'comment': '',
@@ -5032,7 +5031,7 @@ print(json.dumps(payload))
       fi
     else
       # ไม่มี inbound — สร้างใหม่พร้อม client
-      # [FIX] total_flow ส่งเป็น bytes (GB * 1024^3) — 3x-ui ใช้ total_flow ไม่ใช่ totalGB
+      # [FIX] ส่ง totalGB เป็น bytes (GB * 1073741824) — 3x-ui field ชื่อ totalGB แต่รับ bytes
       local _vless_payload
       _vless_payload=$(python3 -c "
 import json, sys
@@ -5041,8 +5040,7 @@ settings = json.dumps({
     'id': sys.argv[1],
     'email': sys.argv[2],
     'limitIp': 2,
-    'totalGB': int(sys.argv[3]),
-    'total': int(sys.argv[3]) * 1073741824,
+    'totalGB': int(sys.argv[3]) * 1073741824,
     'expiryTime': int(sys.argv[4]),
     'enable': True,
     'comment': '',
@@ -5301,16 +5299,15 @@ try:
       idx += 1
       email    = c.get('email', c.get('id', '-'))[:18]
       # totalGB เก็บเป็น GB โดยตรง
-      _tgb = c.get('totalGB', 0)
-      total_gb = _tgb * 1073741824 if _tgb > 0 else 0
+      _tgb_bytes = c.get('totalGB', 0)
+      total_gb = _tgb_bytes / 1073741824 if _tgb_bytes > 0 else 0
       exp_ms   = c.get('expiryTime', 0)
       active   = c.get('enable', True) and enable
 
-      if total_gb == 0:
+      if _tgb_bytes == 0:
         data_str = 'Unlimited'
       else:
-        gb = total_gb / 1073741824
-        data_str = f'{gb:.1f} GB'
+        data_str = f'{total_gb:.1f} GB'
 
       if exp_ms == 0:
         exp_str = 'ไม่จำกัด'
