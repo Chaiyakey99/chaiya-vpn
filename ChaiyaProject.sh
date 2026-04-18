@@ -2106,11 +2106,11 @@ def _fetch_xui_traffic_map():
         xu  = open("/etc/chaiya/xui-user.conf").read().strip() if os.path.exists("/etc/chaiya/xui-user.conf") else "admin"
         xpw = open("/etc/chaiya/xui-pass.conf").read().strip() if os.path.exists("/etc/chaiya/xui-pass.conf") else ""
         xbp = open("/etc/chaiya/xui-basepath.conf").read().strip().rstrip("/") if os.path.exists("/etc/chaiya/xui-basepath.conf") else ""
-        for _proto in ("http", "https"):
+        for _proto in ("https", "http"):
             try:
                 _base = f"{_proto}://127.0.0.1:{xp}{xbp}"
                 cj = _cj.CookieJar()
-                opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj))
+                import ssl as _ssl; _ctx = _ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE; opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj), _ureq.HTTPSHandler(context=_ctx))
                 login_data = _up.urlencode({"username": xu, "password": xpw}).encode()
                 req = _ureq.Request(f"{_base}/login", data=login_data)
                 req.add_header("Content-Type", "application/x-www-form-urlencoded")
@@ -2480,11 +2480,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 xpw = open("/etc/chaiya/xui-pass.conf").read().strip()  if os.path.exists("/etc/chaiya/xui-pass.conf")  else ""
                 xbp = open("/etc/chaiya/xui-basepath.conf").read().strip().rstrip("/") if os.path.exists("/etc/chaiya/xui-basepath.conf") else ""
 
-                for _proto in ("http", "https"):
+                for _proto in ("https", "http"):
                     try:
                         _base = f"{_proto}://127.0.0.1:{xp}{xbp}"
                         cj = _cj.CookieJar()
-                        opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj))
+                        import ssl as _ssl; _ctx = _ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE; opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj), _ureq.HTTPSHandler(context=_ctx))
                         # login
                         login_data = _up.urlencode({"username": xu, "password": xpw}).encode()
                         req = _ureq.Request(f"{_base}/login", data=login_data)
@@ -3258,11 +3258,11 @@ xu  = open(XUI_USER_F).read().strip() if os.path.exists(XUI_USER_F) else "admin"
 xpw = open(XUI_PASS_F).read().strip() if os.path.exists(XUI_PASS_F) else ""
 xbp = open(XUI_BP_F).read().strip().rstrip("/") if os.path.exists(XUI_BP_F) else ""
 
-for _proto in ("http", "https"):
+for _proto in ("https", "http"):
     try:
         _base = f"{_proto}://127.0.0.1:{xp}{xbp}"
         cj = _cj.CookieJar()
-        opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj))
+        import ssl as _ssl; _ctx = _ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE; opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj), _ureq.HTTPSHandler(context=_ctx))
         # login
         login_data = _up.urlencode({"username": xu, "password": xpw}).encode()
         req = _ureq.Request(f"{_base}/login", data=login_data)
@@ -5148,7 +5148,7 @@ print(json.dumps(payload))
     local _fs; _fs=$(echo "$_first" | cut -d'|' -f2)
     local _fu; _fu=$(echo "$_first" | cut -d'|' -f3)
     local _fl; _fl=$(echo "$_first" | cut -d'|' -f4)
-    gen_vless_html "$UNAME" "$_fl" "$_fu" "$AUTO_HOST" "$_fp" "$_fs" "$EXP" "$DATA_GB" "chaiya-$UNAME"
+    gen_vless_html "$UNAME" "$_fl" "$_fu" "$AUTO_HOST" "$_fp" "$_fs" "$EXP" "$DATA_GB" "$UNAME"
   fi
 
   rgb_bar 100 "สร้าง User สำเร็จ! ✔"; printf "\n\n"
