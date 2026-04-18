@@ -3675,7 +3675,15 @@ xui_proto() {
 xui_login() {
   local p u pw bp
   p=$(xui_port); u=$(xui_user); pw=$(xui_pass)
-  bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
+  # อ่าน basepath จาก db โดยตรงก่อนเสมอ — ป้องกัน conf เก่าหรือว่าง
+  local _db_bp
+  _db_bp=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')
+  if [[ -n "$_db_bp" && "$_db_bp" != "/" ]]; then
+    bp="$_db_bp"
+    echo "$bp" > /etc/chaiya/xui-basepath.conf
+  else
+    bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
+  fi
   # normalize trailing slash: "/abc/" → "/abc", "/" → ""(root), "" → ""
   if [[ "$bp" == "/" || -z "$bp" ]]; then
     bp=""
@@ -4220,7 +4228,7 @@ menu_1() {
   # ── 10% ดาวน์โหลด install script ──
   rgb_bar 10 "ดาวน์โหลด install script..."
   local _xui_sh; _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
-  if ! curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
+  if ! curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/v2.8.11/install.sh" \
        -o "$_xui_sh" 2>/dev/null || [[ ! -s "$_xui_sh" ]]; then
     printf "  ${RD}✗ ดาวน์โหลด install script ล้มเหลว${RS}\n"
     read -rp "  Enter..."; return
@@ -4234,7 +4242,7 @@ menu_1() {
   if command -v expect &>/dev/null; then
     expect -c "
       set timeout 180
-      spawn bash $_xui_sh
+      spawn bash $_xui_sh v2.8.11
       expect {
         -re {(?i)(confirm|proceed|install|continue).*\[y/n\]} { send \"y\r\"; exp_continue }
         -re {(?i)port.*panel}                                  { send \"2053\r\"; exp_continue }
@@ -4247,7 +4255,7 @@ menu_1() {
   else
     # fallback: ป้อน input ครอบคลุมมากขึ้น (y + port + ตัวเลือก IP + enter + port 80)
     # ส่ง y เพิ่มพิเศษ 3 ตัว และ enter เพิ่มเผื่อคำถามเพิ่มขึ้น
-    printf "y\ny\n2053\n2\n\n80\ny\n\n\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
+    printf "y\ny\n2053\n2\n\n80\ny\n\n\n" | bash "$_xui_sh" v2.8.11 >> /var/log/chaiya-xui-install.log 2>&1 || true
   fi
   rm -f "$_xui_sh"
 
