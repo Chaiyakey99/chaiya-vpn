@@ -4220,14 +4220,11 @@ menu_1() {
   # ── 10% ดาวน์โหลด install script ──
   rgb_bar 10 "ดาวน์โหลด install script..."
   local _xui_sh; _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
-  # LOCKED: 3x-ui v2.8.11 — ห้ามเปลี่ยน version
-  local _XUI_VERSION="v2.8.11"
-  if ! curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/${_XUI_VERSION}/install.sh" \
+  if ! curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
        -o "$_xui_sh" 2>/dev/null || [[ ! -s "$_xui_sh" ]]; then
-    printf "  ${RD}✗ ดาวน์โหลด install script %s ล้มเหลว${RS}\n" "$_XUI_VERSION"
+    printf "  ${RD}✗ ดาวน์โหลด install script ล้มเหลว${RS}\n"
     read -rp "  Enter..."; return
   fi
-  printf "  ${GR}✔ ดาวน์โหลด 3x-ui %s สำเร็จ${RS}\n" "$_XUI_VERSION"
 
   # ── 15% รัน installer ──────────────────────────────────────────
   # [FIX v2] ไม่ใช้ pipe คงที่ "y\n2053\n2\n\n80\n" อีกต่อไป
@@ -4237,7 +4234,7 @@ menu_1() {
   if command -v expect &>/dev/null; then
     expect -c "
       set timeout 180
-      spawn bash $_xui_sh $_XUI_VERSION
+      spawn bash $_xui_sh
       expect {
         -re {(?i)(confirm|proceed|install|continue).*\[y/n\]} { send \"y\r\"; exp_continue }
         -re {(?i)port.*panel}                                  { send \"2053\r\"; exp_continue }
@@ -4250,7 +4247,7 @@ menu_1() {
   else
     # fallback: ป้อน input ครอบคลุมมากขึ้น (y + port + ตัวเลือก IP + enter + port 80)
     # ส่ง y เพิ่มพิเศษ 3 ตัว และ enter เพิ่มเผื่อคำถามเพิ่มขึ้น
-    printf "y\ny\n2053\n2\n\n80\ny\n\n\n" | bash "$_xui_sh" "$_XUI_VERSION" >> /var/log/chaiya-xui-install.log 2>&1 || true
+    printf "y\ny\n2053\n2\n\n80\ny\n\n\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
   fi
   rm -f "$_xui_sh"
 
