@@ -1158,6 +1158,19 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
         <div class="form-g"><label>จำนวนวัน</label><input type="number" id="new-exp" value="30" min="1"></div>
         <div class="form-g"><label>ลิมิตไอพี</label><input type="number" id="new-iplimit" value="2" min="1"></div>
       </div>
+      <div class="sel-lbl">🔌 เลือก Port</div>
+      <div class="pick-grid" style="margin-bottom:.6rem">
+        <div id="cu-port-80" class="pick-opt a-port80" onclick="cuSelPort('80')" style="border:1.5px solid #00ccff44;background:#0d2a3a">
+          <div class="pi" style="font-size:1.2rem">🌐</div>
+          <div class="pn" style="color:#00ccff">Port 80</div>
+          <div class="ps">WS · HTTP</div>
+        </div>
+        <div id="cu-port-443" class="pick-opt" onclick="cuSelPort('443')" style="border:1.5px solid #444;background:#111">
+          <div class="pi" style="font-size:1.2rem">🔒</div>
+          <div class="pn" style="color:#00ff80">Port 443</div>
+          <div class="ps">WSS · SSL</div>
+        </div>
+      </div>
       <div class="sel-lbl">🌐 เลือก ISP / Operator</div>
       <div class="pick-grid">
         <div id="cu-pro-dtac" class="pick-opt a-dtac" onclick="cuSelPro('dtac')"><div class="pi">🟠</div><div class="pn c-dtac">DTAC GAMING</div><div class="ps">dl.dir.freefiremobile.com</div></div>
@@ -1699,6 +1712,22 @@ function clearCreateLink() {
   const el=document.getElementById('cu-link-result');
   if(el){el.className='imp-result';el.innerHTML='';}
 }
+let _cuPort = '80';
+function cuSelPort(p) {
+  _cuPort = p;
+  ['80','443'].forEach(x => {
+    const el = document.getElementById('cu-port-'+x);
+    if(!el) return;
+    if(x===p) {
+      el.style.borderColor = p==='443' ? '#00ff80' : '#00ccff';
+      el.style.background  = p==='443' ? '#001a00' : '#0d2a3a';
+    } else {
+      el.style.borderColor = '#444';
+      el.style.background  = '#111';
+    }
+  });
+}
+
 async function createUserAndLink() {
   const user=document.getElementById('new-user').value.trim();
   const pass=document.getElementById('new-pass').value.trim();
@@ -1706,24 +1735,52 @@ async function createUserAndLink() {
   const ipl=parseInt(document.getElementById('new-iplimit').value||2);
   if(!user||!pass) return showAlert('alert-create','กรอก username/password ด้วย',false);
   showAlert('alert-create','⏳ กำลังสร้าง...', true);
-  const r=await api('POST','/api/create',{user,pass,exp_days:exp,ip_limit:ipl});
+  const r=await api('POST','/api/create',{user,pass,exp_days:exp,ip_limit:ipl,port:_cuPort});
   if(!r.ok){showAlert('alert-create',r.error||'ล้มเหลว',false);return;}
   showAlert('alert-create',`✅ สร้าง ${user} สำเร็จ`, true);
   loadUsers();
-  const pro=PROS[_cuPro]||PROS.dtac;
-  const link=_cuApp==='npv'?buildNpvLink(user,pass,pro):buildDarkLink(user,pass,pro);
-  const isNpv=_cuApp==='npv';
-  window._cuLink = link;
   const el=document.getElementById('cu-link-result');
   el.className='imp-result show';
-  el.innerHTML=`
-    <div style='display:flex;align-items:center;gap:.4rem;margin:.7rem 0 .3rem'>
-      <span class='imp-badge ${_cuApp}'>${isNpv?'Npv Tunnel':'DarkTunnel'}</span>
-      <span style='font-size:.65rem;color:var(--muted)'>${pro.name} · ${user}</span>
-    </div>
-    <div class='link-preview ${isNpv?'':'dark-lp'}'>${link}</div>
-    <button class='copy-link-btn ${_cuApp}' onclick='copyToClipboard(window._cuLink)'>📋 คัดลอกลิงค์ใส่แอพ</button>
-  `;
+  if(_cuPort==='443'){
+    const htmlUrl = r.html_url || '';
+    el.innerHTML=`
+      <div style='margin:.7rem 0 .5rem;display:flex;align-items:center;gap:.5rem'>
+        <span style='background:#00ff8022;border:1px solid #00ff8066;color:#00ff80;font-size:.72rem;padding:3px 10px;border-radius:99px'>🔒 SSH-WS-SSL · Port 443</span>
+      </div>
+      <div style='background:#001a0a;border:1px solid #00ff4044;border-radius:10px;padding:10px 14px;font-size:.75rem;color:#c0d0e0;line-height:2'>
+        <div>🌐 <b style='color:#00ff80'>Host</b> : ${r.host||'-'}</div>
+        <div>🔌 <b style='color:#00ff80'>Port</b> : 443</div>
+        <div>👤 <b style='color:#00ff80'>User</b> : ${user}</div>
+        <div>🔑 <b style='color:#00ff80'>Pass</b> : <span style='font-family:monospace'>${pass}</span></div>
+        <div>📅 <b style='color:#00ff80'>Expire</b> : ${r.exp||'-'}</div>
+        <div>📱 <b style='color:#00ff80'>IP Limit</b> : ${ipl}</div>
+        <div>📂 <b style='color:#00ff80'>Path</b> : /ssh/</div>
+      </div>
+      <div style='display:flex;gap:.5rem;margin-top:.6rem'>
+        <button class='btn btn-g' style='flex:1' onclick='copyAll443("${r.host||""}","${user}","${pass}","${r.exp||""}","${ipl}")'>📋 Copy ทั้งหมด</button>
+        ${htmlUrl?`<button class='btn btn-c' style='flex:1' onclick='window.open("${htmlUrl}","_blank")'>🌐 ดูหน้า HTML</button>`:''}
+      </div>
+    `;
+  } else {
+    const pro=PROS[_cuPro]||PROS.dtac;
+    const link=_cuApp==='npv'?buildNpvLink(user,pass,pro):buildDarkLink(user,pass,pro);
+    const isNpv=_cuApp==='npv';
+    window._cuLink = link;
+    el.innerHTML=`
+      <div style='display:flex;align-items:center;gap:.4rem;margin:.7rem 0 .3rem'>
+        <span class='imp-badge ${_cuApp}'>${isNpv?'Npv Tunnel':'DarkTunnel'}</span>
+        <span style='font-size:.65rem;color:var(--muted)'>${pro.name} · ${user}</span>
+      </div>
+      <div class='link-preview ${isNpv?'':'dark-lp'}'>${link}</div>
+      <button class='copy-link-btn ${_cuApp}' onclick='copyToClipboard(window._cuLink)'>📋 คัดลอกลิงค์ใส่แอพ</button>
+    `;
+  }
+}
+
+function copyAll443(host,user,pass,exp,ipl){
+  const txt = `Host/IP   : ${host}\nPort      : 443\nUsername  : ${user}\nPassword  : ${pass}\nExpire    : ${exp}\nIP Limit  : ${ipl}\nPath      : /ssh/\nProtocol  : SSH-WS-SSL (TLS)`;
+  if(navigator.clipboard){ navigator.clipboard.writeText(txt).then(()=>toast('✔ Copied!',true)).catch(()=>{}); }
+  else { const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);toast('✔ Copied!',true); }
 }
 
 function openRenew(u) {
@@ -2874,6 +2931,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             days     = int(body.get("exp_days", body.get("days", 30)))
             data_gb  = int(body.get("data_gb", 0))
             ip_limit = int(body.get("ip_limit", 2))
+            port     = str(body.get("port", "80")).strip()
             if not user or not pw:
                 return self.send_json(400, {"error":"user and password required"})
             if not validate_username(user):
@@ -2886,7 +2944,93 @@ class Handler(http.server.BaseHTTPRequestHandler):
             db = os.path.join(USERS_DIR, "users.db")
             with open(db, "a") as f: f.write(f"{user} {days} {exp} {data_gb} {ip_limit}\n")
             run("python3 /usr/local/bin/chaiya-data-tracker 2>/dev/null &")
-            return self.send_json(200, {"ok":True, "result":f"user_created:{user}"})
+
+            # ── สร้าง HTML ถ้าเลือก port 443 ──────────────────────
+            html_url = ""
+            host = ""
+            if port == "443":
+                try:
+                    dom_f = "/etc/chaiya/domain.conf"
+                    host  = open(dom_f).read().strip() if os.path.exists(dom_f) else ""
+                    if not host:
+                        import urllib.request as _ur
+                        host = _ur.urlopen("https://ifconfig.me", timeout=5).read().decode().strip()
+                    copy_text = f"Host/IP   : {host}\nPort      : 443\nUsername  : {user}\nPassword  : {pw}\nExpire    : {exp}\nIP Limit  : {ip_limit}\nPath      : /ssh/\nProtocol  : SSH-WS-SSL (TLS)"
+                    outfile = f"/var/www/chaiya/config/ssh-{user}.html"
+                    os.makedirs("/var/www/chaiya/config", exist_ok=True)
+                    html_content = f"""<!DOCTYPE html>
+<html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHAIYA VPN — {user} (SSH-WS-SSL)</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d0d0d;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}}
+.wrap{{width:100%;max-width:420px}}
+@keyframes rgbTxt{{0%{{color:#ff0080}}16%{{color:#ff8000}}33%{{color:#ffee00}}50%{{color:#00ff80}}66%{{color:#00d4ff}}83%{{color:#b400ff}}100%{{color:#ff0080}}}}
+@keyframes rgbLine{{0%{{background:linear-gradient(90deg,#ff0080,#ff8000)}}50%{{background:linear-gradient(90deg,#00d4ff,#b400ff)}}100%{{background:linear-gradient(90deg,#ffee00,#00ff80)}}}}
+@keyframes rgbBorder{{0%{{border-color:#ff0080}}33%{{border-color:#ffee00}}66%{{border-color:#00d4ff}}100%{{border-color:#ff0080}}}}
+@keyframes pulse{{0%,100%{{transform:scale(1)}}50%{{transform:scale(1.2)}}}}
+@keyframes rgbBreath{{0%{{background:rgba(255,0,128,0.4);box-shadow:0 0 8px rgba(255,0,128,0.3)}}50%{{background:rgba(0,255,128,0.7);box-shadow:0 0 16px rgba(0,255,128,0.6)}}100%{{background:rgba(255,0,128,0.4);box-shadow:0 0 8px rgba(255,0,128,0.3)}}}}
+@keyframes rgbBreathBorder{{0%{{border-color:rgba(255,0,128,0.6)}}50%{{border-color:rgba(0,255,128,1)}}100%{{border-color:rgba(255,0,128,0.6)}}}}
+.header{{text-align:center;padding:22px 0 12px}}
+.fire{{font-size:34px;display:inline-block;animation:pulse 1.8s ease-in-out infinite}}
+.title{{font-size:22px;font-weight:800;letter-spacing:6px;margin-top:4px;animation:rgbTxt 3s linear infinite}}
+.subtitle{{margin-top:4px;font-size:11px;color:#5a8aaa;letter-spacing:2px}}
+.username{{margin-top:6px;font-size:14px;color:#5a8aaa}}
+.username span{{color:#00cfff;font-weight:600}}
+.line{{height:2px;border-radius:2px;margin:10px 0 16px;animation:rgbLine 3s linear infinite}}
+.card{{background:#111118;border-radius:14px;border:1.5px solid #1e1e2e;padding:4px 14px;margin-bottom:12px;animation:rgbBorder 4s linear infinite}}
+.row{{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid #1a1a2a}}
+.row:last-of-type{{border-bottom:none}}
+.row-left{{display:flex;align-items:center;gap:10px}}
+.ico{{font-size:18px}}
+.lbl{{font-size:13px;font-weight:500;letter-spacing:1px;animation:rgbTxt 3s linear infinite}}
+.row-right{{font-size:13px;color:#c0d0e0;text-align:right;word-break:break-all}}
+.row-right.pass{{font-family:monospace;letter-spacing:2px;color:#00ff80;background:#00ff8011;padding:2px 8px;border-radius:6px}}
+.ssl-badge{{display:inline-block;background:#00ff8022;border:1px solid #00ff8066;color:#00ff80;font-size:10px;padding:2px 8px;border-radius:99px;margin-left:6px}}
+.btn-copy{{width:100%;padding:15px;border:2px solid rgba(255,0,128,0.8);border-radius:12px;font-size:15px;font-weight:700;letter-spacing:1px;cursor:pointer;color:#fff;margin-top:4px;animation:rgbBreath 4s ease-in-out infinite,rgbBreathBorder 4s ease-in-out infinite;transition:transform .1s,opacity .1s}}
+.btn-copy:active{{transform:scale(.97);opacity:.85}}
+.notice{{margin-top:14px;padding:10px 14px;border-radius:10px;background:#001a00;border:1px solid #00ff4066;font-size:12px;color:#00cc66;line-height:1.8;text-align:center}}
+.notice b{{color:#00ff80}}
+.toast{{position:fixed;bottom:32px;left:50%;transform:translateX(-50%);background:#00ff80;color:#000;padding:11px 28px;border-radius:22px;font-weight:700;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}}
+.toast.show{{opacity:1}}
+</style></head>
+<body><div class="wrap">
+  <div class="header">
+    <div class="fire">\U0001f525</div>
+    <div class="title">CHAIYA VPN</div>
+    <div class="subtitle">SSH · WS · SSL</div>
+    <div class="username">\U0001f464 <span>{user}</span></div>
+  </div>
+  <div class="line"></div>
+  <div class="card">
+    <div class="row"><div class="row-left"><span class="ico">\U0001f310</span><span class="lbl">Host/IP</span></div><div class="row-right">{host}</div></div>
+    <div class="row"><div class="row-left"><span class="ico">\U0001f50c</span><span class="lbl">Port</span></div><div class="row-right">443 <span class="ssl-badge">\U0001f512 SSL</span></div></div>
+    <div class="row"><div class="row-left"><span class="ico">\U0001f464</span><span class="lbl">Username</span></div><div class="row-right">{user}</div></div>
+    <div class="row"><div class="row-left"><span class="ico">\U0001f511</span><span class="lbl">Password</span></div><div class="row-right pass">{pw}</div></div>
+    <div class="row"><div class="row-left"><span class="ico">\U0001f4c5</span><span class="lbl">\u0e2b\u0e21\u0e14\u0e2d\u0e32\u0e22\u0e38</span></div><div class="row-right">{exp}</div></div>
+    <div class="row"><div class="row-left"><span class="ico">\U0001f4f1</span><span class="lbl">IP Limit</span></div><div class="row-right">{ip_limit} IP</div></div>
+    <div class="row"><div class="row-left"><span class="ico">\U0001f4e1</span><span class="lbl">Protocol</span></div><div class="row-right">SSH · WS · SSL</div></div>
+    <div class="row"><div class="row-left"><span class="ico">\U0001f4c2</span><span class="lbl">Path</span></div><div class="row-right">/ssh/</div></div>
+  </div>
+  <button class="btn-copy" onclick="copyAll()">\U0001f4cb&nbsp; Copy \u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e17\u0e31\u0e49\u0e07\u0e2b\u0e21\u0e14</button>
+  <div class="notice">\U0001f512 <b>SSL Self-Signed</b> — \u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e44\u0e14\u0e49\u0e1b\u0e01\u0e15\u0e34<br>TLS = \u0e40\u0e1b\u0e34\u0e14 &nbsp;·&nbsp; Skip Verify = \u0e40\u0e1b\u0e34\u0e14 &nbsp;·&nbsp; Path = /ssh/</div>
+</div>
+<div class="toast" id="toast">\u2714 Copied!</div>
+<script>
+var _copyText = {repr(copy_text)};
+function copyAll(){{
+  if(navigator.clipboard){{navigator.clipboard.writeText(_copyText).then(showToast).catch(fb);}}else{{fb();}}
+}}
+function fb(){{var ta=document.createElement('textarea');ta.value=_copyText;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast();}}
+function showToast(){{var el=document.getElementById('toast');el.classList.add('show');setTimeout(function(){{el.classList.remove('show');}},2000);}}
+</script></body></html>"""
+                    with open(outfile, "w", encoding="utf-8") as f:
+                        f.write(html_content)
+                    html_url = f"http://{host}:81/config/ssh-{user}.html"
+                except Exception as e:
+                    pass
+
+            return self.send_json(200, {"ok":True, "result":f"user_created:{user}", "host":host, "exp":exp, "html_url":html_url})
         elif p == "/api/delete":
             user = body.get("user","").strip()
             if not user:
