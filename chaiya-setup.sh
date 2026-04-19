@@ -125,6 +125,7 @@ ok "OpenSSH พร้อม"
 
 # ── DROPBEAR ─────────────────────────────────────────────────
 info "ตั้งค่า Dropbear..."
+systemctl stop dropbear 2>/dev/null || true
 mkdir -p /etc/dropbear
 [[ ! -f /etc/dropbear/dropbear_rsa_host_key ]] && \
   dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key 2>/dev/null || true
@@ -223,7 +224,7 @@ if [[ -f "$XUI_DB" ]]; then
 fi
 
 systemctl start x-ui 2>/dev/null || true
-
+sleep 5
 info "รอ x-ui เริ่มต้น..."
 REAL_XUI_PORT="$XUI_PORT"
 XUI_READY=0
@@ -3567,23 +3568,28 @@ ln -sf /etc/nginx/sites-available/chaiya-http /etc/nginx/sites-enabled/
 nginx -t &>/dev/null && systemctl restart nginx
 
 # ── ขอ SSL Certificate ─────────────────────────────────────────
+apt-get install -y -qq python3-certbot-nginx 2>/dev/null || true
 info "ขอ SSL Certificate สำหรับ $DOMAIN ..."
-certbot certonly --nginx --non-interactive --agree-tos \
-  --register-unsafely-without-email \
-  -d "$DOMAIN" 2>&1 | tail -5 || \
-certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos \
-  --register-unsafely-without-email \
-  -d "$DOMAIN" 2>&1 | tail -5
-
 SSL_CERT="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+USE_SSL=0
 
-if [[ -f "$SSL_CERT" ]]; then
+for _ssl_try in 1 2 3; do
+  certbot certonly --nginx --non-interactive --agree-tos \
+    --register-unsafely-without-email \
+    -d "$DOMAIN" 2>&1 | tail -5
+  if [[ -f "$SSL_CERT" ]]; then USE_SSL=1; break; fi
+  certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos \
+    --register-unsafely-without-email \
+    -d "$DOMAIN" 2>&1 | tail -5
+  if [[ -f "$SSL_CERT" ]]; then USE_SSL=1; break; fi
+  [[ $_ssl_try -lt 3 ]] && { warn "SSL retry $_ssl_try/3..."; sleep 5; }
+done
+
+if [[ $USE_SSL -eq 1 ]]; then
   ok "SSL Certificate พร้อม"
-  USE_SSL=1
 else
   warn "SSL Certificate ไม่สำเร็จ — ใช้ HTTP แทนชั่วคราว (ต้องแก้ DNS ก่อน)"
-  USE_SSL=0
 fi
 
 # ── NGINX HTTPS CONFIG ─────────────────────────────────────────
