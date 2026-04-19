@@ -414,21 +414,7 @@ server {
     }
 }
 
-server {
-    listen 2053 ssl;
-    server_name adminchaiya.godvpn.shop;
-    ssl_certificate /etc/letsencrypt/live/adminchaiya.godvpn.shop/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/adminchaiya.godvpn.shop/privkey.pem;
-    location / {
-        add_header Cache-Control "no-cache, no-store, must-revalidate";
-        add_header Pragma "no-cache";
-        add_header Expires "0";
-        proxy_pass http://127.0.0.1:2053;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header Cookie $http_cookie;
-    }
-}
+
 
 NGINXEOF
 
@@ -3135,7 +3121,13 @@ window.addEventListener('load',()=>{
 
 HTMLEOF
 
-cp /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya
-nginx -t && systemctl restart nginx
+# ตั้งค่า nginx sites-enabled
+if [ ! -f /etc/nginx/sites-enabled/chaiya ] || [ "$(readlink -f /etc/nginx/sites-enabled/chaiya)" != "$(readlink -f /etc/nginx/sites-available/chaiya)" ]; then
+  ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya
+fi
+
+nginx -t && systemctl reload nginx || systemctl restart nginx
 systemctl restart chaiya-ssh-api
-echo "Update done"
+echo ""
+echo -e "\033[1;32m[OK]\033[0m อัพเดทสำเร็จ!"
+echo -e "\033[1;36m[INFO]\033[0m เปิด Panel: https://$(cat /etc/chaiya/domain.conf 2>/dev/null || hostname)"
