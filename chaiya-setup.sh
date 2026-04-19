@@ -130,6 +130,8 @@ mkdir -p /etc/dropbear
   dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key 2>/dev/null || true
 [[ ! -f /etc/dropbear/dropbear_ecdsa_host_key ]] && \
   dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key 2>/dev/null || true
+[[ ! -f /etc/dropbear/dropbear_dss_host_key ]] && \
+  dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key 2>/dev/null || true
 
 mkdir -p /etc/systemd/system/dropbear.service.d
 cat > /etc/systemd/system/dropbear.service.d/override.conf << EOF
@@ -246,6 +248,7 @@ XUI_BASE="http://127.0.0.1:${REAL_XUI_PORT}"
 XUI_COOKIE=$(mktemp)
 
 LOGIN_OK="false"
+[[ $XUI_READY -eq 0 ]] && sleep 5
 for _attempt in 1 2 3; do
   LOGIN_RESP=$(curl -s --max-time 10 -c "$XUI_COOKIE" -X POST "${XUI_BASE}/login" \
     -H "Content-Type: application/x-www-form-urlencoded" \
@@ -260,7 +263,7 @@ except:
   print('false')
 " 2>/dev/null)
   [[ "$LOGIN_OK" == "true" ]] && break
-  [[ $_attempt -lt 3 ]] && sleep 3
+  [[ $_attempt -lt 3 ]] && sleep 5
 done
 
 _get_existing_ports() {
@@ -3530,10 +3533,14 @@ window.addEventListener('load',()=>{
 DASHV8EOF
 
 # patch config.js และ paths ให้ตรงกับ nginx proxy
-sed -i 's|const LOGIN_PAGE.*=.*chaiya-login.html.*|const LOGIN_PAGE  = '"'"'index.html'"'"';|g' /opt/chaiya-panel/sshws.html
-sed -i "s|const SSH_API = '/sshws-api';|const SSH_API = '/api';|g" /opt/chaiya-panel/sshws.html
-sed -i "s|window.location.replace('chaiya-login.html');|window.location.replace('index.html');|g" /opt/chaiya-panel/sshws.html
-sed -i "s|!s.user || !s.pass || Date.now()|!(s.token || (s.user \&\& s.pass)) || Date.now()|g" /opt/chaiya-panel/sshws.html
+python3 << 'PYEOF'
+with open('/opt/chaiya-panel/sshws.html','r') as f: c=f.read()
+c=c.replace("const SSH_API = '/sshws-api';","const SSH_API = '/api';")
+c=c.replace("window.location.replace('chaiya-login.html');","window.location.replace('index.html');")
+c=c.replace("!s.user || !s.pass || Date.now()","!(s.token || (s.user && s.pass)) || Date.now()")
+with open('/opt/chaiya-panel/sshws.html','w') as f: f.write(c)
+print("patch OK")
+PYEOF
 
 chmod -R 755 /opt/chaiya-panel
 
