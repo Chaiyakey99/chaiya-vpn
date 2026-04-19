@@ -3605,8 +3605,7 @@ server {
 
 # HTTPS — Panel หลัก
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;
     server_name $DOMAIN;
 
     ssl_certificate     $SSL_CERT;
