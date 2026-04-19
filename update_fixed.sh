@@ -419,6 +419,27 @@ server {
 NGINXEOF
 
 
+# ── สร้าง directories ──
+mkdir -p /opt/chaiya-panel /opt/chaiya-ssh-api /etc/chaiya /etc/chaiya/exp /etc/chaiya/sshws-users
+mkdir -p /etc/systemd/system
+
+# ── สร้าง chaiya-ssh-api service ──
+cat > /etc/systemd/system/chaiya-ssh-api.service << 'SVCEOF'
+[Unit]
+Description=Chaiya SSH API
+After=network.target
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/chaiya-ssh-api/app.py 2095
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+systemctl daemon-reload
+systemctl enable chaiya-ssh-api 2>/dev/null || true
+
 # ── Regenerate config.js จากค่าที่ติดตั้งไว้ ──
 DOMAIN=$(cat /etc/chaiya/domain.conf 2>/dev/null || hostname -I | awk '{print $1}')
 XUI_USER=$(cat /etc/chaiya/xui-user.conf 2>/dev/null || echo "admin")
