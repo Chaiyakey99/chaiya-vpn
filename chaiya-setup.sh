@@ -1863,41 +1863,50 @@ select option{background:#1a2235;color:var(--text)}
 ══════════════════════════════════════ */
 .site-header{
   text-align:center;
-  padding:2rem 1.5rem 1.6rem;
-  background:linear-gradient(160deg,#152515 0%,#0e1e2e 55%,#18182e 100%);
-  border-bottom:1px solid rgba(255,255,255,.05);
+  padding:2.2rem 1.5rem 1.8rem;
+  background:linear-gradient(175deg,#0a0f1a 0%,#0d1520 55%,#111820 100%);
+  border-bottom:1px solid rgba(255,255,255,.06);
   position:relative;overflow:hidden;
 }
 .site-header::before{
-  content:"";position:absolute;top:-60px;left:50%;transform:translateX(-50%);
-  width:380px;height:200px;
-  background:radial-gradient(ellipse,rgba(80,160,20,.18) 0%,transparent 70%);
-  pointer-events:none;
+  content:"";position:absolute;inset:0;
+  background:
+    radial-gradient(ellipse 60% 40% at 20% 50%,rgba(0,180,255,.07) 0%,transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 50%,rgba(180,0,255,.07) 0%,transparent 70%),
+    radial-gradient(ellipse 80% 60% at 50% 120%,rgba(0,255,150,.06) 0%,transparent 65%);
+  pointer-events:none;animation:hdrGlow 8s ease-in-out infinite alternate;
 }
 .site-logo{
   font-family:"Share Tech Mono",monospace;
-  font-size:.6rem;letter-spacing:.35em;
-  color:rgba(100,200,50,.65);
-  margin-bottom:.45rem;
-  display:flex;align-items:center;justify-content:center;gap:.7rem;
-  position:relative;z-index:1;
+  font-size:.6rem;letter-spacing:.38em;
+  color:rgba(160,220,255,.5);
+  margin-bottom:.5rem;
+  display:flex;align-items:center;justify-content:center;gap:.75rem;
+  position:relative;z-index:2;
 }
 .site-logo::before,.site-logo::after{
-  content:"";display:inline-block;height:1px;width:42px;
-  background:linear-gradient(90deg,transparent,rgba(100,200,50,.45));
+  content:"";display:inline-block;height:1px;width:44px;
+  background:linear-gradient(90deg,transparent,rgba(100,180,255,.35));
 }
-.site-logo::after{background:linear-gradient(90deg,rgba(100,200,50,.45),transparent)}
+.site-logo::after{background:linear-gradient(90deg,rgba(100,180,255,.35),transparent)}
 .site-title{
-  font-family:"Rajdhani",sans-serif;font-size:2.4rem;font-weight:700;letter-spacing:.08em;
-  color:#eef6ff;position:relative;z-index:1;line-height:1.1;
+  font-family:"Rajdhani",sans-serif;font-size:2.45rem;font-weight:700;
+  letter-spacing:.09em;color:#e8f4ff;
+  position:relative;z-index:2;line-height:1.1;
+  text-shadow:0 0 30px rgba(80,160,255,.2);
 }
-.site-title span{color:#72d124;text-shadow:0 0 22px rgba(100,200,30,.4)}
+.site-title .rgb-word{
+  background:linear-gradient(90deg,#7ee8fa,#80ff72,#7ee8fa);
+  background-size:200% auto;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:rgbShift 4s linear infinite;
+}
 .site-sub{
-  font-size:.72rem;color:rgba(255,255,255,.35);margin-top:.4rem;
+  font-size:.7rem;color:rgba(255,255,255,.3);margin-top:.4rem;
   font-family:"Share Tech Mono",monospace;letter-spacing:.07em;
-  position:relative;z-index:1;
+  position:relative;z-index:2;
 }
-.site-sub .dot{margin:0 .4rem;color:rgba(110,200,50,.45)}
+.site-sub .dot{margin:0 .4rem;color:rgba(130,200,255,.35)}
 
 /* ══════════════════════════════════════
    TAB NAV UPGRADE
