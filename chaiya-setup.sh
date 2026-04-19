@@ -1188,7 +1188,6 @@ cat > /opt/chaiya-panel/sshws.html << 'DASHV8EOF'
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<script src="config.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CHAIYA V2RAY PRO MAX — Dashboard</title>
@@ -1199,37 +1198,34 @@ cat > /opt/chaiya-panel/sshws.html << 'DASHV8EOF'
    ROOT & RESET
 ══════════════════════════════════════ */
 :root {
-  --bg:        #0b0f18;
-  --surface:   #111827;
-  --surface2:  #1a2235;
-  --border:    rgba(255,255,255,.08);
-  --border2:   rgba(255,255,255,.13);
-  --shadow:    0 2px 16px rgba(0,0,0,.4);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,.5);
+  --bg:        #f0f4f8;
+  --surface:   #ffffff;
+  --border:    #e2e8f0;
+  --shadow:    0 2px 12px rgba(0,0,0,.08);
+  --shadow-lg: 0 4px 24px rgba(0,0,0,.12);
 
-  --ais:       #72d124;
-  --ais2:      #5ab818;
-  --ais-light: rgba(114,209,36,.12);
-  --ais-bdr:   rgba(114,209,36,.3);
+  --ais:       #5a9e1c;
+  --ais2:      #3d7a0e;
+  --ais-light: #f0f9e8;
+  --ais-bdr:   #c5e89a;
 
-  --true:      #f87171;
-  --true2:     #ef4444;
-  --true-light:rgba(248,113,113,.12);
-  --true-bdr:  rgba(248,113,113,.3);
+  --true:      #e01020;
+  --true2:     #b8000e;
+  --true-light:#fff0f0;
+  --true-bdr:  #f8a0a8;
 
-  --ssh:       #38bdf8;
-  --ssh2:      #0ea5e9;
-  --ssh-light: rgba(56,189,248,.12);
-  --ssh-bdr:   rgba(56,189,248,.3);
+  --ssh:       #1a6fa8;
+  --ssh2:      #0d5487;
+  --ssh-light: #e8f4fc;
+  --ssh-bdr:   #90caf0;
 
-  --text:      #e8f4ff;
-  --text2:     rgba(232,244,255,.65);
-  --text3:     rgba(232,244,255,.35);
-  --green:     #4ade80;
-  --orange:    #fb923c;
-  --red:       #f87171;
-  --purple:    #a78bfa;
-  --accent:    #7ee8fa;
+  --text:      #1a2332;
+  --text2:     #4a6072;
+  --text3:     #8099ac;
+  --green:     #22c55e;
+  --orange:    #f97316;
+  --red:       #ef4444;
+  --purple:    #8b5cf6;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -1237,11 +1233,8 @@ body{
   color:var(--text);
   font-family:'Kanit',sans-serif;
   font-weight:400;
-  font-size:15px;
-  line-height:1.5;
   min-height:100vh;
   overflow-x:hidden;
-  -webkit-font-smoothing:antialiased;
 }
 
 /* ══════════════════════════════════════
@@ -1362,27 +1355,22 @@ body{
 ══════════════════════════════════════ */
 .tab-nav{
   display:flex;
-  background:#0e1825;
-  border-bottom:1px solid rgba(255,255,255,.07);
-  overflow-x:auto;-webkit-overflow-scrolling:touch;
-  position:sticky;top:0;z-index:200;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
 }
 .tab-nav::-webkit-scrollbar{display:none}
 .tab-btn{
-  flex:1;min-width:72px;
-  padding:.82rem .5rem;
+  flex:1;min-width:80px;
+  padding:.75rem .5rem;
   border:none;background:transparent;
-  font-family:'Kanit',sans-serif;font-size:.82rem;font-weight:600;
-  color:rgba(255,255,255,.35);cursor:pointer;
+  font-family:'Kanit',sans-serif;font-size:.8rem;font-weight:600;
+  color:var(--text3);cursor:pointer;
   border-bottom:2px solid transparent;
-  transition:all .22s;white-space:nowrap;letter-spacing:.01em;
+  transition:all .2s;white-space:nowrap;
 }
-.tab-btn:hover{color:rgba(255,255,255,.65);background:rgba(255,255,255,.03)}
-.tab-btn.active{
-  color:var(--accent);border-bottom-color:var(--accent);
-  background:rgba(126,232,250,.05);
-  text-shadow:0 0 12px rgba(126,232,250,.4);
-}
+.tab-btn.active{color:var(--ais);border-bottom-color:var(--ais)}
 
 /* ══════════════════════════════════════
    TAB PANELS
@@ -1405,45 +1393,38 @@ body{
 }
 .stat-card{
   background:var(--surface);
-  border-radius:18px;
-  padding:1.1rem 1.2rem;
-  border:1px solid var(--border2);
+  border-radius:16px;
+  padding:1rem 1.1rem;
+  border:1px solid var(--border);
   box-shadow:var(--shadow);
   position:relative;overflow:hidden;
-  backdrop-filter:blur(8px);
-}
-.stat-card::before{
-  content:'';position:absolute;inset:0;border-radius:18px;
-  background:linear-gradient(135deg,rgba(255,255,255,.04) 0%,transparent 60%);
-  pointer-events:none;
 }
 .stat-card.wide{grid-column:span 2}
 .stat-label{
   font-family:'Share Tech Mono',monospace;
-  font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--text3);margin-bottom:.5rem;
+  font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text3);margin-bottom:.4rem;
   display:flex;align-items:center;gap:.4rem;
 }
 .stat-value{
   font-family:'Rajdhani',sans-serif;
-  font-size:2.1rem;font-weight:700;line-height:1;
+  font-size:1.9rem;font-weight:700;line-height:1;
   color:var(--text);
-  text-shadow:0 0 20px rgba(126,232,250,.15);
 }
-.stat-unit{font-size:1.1rem;color:var(--text2);margin-left:.15rem}
-.stat-sub{font-size:.75rem;color:var(--text3);margin-top:.35rem;font-family:'Share Tech Mono',monospace}
+.stat-unit{font-size:1rem;color:var(--text2);margin-left:.15rem}
+.stat-sub{font-size:.72rem;color:var(--text3);margin-top:.3rem}
 
 /* Ring gauge */
 .ring-wrap{display:flex;align-items:center;gap:.9rem}
 .ring-svg{flex-shrink:0}
-.ring-track{fill:none;stroke:rgba(255,255,255,.1);stroke-width:6}
+.ring-track{fill:none;stroke:var(--border);stroke-width:6}
 .ring-fill{fill:none;stroke-width:6;stroke-linecap:round;
   transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)}
 .ring-info{flex:1}
 
 /* Bar gauge */
 .bar-gauge{
-  height:8px;background:rgba(255,255,255,.08);border-radius:4px;
+  height:8px;background:var(--border);border-radius:4px;
   margin-top:.6rem;overflow:hidden;
 }
 .bar-fill{
@@ -1454,31 +1435,31 @@ body{
 /* Online badge */
 .online-badge{
   display:inline-flex;align-items:center;gap:.35rem;
-  background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);
-  color:#4ade80;padding:.25rem .8rem;border-radius:20px;
-  font-size:.73rem;font-family:'Share Tech Mono',monospace;
+  background:#f0fdf4;border:1px solid #86efac;
+  color:#166534;padding:.25rem .7rem;border-radius:20px;
+  font-size:.72rem;font-family:'Share Tech Mono',monospace;
 }
 .online-dot{width:7px;height:7px;border-radius:50%;background:var(--green);
   animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 .refresh-btn{
-  border:1px solid var(--border2);background:rgba(255,255,255,.05);
-  border-radius:8px;padding:.32rem .75rem;
-  font-size:.76rem;color:var(--text2);cursor:pointer;
+  border:1px solid var(--border);background:var(--surface);
+  border-radius:8px;padding:.3rem .7rem;
+  font-size:.75rem;color:var(--text2);cursor:pointer;
   font-family:'Kanit',sans-serif;
   transition:all .2s;
 }
-.refresh-btn:hover{background:rgba(126,232,250,.08);color:var(--accent);border-color:rgba(126,232,250,.3)}
+.refresh-btn:hover{background:var(--bg);color:var(--text)}
 .refresh-btn.spin svg{animation:spinR .6s linear infinite}
 @keyframes spinR{to{transform:rotate(360deg)}}
 
 /* uptime chip */
 .chip{
   display:inline-block;
-  background:rgba(255,255,255,.05);border:1px solid var(--border);
+  background:#f8fafc;border:1px solid var(--border);
   border-radius:6px;padding:.15rem .5rem;
-  font-family:'Share Tech Mono',monospace;font-size:.72rem;color:var(--text3);
+  font-family:'Share Tech Mono',monospace;font-size:.72rem;color:var(--text2);
 }
 
 /* ══════════════════════════════════════
@@ -1487,13 +1468,8 @@ body{
 .section-label{
   display:flex;align-items:center;gap:.5rem;
   font-family:'Rajdhani',sans-serif;
-  font-size:.95rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--accent);padding:.2rem 0 .8rem;
-  text-shadow:0 0 16px rgba(126,232,250,.3);
-}
-.section-label::after{
-  content:'';flex:1;height:1px;
-  background:linear-gradient(90deg,rgba(126,232,250,.25),transparent);
+  font-size:.9rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text2);padding:.2rem 0 .7rem;
 }
 
 /* ══════════════════════════════════════
@@ -1501,8 +1477,8 @@ body{
 ══════════════════════════════════════ */
 .card-group{
   background:var(--surface);border-radius:18px;
-  box-shadow:var(--shadow-lg);overflow:hidden;
-  border:1px solid var(--border2);
+  box-shadow:var(--shadow);overflow:hidden;
+  border:1px solid var(--border);
 }
 .card-group .carrier-btn+.carrier-btn{border-top:1px solid var(--border)}
 
@@ -1511,29 +1487,29 @@ body{
 ══════════════════════════════════════ */
 .carrier-btn{
   width:100%;border:none;background:var(--surface);
-  padding:1.1rem 1.3rem;cursor:pointer;
+  padding:1rem 1.2rem;cursor:pointer;
   display:flex;align-items:center;gap:1rem;text-align:left;
-  transition:background .18s;
+  transition:background .15s;
 }
-.carrier-btn:hover{background:var(--surface2)}
-.carrier-btn:active{background:rgba(126,232,250,.05)}
+.carrier-btn:hover{background:#f8fbff}
+.carrier-btn:active{background:#f0f6ff}
 
 .btn-logo{
   width:54px;height:54px;border-radius:13px;
   display:flex;align-items:center;justify-content:center;
   flex-shrink:0;overflow:hidden;
-  border:1px solid var(--border);background:rgba(255,255,255,.06);
+  border:1px solid var(--border);background:#f4f4f4;
 }
 .logo-ais{background:#fff;border-color:var(--ais-bdr)}
 .logo-true{background:#c8040d;border-color:#e0000a}
 .logo-ssh{background:#1565c0;border-color:#1976d2}
 
 .btn-info{flex:1;min-width:0}
-.btn-name{font-family:'Rajdhani',sans-serif;font-size:1.18rem;font-weight:700;letter-spacing:.05em;display:block;margin-bottom:.2rem}
+.btn-name{font-family:'Rajdhani',sans-serif;font-size:1.12rem;font-weight:700;letter-spacing:.04em;display:block;margin-bottom:.15rem}
 .btn-ais  .btn-name{color:var(--ais)}
 .btn-true .btn-name{color:var(--true)}
 .btn-ssh  .btn-name{color:var(--ssh)}
-.btn-desc{font-size:.76rem;font-weight:400;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;font-family:'Share Tech Mono',monospace}
+.btn-desc{font-size:.74rem;font-weight:300;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .btn-true .btn-desc{color:var(--true)}
 .btn-arrow{color:var(--text3);font-size:1.1rem;flex-shrink:0;transition:transform .18s}
 .carrier-btn:hover .btn-arrow{transform:translateX(3px);color:var(--text2)}
@@ -1543,7 +1519,7 @@ body{
 ══════════════════════════════════════ */
 .mgmt-panel{
   background:var(--surface);border-radius:18px;
-  border:1px solid var(--border2);box-shadow:var(--shadow-lg);
+  border:1px solid var(--border);box-shadow:var(--shadow);
   overflow:hidden;
 }
 .mgmt-header{
@@ -1561,49 +1537,47 @@ body{
   padding:.8rem 1.2rem;border-bottom:1px solid var(--border);
 }
 .search-bar input{
-  flex:1;background:rgba(255,255,255,.04);border:1.5px solid var(--border2);
-  border-radius:10px;padding:.55rem .9rem;
-  font-family:'Kanit',sans-serif;font-size:.9rem;
-  outline:none;color:var(--text);transition:border-color .2s,box-shadow .2s;
+  flex:1;background:#f8fafc;border:1.5px solid var(--border);
+  border-radius:10px;padding:.5rem .85rem;
+  font-family:'Kanit',sans-serif;font-size:.88rem;
+  outline:none;color:var(--text);transition:border-color .2s;
 }
-.search-bar input::placeholder{color:var(--text3)}
-.search-bar input:focus{border-color:var(--ssh);background:rgba(56,189,248,.05);box-shadow:0 0 0 3px rgba(56,189,248,.1)}
+.search-bar input:focus{border-color:var(--ssh);background:#fff}
 
 /* User row */
 .user-list{max-height:400px;overflow-y:auto}
 .user-list::-webkit-scrollbar{width:4px}
 .user-list::-webkit-scrollbar-thumb{background:rgba(0,0,0,.1);border-radius:2px}
 
-.user-row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+.user-row{
   padding:.75rem 1.2rem;
   border-bottom:1px solid var(--border);
   display:flex;align-items:center;gap:.8rem;
   transition:background .15s;cursor:pointer;
 }
 .user-row:last-child{border-bottom:none}
-.user-row:hover{background:rgba(126,232,250,.04)}
+.user-row:hover{background:#f8fafc}
 .user-avatar{
-  width:38px;height:38px;border-radius:11px;
+  width:36px;height:36px;border-radius:10px;
   display:flex;align-items:center;justify-content:center;
-  font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.95rem;
+  font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.9rem;
   flex-shrink:0;
 }
-.ua-ais{background:rgba(114,209,36,.15);color:var(--ais);border:1px solid var(--ais-bdr)}
-.ua-true{background:rgba(248,113,113,.15);color:var(--true);border:1px solid var(--true-bdr)}
-.ua-ssh{background:rgba(56,189,248,.15);color:var(--ssh);border:1px solid var(--ssh-bdr)}
+.ua-ais{background:var(--ais-light);color:var(--ais2);border:1px solid var(--ais-bdr)}
+.ua-true{background:var(--true-light);color:var(--true2);border:1px solid var(--true-bdr)}
 
 .user-info{flex:1;min-width:0}
-.user-name{font-weight:600;font-size:.92rem;color:var(--text);margin-bottom:.12rem;letter-spacing:.01em}
-.user-meta{font-size:.73rem;color:var(--text3);font-family:'Share Tech Mono',monospace}
+.user-name{font-weight:600;font-size:.88rem;color:var(--text);margin-bottom:.1rem}
+.user-meta{font-size:.72rem;color:var(--text3);font-family:'Share Tech Mono',monospace}
 
 .status-badge{
   font-size:.68rem;padding:.2rem .55rem;border-radius:20px;
   font-family:'Share Tech Mono',monospace;flex-shrink:0;
 }
-.status-ok{background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);color:#4ade80}
-.status-exp{background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.3);color:#fb923c}
-.status-dead{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:#f87171}
-.status-online{background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3);color:#38bdf8}
+.status-ok{background:#f0fdf4;border:1px solid #86efac;color:#166534}
+.status-exp{background:#fff7ed;border:1px solid #fed7aa;color:#92400e}
+.status-dead{background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}
+.status-online{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
 
 /* empty state */
 .empty-state{
@@ -1631,27 +1605,24 @@ body{
 
 .modal{
   width:100%;max-width:520px;
-  background:#111827;
+  background:var(--surface);
   border-radius:24px 24px 0 0;
-  border-top:1px solid rgba(255,255,255,.1);
   overflow:hidden;position:relative;
   animation:slideUp .28s cubic-bezier(.34,1.1,.64,1);
   max-height:92vh;display:flex;flex-direction:column;
-  box-shadow:0 -8px 40px rgba(0,0,0,.6);
 }
 @keyframes slideUp{from{transform:translateY(100%);opacity:.5}to{transform:translateY(0);opacity:1}}
 
 .modal::before{content:'';display:block;width:40px;height:4px;border-radius:2px;background:rgba(0,0,0,.15);margin:10px auto 0;flex-shrink:0}
 
 .modal-header{
-  padding:.9rem 1.4rem 1rem;
+  padding:.85rem 1.4rem .95rem;
   display:flex;align-items:center;justify-content:space-between;
-  border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;
+  border-bottom:1px solid var(--border);flex-shrink:0;
 }
 .modal-title{
-  font-family:'Rajdhani',sans-serif;font-size:1.1rem;font-weight:700;letter-spacing:.08em;
+  font-family:'Rajdhani',sans-serif;font-size:1.05rem;font-weight:700;letter-spacing:.08em;
   display:flex;align-items:center;gap:.6rem;
-  color:var(--text);
 }
 .modal-ais  .modal-title{color:var(--ais2)}
 .modal-true .modal-title{color:var(--true2)}
@@ -1660,10 +1631,10 @@ body{
 
 .modal-close{
   width:30px;height:30px;border-radius:50%;border:none;
-  background:rgba(255,255,255,.06);display:flex;align-items:center;justify-content:center;
+  background:#f0f4f8;display:flex;align-items:center;justify-content:center;
   cursor:pointer;font-size:.85rem;color:var(--text2);transition:all .2s;
 }
-.modal-close:hover{background:rgba(255,255,255,.12);color:var(--text)}
+.modal-close:hover{background:#e2e8f0;color:var(--text)}
 
 .modal-body{padding:1rem 1.4rem 1.6rem;overflow-y:auto;flex:1}
 .modal-body::-webkit-scrollbar{width:4px}
@@ -1684,21 +1655,21 @@ body{
 .fgrid .span2{grid-column:span 2}
 .field{display:flex;flex-direction:column;gap:.3rem}
 
-label{font-size:.69rem;font-family:'Share Tech Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:rgba(232,244,255,.45)}
+label{font-size:.67rem;font-family:'Share Tech Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--text3)}
 input,select{
-  background:rgba(255,255,255,.05);border:1.5px solid var(--border2);border-radius:10px;
-  padding:.6rem .9rem;color:var(--text);
-  font-family:'Kanit',sans-serif;font-size:.9rem;outline:none;
+  background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;
+  padding:.58rem .88rem;color:var(--text);
+  font-family:'Kanit',sans-serif;font-size:.88rem;outline:none;
   transition:border-color .2s,box-shadow .2s;width:100%;
 }
-input:focus,select:focus{background:rgba(56,189,248,.05)}
-input.ais-focus:focus{border-color:var(--ais);box-shadow:0 0 0 3px rgba(114,209,36,.15)}
-input.true-focus:focus{border-color:var(--true);box-shadow:0 0 0 3px rgba(248,113,113,.15)}
-input.ssh-focus:focus{border-color:var(--ssh);box-shadow:0 0 0 3px rgba(56,189,248,.15)}
-input.mgmt-focus:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(167,139,250,.15)}
-select option{background:#1a2235;color:var(--text)}
+input:focus,select:focus{background:#fff}
+input.ais-focus:focus{border-color:var(--ais);box-shadow:0 0 0 3px rgba(90,158,28,.1)}
+input.true-focus:focus{border-color:var(--true);box-shadow:0 0 0 3px rgba(224,16,32,.09)}
+input.ssh-focus:focus{border-color:var(--ssh);box-shadow:0 0 0 3px rgba(26,111,168,.1)}
+input.mgmt-focus:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(139,92,246,.1)}
+select option{background:#fff}
 
-.divider{height:1px;background:rgba(255,255,255,.07);margin:.8rem 0}
+.divider{height:1px;background:var(--border);margin:.8rem 0}
 
 .submit-btn{
   width:100%;padding:.83rem;border:none;border-radius:12px;
@@ -1706,28 +1677,28 @@ select option{background:#1a2235;color:var(--text)}
   cursor:pointer;margin-top:.8rem;transition:all .2s;overflow:hidden;
 }
 .submit-btn:disabled{opacity:.5;cursor:not-allowed}
-.submit-btn.ais-btn{background:linear-gradient(135deg,#5ab818,var(--ais));color:#071a00;box-shadow:0 4px 20px rgba(114,209,36,.35)}
-.submit-btn.ais-btn:hover:not(:disabled){box-shadow:0 6px 28px rgba(114,209,36,.5);transform:translateY(-1px)}
-.submit-btn.true-btn{background:linear-gradient(135deg,#ef4444,var(--true));color:#fff;box-shadow:0 4px 20px rgba(248,113,113,.35)}
-.submit-btn.true-btn:hover:not(:disabled){box-shadow:0 6px 28px rgba(248,113,113,.5);transform:translateY(-1px)}
-.submit-btn.ssh-btn{background:linear-gradient(135deg,#0ea5e9,var(--ssh));color:#001a2e;box-shadow:0 4px 20px rgba(56,189,248,.35)}
-.submit-btn.ssh-btn:hover:not(:disabled){box-shadow:0 6px 28px rgba(56,189,248,.5);transform:translateY(-1px)}
-.submit-btn.mgmt-btn{background:linear-gradient(135deg,#7c3aed,var(--purple));color:#fff;box-shadow:0 4px 20px rgba(167,139,250,.35)}
-.submit-btn.mgmt-btn:hover:not(:disabled){box-shadow:0 6px 28px rgba(167,139,250,.5);transform:translateY(-1px)}
-.submit-btn.danger-btn{background:linear-gradient(135deg,#dc2626,var(--red));color:#fff;box-shadow:0 4px 20px rgba(248,113,113,.35)}
+.submit-btn.ais-btn{background:linear-gradient(135deg,#4d8a15,var(--ais));color:#fff;box-shadow:0 4px 14px rgba(90,158,28,.3)}
+.submit-btn.ais-btn:hover:not(:disabled){box-shadow:0 6px 22px rgba(90,158,28,.4);transform:translateY(-1px)}
+.submit-btn.true-btn{background:linear-gradient(135deg,#c0030f,var(--true));color:#fff;box-shadow:0 4px 14px rgba(224,16,32,.26)}
+.submit-btn.true-btn:hover:not(:disabled){box-shadow:0 6px 22px rgba(224,16,32,.36);transform:translateY(-1px)}
+.submit-btn.ssh-btn{background:linear-gradient(135deg,#135d94,var(--ssh));color:#fff;box-shadow:0 4px 14px rgba(26,111,168,.26)}
+.submit-btn.ssh-btn:hover:not(:disabled){box-shadow:0 6px 22px rgba(26,111,168,.36);transform:translateY(-1px)}
+.submit-btn.mgmt-btn{background:linear-gradient(135deg,#6d28d9,var(--purple));color:#fff;box-shadow:0 4px 14px rgba(139,92,246,.26)}
+.submit-btn.mgmt-btn:hover:not(:disabled){box-shadow:0 6px 22px rgba(139,92,246,.36);transform:translateY(-1px)}
+.submit-btn.danger-btn{background:linear-gradient(135deg,#b91c1c,var(--red));color:#fff;box-shadow:0 4px 14px rgba(239,68,68,.22)}
 
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.4rem}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 .alert{display:none;margin-top:.7rem;padding:.68rem .9rem;border-radius:10px;font-size:.8rem;line-height:1.6}
-.alert.ok{background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);color:#4ade80}
-.alert.err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:#f87171}
-.alert.info{background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.3);color:#38bdf8}
+.alert.ok{background:#f0fdf4;border:1px solid #86efac;color:#166534}
+.alert.err{background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}
+.alert.info{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
 
 /* ══════════════════════════════════════
    RESULT CARD
 ══════════════════════════════════════ */
-.result-card{display:none;margin-top:1rem;border-radius:14px;overflow:hidden;border:1px solid var(--border2);box-shadow:0 4px 20px rgba(0,0,0,.4);background:rgba(255,255,255,.02)}
+.result-card{display:none;margin-top:1rem;border-radius:14px;overflow:hidden;border:1.5px solid var(--border);box-shadow:0 2px 10px rgba(0,0,0,.06)}
 .result-card.show{display:block}
 #ais-result.show{border-color:var(--ais-bdr)}
 #true-result.show{border-color:var(--true-bdr)}
@@ -1735,14 +1706,14 @@ select option{background:#1a2235;color:var(--text)}
 
 .result-header{padding:.65rem 1rem;font-family:'Share Tech Mono',monospace;font-size:.72rem;letter-spacing:.1em;display:flex;align-items:center;gap:.5rem;border-bottom:1px solid var(--border)}
 .result-header .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.result-header.ais-r{background:rgba(114,209,36,.12);color:var(--ais)}
+.result-header.ais-r{background:var(--ais-light);color:var(--ais2)}
 .result-header.ais-r .dot{background:var(--ais);box-shadow:0 0 5px var(--ais)}
-.result-header.true-r{background:rgba(248,113,113,.12);color:var(--true)}
+.result-header.true-r{background:var(--true-light);color:var(--true2)}
 .result-header.true-r .dot{background:var(--true)}
-.result-header.ssh-r{background:rgba(56,189,248,.12);color:var(--ssh)}
+.result-header.ssh-r{background:var(--ssh-light);color:var(--ssh2)}
 .result-header.ssh-r .dot{background:var(--ssh)}
 
-.result-body{padding:.85rem 1rem;background:rgba(255,255,255,.02)}
+.result-body{padding:.85rem 1rem;background:#fafcfe}
 .info-rows{margin-bottom:.8rem}
 .info-row{display:flex;justify-content:space-between;align-items:center;padding:.32rem 0;border-bottom:1px solid var(--border);font-size:.8rem}
 .info-row:last-child{border-bottom:none}
@@ -1751,50 +1722,52 @@ select option{background:#1a2235;color:var(--text)}
 .info-val.pass{font-family:'Share Tech Mono',monospace;color:var(--green);font-weight:600}
 .info-val.uuid{font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--ssh)}
 
-.link-box{background:rgba(255,255,255,.04);border-radius:8px;padding:.7rem .9rem;font-family:'Share Tech Mono',monospace;font-size:.72rem;word-break:break-all;line-height:1.7;margin-bottom:.7rem;border:1px solid var(--border2);color:var(--text3)}
-.link-box.vless-link{border-left:3px solid var(--ais);color:var(--ais)}
-.link-box.npv-link{border-left:3px solid var(--ssh);color:var(--ssh)}
-.link-box.dark-link{border-left:3px solid var(--purple);color:var(--purple)}
+.link-box{background:#f0f4f8;border-radius:8px;padding:.6rem .8rem;font-family:'Share Tech Mono',monospace;font-size:.62rem;word-break:break-all;line-height:1.7;margin-bottom:.7rem;border:1px solid var(--border);color:var(--text2)}
+.link-box.vless-link{border-left:3px solid var(--ais);color:var(--ais2)}
+.link-box.npv-link{border-left:3px solid var(--ssh);color:var(--ssh2)}
+.link-box.dark-link{border-left:3px solid #9333ea;color:#7e22ce}
 
 .qr-wrap{display:flex;justify-content:center;margin:.6rem 0 .8rem}
 .qr-inner{background:#fff;padding:10px;border-radius:10px;display:inline-block;border:1px solid var(--border)}
 
 .copy-row{display:flex;gap:.5rem;flex-wrap:wrap}
-.copy-btn{flex:1;min-width:120px;padding:.52rem .7rem;border-radius:9px;border:1.5px solid var(--border2);background:rgba(255,255,255,.04);font-family:'Rajdhani',sans-serif;font-size:.86rem;font-weight:700;letter-spacing:.06em;cursor:pointer;transition:all .2s;color:var(--text2)}
+.copy-btn{flex:1;min-width:120px;padding:.5rem .7rem;border-radius:9px;border:1.5px solid var(--border);background:#fff;font-family:'Rajdhani',sans-serif;font-size:.85rem;font-weight:700;letter-spacing:.06em;cursor:pointer;transition:all .2s;color:var(--text2)}
 .copy-btn.vless{border-color:var(--ais-bdr);color:var(--ais2)}
-.copy-btn.vless:hover{background:rgba(114,209,36,.1)}
+.copy-btn.vless:hover{background:var(--ais-light)}
 .copy-btn.npv{border-color:var(--ssh-bdr);color:var(--ssh2)}
-.copy-btn.npv:hover{background:rgba(56,189,248,.1)}
+.copy-btn.npv:hover{background:var(--ssh-light)}
 .copy-btn.ssh-copy{border-color:var(--ssh-bdr);color:var(--ssh2)}
-.copy-btn.ssh-copy:hover{background:rgba(56,189,248,.1)}
+.copy-btn.ssh-copy:hover{background:var(--ssh-light)}
 .copy-btn.copied{opacity:.6;pointer-events:none}
 
 /* ══════════════════════════════════════
    PORT / APP TABS
 ══════════════════════════════════════ */
 .port-tabs{display:flex;gap:.4rem;margin-bottom:.6rem}
-.port-tab{flex:1;padding:.52rem;border-radius:9px;font-size:.82rem;cursor:pointer;border:1.5px solid var(--border2);background:rgba(255,255,255,.03);color:var(--text2);font-family:'Rajdhani',sans-serif;font-weight:600;transition:all .2s}
-.port-tab.active-ssh{border-color:var(--ssh);background:rgba(56,189,248,.15);color:var(--ssh);box-shadow:0 0 10px rgba(56,189,248,.2)}
+.port-tab{flex:1;padding:.48rem;border-radius:9px;font-size:.8rem;cursor:pointer;border:1.5px solid var(--border);background:#f8fafc;color:var(--text2);font-family:'Rajdhani',sans-serif;font-weight:600;transition:all .2s}
+.port-tab.active-ssh{border-color:var(--ssh);background:var(--ssh-light);color:var(--ssh2)}
 .pro-tab{display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.5rem .6rem}
-#ssh-pro-dtac.active-ssh{border-color:var(--ssh);background:rgba(56,189,248,.15);color:var(--ssh)}
-#ssh-pro-true.active-ssh{border-color:var(--true);background:rgba(248,113,113,.15);color:var(--true)}
+#ssh-pro-dtac.active-ssh{border-color:var(--ssh);background:var(--ssh-light);color:var(--ssh2)}
+#ssh-pro-true.active-ssh{border-color:var(--true);background:var(--true-light);color:var(--true2)}
 
 /* ══════════════════════════════════════
    MGMT MODAL — action rows
 ══════════════════════════════════════ */
 .action-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.8rem}
 .action-card{
-  background:rgba(255,255,255,.03);border:1.5px solid var(--border2);border-radius:12px;
+  background:#f8fafc;border:1.5px solid var(--border);border-radius:12px;
   padding:.85rem .9rem;cursor:pointer;transition:all .2s;text-align:center;
 }
-.action-card:hover{border-color:var(--ssh);background:rgba(56,189,248,.08)}
-.action-card.selected{border-color:var(--ssh);background:rgba(56,189,248,.1);box-shadow:0 0 0 2px rgba(56,189,248,.15)}
+.action-card:hover{border-color:var(--ssh);background:var(--ssh-light)}
+.action-card.selected{border-color:var(--purple);background:#f5f3ff}
 .action-icon{font-size:1.4rem;margin-bottom:.3rem}
 .action-name{font-family:'Rajdhani',sans-serif;font-size:.9rem;font-weight:700;color:var(--text)}
 .action-desc{font-size:.7rem;color:var(--text3);margin-top:.15rem}
+
+/* user detail panel */
 .udetail{
-  background:rgba(255,255,255,.03);border-radius:12px;padding:.85rem 1rem;
-  border:1px solid var(--border2);margin-bottom:.9rem;
+  background:var(--bg);border-radius:12px;padding:.85rem 1rem;
+  border:1px solid var(--border);margin-bottom:.9rem;
 }
 .udetail-row{display:flex;justify-content:space-between;padding:.28rem 0;border-bottom:1px solid var(--border);font-size:.8rem}
 .udetail-row:last-child{border-bottom:none}
@@ -1834,18 +1807,18 @@ select option{background:#1a2235;color:var(--text)}
 .svc-row{
   display:flex;align-items:center;gap:.65rem;
   border-radius:11px;padding:.52rem .85rem;
-  border:1px solid var(--border2);background:rgba(255,255,255,.02);
+  border:1px solid var(--border);background:#f9fbfc;
   transition:all .15s;
 }
-.svc-row.up  {border-color:rgba(74,222,128,.3);background:rgba(74,222,128,.05)}
-.svc-row.down{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.05)}
-.svc-row.warn{border-color:rgba(251,146,60,.3);background:rgba(251,146,60,.05)}
+.svc-row.up  {border-color:#86efac;background:#f0fdf4}
+.svc-row.down{border-color:#fca5a5;background:#fef2f2}
+.svc-row.warn{border-color:#fed7aa;background:#fffbf5}
 .svc-dot{
   width:8px;height:8px;border-radius:50%;flex-shrink:0;
 }
-.svc-dot.up  {background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,.6);animation:pulse 2s infinite}
-.svc-dot.down{background:#f87171;box-shadow:0 0 6px rgba(248,113,113,.4)}
-.svc-dot.warn{background:#fb923c;box-shadow:0 0 8px rgba(251,146,60,.5);animation:pulse 2s infinite}
+.svc-dot.up  {background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.55);animation:pulse 2s infinite}
+.svc-dot.down{background:var(--red)}
+.svc-dot.warn{background:var(--orange);animation:pulse 2s infinite}
 .svc-icon{font-size:.9rem;flex-shrink:0}
 .svc-name{font-family:"Share Tech Mono",monospace;font-size:.75rem;color:var(--text);flex:1;font-weight:600}
 .svc-ports{font-family:"Share Tech Mono",monospace;font-size:.63rem;color:var(--text3)}
@@ -1853,10 +1826,10 @@ select option{background:#1a2235;color:var(--text)}
   font-family:"Share Tech Mono",monospace;font-size:.63rem;
   padding:.13rem .5rem;border-radius:20px;flex-shrink:0;font-weight:700;
 }
-.svc-chip.up  {background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.3)}
-.svc-chip.down{background:rgba(248,113,113,.12);color:#f87171;border:1px solid rgba(248,113,113,.3)}
-.svc-chip.warn{background:rgba(251,146,60,.12);color:#fb923c;border:1px solid rgba(251,146,60,.3)}
-.svc-chip.checking{background:rgba(255,255,255,.04);color:var(--text3);border:1px solid var(--border)}
+.svc-chip.up  {background:#dcfce7;color:#166534;border:1px solid #86efac}
+.svc-chip.down{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+.svc-chip.warn{background:#fff7ed;color:#92400e;border:1px solid #fed7aa}
+.svc-chip.checking{background:#f1f5f9;color:var(--text3);border:1px solid var(--border)}
 
 /* ══════════════════════════════════════
    HEADER UPGRADE
@@ -1869,7 +1842,7 @@ select option{background:#1a2235;color:var(--text)}
   position:relative;overflow:hidden;
 }
 .site-header::before{
-  content:"";position:absolute;inset:0;
+  content:'';position:absolute;inset:0;
   background:
     radial-gradient(ellipse 60% 40% at 20% 50%,rgba(0,180,255,.07) 0%,transparent 70%),
     radial-gradient(ellipse 60% 40% at 80% 50%,rgba(180,0,255,.07) 0%,transparent 70%),
@@ -1958,7 +1931,7 @@ select option{background:#1a2235;color:var(--text)}
   font-family:"Kanit",sans-serif;
   transition:all .2s;display:inline-flex;align-items:center;gap:.3rem;
 }
-.refresh-btn:hover{background:rgba(126,232,250,.08);color:var(--accent);border-color:rgba(126,232,250,.3)}
+.refresh-btn:hover{background:#f0f4fa;color:var(--text);border-color:#b0bfd0}
 .refresh-btn.spin svg{animation:spinR .6s linear infinite}
 
 /* carrier button upgrade */
@@ -1968,7 +1941,7 @@ select option{background:#1a2235;color:var(--text)}
   display:flex;align-items:center;gap:1rem;text-align:left;
   transition:background .15s,transform .1s;
 }
-.carrier-btn:hover{background:rgba(126,232,250,.05);transform:none}
+.carrier-btn:hover{background:#f6f9ff;transform:none}
 .carrier-btn:active{transform:scale(.99)}
 
 /* section label upgrade */
@@ -2025,8 +1998,8 @@ select option{background:#1a2235;color:var(--text)}
 /* online badge upgrade */
 .online-badge{
   display:inline-flex;align-items:center;gap:.38rem;
-  background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);
-  color:#4ade80;padding:.26rem .75rem;border-radius:20px;
+  background:#f0fdf4;border:1px solid #86efac;
+  color:#15803d;padding:.26rem .75rem;border-radius:20px;
   font-size:.7rem;font-family:"Share Tech Mono",monospace;font-weight:600;
 }
 
@@ -2055,64 +2028,64 @@ select option{background:#1a2235;color:var(--text)}
   font-family:"Share Tech Mono",monospace;
   font-size:.68rem;padding:.25rem .75rem;border-radius:20px;margin-bottom:.95rem;
 }
-.sni-badge.ais{background:rgba(114,209,36,.12);border:1px solid rgba(114,209,36,.3);color:var(--ais)}
-.sni-badge.true{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:var(--true)}
-.sni-badge.ssh{background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3);color:var(--ssh)}
+.sni-badge.ais{background:#edf7e3;border:1px solid #b5e08a;color:#316808}
+.sni-badge.true{background:#fff0f0;border:1px solid #f5909a;color:#a6000c}
+.sni-badge.ssh{background:#e6f3fc;border:1px solid #82c0ee;color:#0c4f84}
 
 /* input upgrade */
 input,select{
-  background:rgba(255,255,255,.04);border:1.5px solid var(--border2);border-radius:11px;
+  background:#f6f9fc;border:1.5px solid #d8e2ee;border-radius:11px;
   padding:.6rem .9rem;color:var(--text);
   font-family:"Kanit",sans-serif;font-size:.88rem;outline:none;
   transition:border-color .2s,box-shadow .2s,background .2s;width:100%;
 }
-input:focus,select:focus{background:rgba(56,189,248,.05)}
+input:focus,select:focus{background:#fff}
 input.ais-focus:focus{border-color:#4d9a0e;box-shadow:0 0 0 3px rgba(77,154,14,.1)}
 input.true-focus:focus{border-color:#d80e1c;box-shadow:0 0 0 3px rgba(216,14,28,.09)}
-input.ssh-focus:focus{border-color:var(--ssh);box-shadow:0 0 0 3px rgba(56,189,248,.15)}
+input.ssh-focus:focus{border-color:#1568a6;box-shadow:0 0 0 3px rgba(21,104,166,.1)}
 input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,.1)}
 
 /* link-box upgrade */
 .link-box{
-  background:rgba(255,255,255,.04);border-radius:10px;padding:.7rem .9rem;
+  background:#f0f5fb;border-radius:10px;padding:.7rem .9rem;
   font-family:"Share Tech Mono",monospace;font-size:.62rem;
   word-break:break-all;line-height:1.75;margin-bottom:.75rem;
-  border:1px solid var(--border2);color:var(--text3);
+  border:1px solid #dde3ec;color:var(--text2);
 }
-.link-box.vless-link{border-left:3px solid var(--ais);color:var(--ais)}
-.link-box.npv-link{border-left:3px solid var(--ssh);color:var(--ssh)}
-.link-box.dark-link{border-left:3px solid var(--purple);color:var(--purple)}
+.link-box.vless-link{border-left:3px solid #4d9a0e;color:#316808}
+.link-box.npv-link{border-left:3px solid #1568a6;color:#0c4f84}
+.link-box.dark-link{border-left:3px solid #7c3aed;color:#5b21b6}
 
 /* copy buttons upgrade */
 .copy-btn{
   flex:1;min-width:110px;padding:.52rem .7rem;
-  border-radius:10px;border:1.5px solid var(--border2);
-  background:rgba(255,255,255,.04);font-family:"Rajdhani",sans-serif;font-size:.85rem;
+  border-radius:10px;border:1.5px solid var(--border);
+  background:#fff;font-family:"Rajdhani",sans-serif;font-size:.85rem;
   font-weight:700;letter-spacing:.06em;cursor:pointer;
   transition:all .18s;color:var(--text2);
 }
-.copy-btn.vless{border-color:var(--ais-bdr);color:var(--ais)}
-.copy-btn.vless:hover{background:rgba(114,209,36,.1)}
-.copy-btn.npv{border-color:var(--ssh-bdr);color:var(--ssh)}
-.copy-btn.npv:hover{background:rgba(56,189,248,.1)}
-.copy-btn.ssh-copy{border-color:var(--ssh-bdr);color:var(--ssh)}
-.copy-btn.ssh-copy:hover{background:rgba(56,189,248,.1)}
+.copy-btn.vless{border-color:#b5e08a;color:#316808}
+.copy-btn.vless:hover{background:#edf7e3;border-color:#4d9a0e}
+.copy-btn.npv{border-color:#82c0ee;color:#0c4f84}
+.copy-btn.npv:hover{background:#e6f3fc;border-color:#1568a6}
+.copy-btn.ssh-copy{border-color:#82c0ee;color:#0c4f84}
+.copy-btn.ssh-copy:hover{background:#e6f3fc;border-color:#1568a6}
 
 /* port tabs upgrade */
 .port-tab{
   flex:1;padding:.5rem;border-radius:10px;font-size:.8rem;cursor:pointer;
-  border:1.5px solid var(--border2);background:rgba(255,255,255,.03);color:var(--text2);
+  border:1.5px solid #d8e2ee;background:#f6f9fc;color:var(--text2);
   font-family:"Rajdhani",sans-serif;font-weight:600;transition:all .18s;
 }
-.port-tab.active-ssh{border-color:var(--ssh);background:rgba(56,189,248,.15);color:var(--ssh)}
+.port-tab.active-ssh{border-color:#1568a6;background:#e6f3fc;color:#0c4f84}
 
 /* action card upgrade */
 .action-card{
-  background:rgba(255,255,255,.03);border:1.5px solid var(--border2);border-radius:14px;
+  background:#f6f9fc;border:1.5px solid #d8e2ee;border-radius:14px;
   padding:.9rem .9rem;cursor:pointer;transition:all .18s;text-align:center;
 }
-.action-card:hover{border-color:var(--ssh);background:rgba(56,189,248,.08);transform:translateY(-1px)}
-.action-card.selected{border-color:var(--purple);background:rgba(167,139,250,.1);box-shadow:0 0 0 3px rgba(167,139,250,.12)}
+.action-card:hover{border-color:#1568a6;background:#e6f3fc;transform:translateY(-1px)}
+.action-card.selected{border-color:#7c3aed;background:#f5f3ff;box-shadow:0 0 0 3px rgba(124,58,237,.08)}
 
 /* result card upgrade */
 .result-card{
@@ -2121,7 +2094,8 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 }
 .result-card.show{display:block}
 
-/* bg: keep dark theme */
+/* bg upgrade */
+:root { --bg: #ebeff6; }
 .main{max-width:520px;margin:0 auto;padding:1.5rem 1rem 4rem;display:flex;flex-direction:column;gap:1.3rem}
 
 
@@ -2134,7 +2108,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
   transition:background .15s;
 }
 .online-user-row:last-child{border-bottom:none}
-.online-user-row:hover{background:rgba(126,232,250,.03)}
+.online-user-row:hover{background:#f6faff}
 .online-avatar{
   width:40px;height:40px;border-radius:12px;
   display:flex;align-items:center;justify-content:center;
@@ -2358,6 +2332,19 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
     </div>
 
 
+    <!-- Service Monitor -->
+    <div class="stat-card wide">
+      <div class="stat-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem">
+        <span>🛠 SERVICE MONITOR</span>
+        <button class="refresh-btn" id="svc-refresh-btn" onclick="loadServiceStatus()">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          เช็คสถานะ
+        </button>
+      </div>
+      <div id="svc-list">
+        <div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังตรวจสอบ...</div>
+      </div>
+    </div>
 
   </div><!-- /stats-grid -->
 
@@ -2429,18 +2416,9 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 ══════════════════════════════════════ -->
 <div class="tab-panel" id="tab-manage">
 <div class="main">
-
-  <!-- Filter tabs -->
-  <div class="port-tabs" style="margin-bottom:0">
-    <button class="port-tab active-ssh" id="mgmt-filter-vless" onclick="mgmtFilter('vless')">📡 VLESS / x-ui</button>
-    <button class="port-tab" id="mgmt-filter-ssh" onclick="mgmtFilter('ssh')">🔑 SSH Users</button>
-  </div>
-
-  <!-- VLESS panel -->
-  <div id="mgmt-vless-panel">
   <div class="mgmt-panel">
     <div class="mgmt-header">
-      <div class="mgmt-title">🔧 จัดการยูสเซอร์ทั้งหมด</div>
+      <div class="mgmt-title">🔧 จัดการยูสเซอร์ VLESS</div>
       <button class="refresh-btn" onclick="loadUserList()">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         โหลด
@@ -2456,30 +2434,6 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
       </div>
     </div>
   </div>
-  </div>
-
-  <!-- SSH panel -->
-  <div id="mgmt-ssh-panel" style="display:none">
-  <div class="mgmt-panel">
-    <div class="mgmt-header">
-      <div class="mgmt-title">🔑 จัดการ SSH Users</div>
-      <button class="refresh-btn" onclick="loadSSHUserList()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-        โหลด
-      </button>
-    </div>
-    <div class="search-bar">
-      <input type="text" id="ssh-search-input" placeholder="🔍 ค้นหา SSH username..." oninput="filterSSHUsers(this.value)">
-    </div>
-    <div class="user-list" id="ssh-user-list">
-      <div class="empty-state">
-        <div class="ei">🔑</div>
-        <div>กดปุ่ม "โหลด" เพื่อดึง SSH users</div>
-      </div>
-    </div>
-  </div>
-  </div>
-
 </div>
 </div>
 
@@ -2613,17 +2567,17 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
         <div class="field"><label>🔑 Password</label><input type="text" id="ssh-pass" placeholder="pass1234" class="ssh-focus"></div>
         <div class="field"><label>📅 วันใช้งาน</label><input type="number" id="ssh-days" value="30" min="1" class="ssh-focus"></div>
         <div class="field"><label>📱 IP Limit</label><input type="number" id="ssh-iplimit" value="2" min="1" class="ssh-focus"></div>
-
+        <div class="field span2" style="display:none" id="ssh-sni-field"><label>🌐 SNI / Host</label><input type="text" id="ssh-sni" placeholder="your-domain.com" class="ssh-focus"></div>
       </div>
       <div class="divider"></div>
-      <div style="margin-bottom:.6rem" id="ssh-app-row">
+      <div style="margin-bottom:.6rem">
         <label style="margin-bottom:.4rem;display:block">📱 แอพ Import Link</label>
         <div class="port-tabs">
           <button class="port-tab active-ssh" id="ssh-app-npv" onclick="sshSelApp('npv')">NpvTunnel</button>
           <button class="port-tab" id="ssh-app-dark" onclick="sshSelApp('dark')">DarkTunnel</button>
         </div>
       </div>
-      <div style="margin-bottom:.8rem" id="ssh-pro-row">
+      <div style="margin-bottom:.8rem">
         <label style="margin-bottom:.4rem;display:block">🌐 Operator / Payload</label>
         <div class="port-tabs">
           <button class="port-tab active-ssh pro-tab" id="ssh-pro-dtac" onclick="sshSelPro('dtac')">DTAC GAMING</button>
@@ -2729,7 +2683,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
         </div>
         <!-- Reset Traffic -->
         <div id="form-resettraffic" style="display:none">
-          <div style="background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);border-radius:10px;padding:.75rem .9rem;font-size:.82rem;color:#fb923c;margin-bottom:.8rem">
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:.75rem .9rem;font-size:.82rem;color:#92400e;margin-bottom:.8rem">
             ⚠️ การรีเซต Traffic จะเคลียร์ยอดใช้งาน Up/Down ของยูสนี้ให้กลับเป็น 0
           </div>
           <button class="submit-btn mgmt-btn" onclick="doAction('resettraffic')">🔃 รีเซต Traffic</button>
@@ -2748,52 +2702,6 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     MODAL: SSH USER MANAGEMENT
-══════════════════════════════════════ -->
-<div class="modal-overlay" id="modal-ssh-mgmt">
-  <div class="modal modal-mgmt">
-    <div class="modal-header">
-      <span class="modal-title">🔑 จัดการ SSH User: <span id="ssh-mgmt-name" style="color:var(--ssh)"></span></span>
-      <button class="modal-close" onclick="closeModal('ssh-mgmt')">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="udetail" style="margin-bottom:.9rem">
-        <div class="udetail-row">
-          <span class="dk">👤 Username</span>
-          <span class="dv" id="ssh-mgmt-name-detail"></span>
-        </div>
-        <div class="udetail-row">
-          <span class="dk">📅 หมดอายุ</span>
-          <span class="dv" id="ssh-mgmt-exp"></span>
-        </div>
-        <div class="udetail-row">
-          <span class="dk">🔌 Ports</span>
-          <span class="dv">Dropbear 143, 109</span>
-        </div>
-      </div>
-
-      <div class="divider"></div>
-
-      <!-- Renew -->
-      <div style="margin-bottom:.8rem">
-        <label style="margin-bottom:.45rem;display:block;font-family:'Share Tech Mono',monospace;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3)">📅 ต่ออายุ (วัน นับจากวันนี้)</label>
-        <div style="display:flex;gap:.5rem;align-items:center">
-          <input type="number" id="ssh-mgmt-days" value="30" min="1" class="ssh-focus" style="max-width:120px">
-          <button class="submit-btn ssh-btn" onclick="doSSHRenew()" style="margin-top:0;flex:1">🔄 ต่ออายุ</button>
-        </div>
-      </div>
-
-      <div class="divider"></div>
-
-      <!-- Delete -->
-      <button class="submit-btn danger-btn" onclick="doSSHDelete()" style="margin-top:.5rem">🗑️ ลบ SSH User ถาวร</button>
-
-      <div class="alert" id="ssh-mgmt-alert" style="display:none"></div>
-    </div>
-  </div>
-</div>
-
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
@@ -2807,14 +2715,12 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 ══════════════════════════════════════ */
 (function(){
   const SESSION_KEY = 'chaiya_auth';
-  const LOGIN_PAGE  = 'index.html';
+  const LOGIN_PAGE  = 'chaiya-login.html';
   const saved = sessionStorage.getItem(SESSION_KEY);
   if (!saved) { window.location.replace(LOGIN_PAGE); return; }
   try {
     const s = JSON.parse(saved);
-    // รองรับทั้ง token (ระบบใหม่) และ user/pass (ระบบเก่า)
-    const valid = (s.token || (s.user && s.pass)) && Date.now() < s.exp;
-    if (!valid) {
+    if (!s.user || !s.pass || Date.now() >= s.exp) {
       sessionStorage.removeItem(SESSION_KEY);
       window.location.replace(LOGIN_PAGE);
     }
@@ -2827,7 +2733,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 const CFG    = (typeof window.CHAIYA_CONFIG !== 'undefined') ? window.CHAIYA_CONFIG : {};
 const HOST   = CFG.host       || location.hostname;
 const XUI_API = '/xui-api';
-const SSH_API = '/api';
+const SSH_API = '/sshws-api';
 const TOK    = CFG.ssh_token  || '';
 
 const PROS = {
@@ -2855,7 +2761,6 @@ function switchTab(tab) {
   event.currentTarget.classList.add('active');
   if(tab==='dash') loadStats();
   if(tab==='online') loadOnlineUsers();
-  if(tab==='manage') loadUserList();
 }
 
 /* ══════════════════════════════════════
@@ -2915,36 +2820,25 @@ function copyToClipboard(text,btnId){
    x-ui API
 ══════════════════════════════════════ */
 async function xuiLogin(){
+  const SESSION_KEY = 'chaiya_auth';
   let user = CFG.xui_user||'admin', pass = CFG.xui_pass||'';
-  try{
-    const form=new URLSearchParams({username:user,password:pass});
-    const r=await fetch(XUI_API+'/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:form.toString()});
-    const d=await r.json(); _xuiCookieSet=!!d.success; return d.success;
-  }catch(e){ _xuiCookieSet=false; return false; }
+  try {
+    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY)||'{}');
+    if(s.user) user = s.user;
+    if(s.pass) pass = s.pass;
+  } catch(e){}
+  const form=new URLSearchParams({username:user,password:pass});
+  const r=await fetch(XUI_API+'/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:form.toString()});
+  const d=await r.json(); _xuiCookieSet=!!d.success; return d.success;
 }
 async function xuiPost(path,payload){
-  if(!_xuiCookieSet){ await xuiLogin(); }
+  if(!_xuiCookieSet)await xuiLogin();
   const r=await fetch(XUI_API+path,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const d=await r.json();
-  // cookie หมดอายุ — re-login แล้วลองใหม่
-  if(d&&d.success===false&&d.msg&&d.msg.includes('login')){
-    await xuiLogin();
-    const r2=await fetch(XUI_API+path,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    return r2.json();
-  }
-  return d;
+  return r.json();
 }
 async function xuiGet(path){
-  if(!_xuiCookieSet){ await xuiLogin(); }
-  const r=await fetch(XUI_API+path,{credentials:'include'});
-  const d=await r.json();
-  // cookie หมดอายุ — re-login แล้วลองใหม่
-  if(d&&d.success===false&&d.msg&&d.msg.includes('login')){
-    await xuiLogin();
-    const r2=await fetch(XUI_API+path,{credentials:'include'});
-    return r2.json();
-  }
-  return d;
+  if(!_xuiCookieSet)await xuiLogin();
+  const r=await fetch(XUI_API+path,{credentials:'include'}); return r.json();
 }
 async function getInboundId(port){
   const d=await xuiGet('/panel/api/inbounds/list');
@@ -3064,7 +2958,6 @@ function setBadge(ok,text){
    USER LIST
 ══════════════════════════════════════ */
 async function loadUserList(){
-  if(!_xuiCookieSet)await xuiLogin();
   const list=document.getElementById('user-list');
   list.innerHTML='<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังโหลด...</div>';
   try{
@@ -3101,9 +2994,7 @@ function renderUserList(users){
   const now=Date.now();
   list.innerHTML=users.map(u=>{
     const isAis=u.inboundPort===8080;
-    const isSsh=u.protocol==='ssh'||u.inboundPort===80||u.inboundPort===443;
-    const avatarClass=isAis?'ua-ais':isSsh?'ua-ssh':'ua-true';
-    const displayName=(u.email||'?')+(isSsh?'-ssh':'-vless');
+    const avatarClass=isAis?'ua-ais':'ua-true';
     const initial=(u.email||'?')[0].toUpperCase();
     let statusHtml='', expStr='';
     if(u.expiryTime===0){expStr='ไม่จำกัด';statusHtml='<span class="status-badge status-ok">✓ Active</span>'}
@@ -3114,26 +3005,16 @@ function renderUserList(users){
       else if(days<=3){expStr=`เหลือ ${days} วัน`;statusHtml=`<span class="status-badge status-exp">⚠ ${days}d</span>`}
       else{expStr=`${days} วัน`;statusHtml='<span class="status-badge status-ok">✓ Active</span>'}
     }
-    return `<button type="button" class="user-row" data-email="${u.email}" style="width:100%;text-align:left;border:none;background:none;cursor:pointer;">
+    return `<div class="user-row" onclick="openMgmtModal(${JSON.stringify(u.email)})">
       <div class="user-avatar ${avatarClass}">${initial}</div>
       <div class="user-info">
-        <div class="user-name">${displayName}</div>
+        <div class="user-name">${u.email}</div>
         <div class="user-meta">Port ${u.inboundPort} · ${expStr}</div>
       </div>
       ${statusHtml}
-    </button>`;
+    </div>`;
   }).join('');
 }
-
-document.addEventListener('DOMContentLoaded',function(){
-  var ul=document.getElementById('user-list');
-  if(ul){
-    ul.addEventListener('click',function(e){
-      var row=e.target.closest('.user-row');
-      if(row){var em=row.getAttribute('data-email');if(em)openMgmtModal(em);}
-    });
-  }
-});
 
 function filterUsers(q){
   const s=q.toLowerCase();
@@ -3238,7 +3119,7 @@ function openMgmtModal(email){
     expStr=new Date(u.expiryTime).toLocaleDateString('th-TH');
     expClass=diff<0?'dead':diff<259200000?'exp':'ok';
   }
-  const dataStr=u.totalGB>0?(u.totalGB/1073741824).toFixed(1)+' GB':'ไม่จำกัด';
+  const dataStr=u.totalGB>0?u.totalGB+' GB':'ไม่จำกัด';
   document.getElementById('mgmt-user-detail').innerHTML=`
     <div class="udetail-row"><span class="dk">👤 Username</span><span class="dv">${u.email}</span></div>
     <div class="udetail-row"><span class="dk">🔌 Port</span><span class="dv">${u.inboundPort}</span></div>
@@ -3314,28 +3195,16 @@ async function doAction(action){
       return;
     } else if(action==='delete'){
       const res=await xuiPost(`/panel/api/inbounds/${u.inboundId}/delClient/${u.uuid}`,{});
-      if(!res||!res.success){
-        throw new Error(res&&res.msg?res.msg:'ลบไม่สำเร็จ');
-      }
+      if(!res.success)throw new Error(res.msg||'ลบไม่สำเร็จ');
       setAlert('mgmt','✅ ลบยูสสำเร็จ','ok');
       setTimeout(()=>{closeModal('mgmt');loadUserList();},1500);
       return;
     }
 
-    // update client — x-ui API format
-    const updatedClients = clients.map((c,i)=>i===clientIdx?client:c);
-    const updatedSettings = {...settings, clients: updatedClients};
-    // ลอง updateClient ก่อน ถ้าไม่สำเร็จ fallback ไป update inbound ทั้งหมด
-    let res = await xuiPost(`/panel/api/inbounds/updateClient/${u.uuid}`,{
-      id: u.inboundId,
-      settings: JSON.stringify({clients:[client]})
-    });
-    if(!res||!res.success){
-      // fallback: update inbound ทั้งหมด
-      const ibFull = {...ib, settings: JSON.stringify(updatedSettings)};
-      res = await xuiPost(`/panel/api/inbounds/update/${u.inboundId}`, ibFull);
-    }
-    if(!res||!res.success)throw new Error(res&&res.msg?res.msg:'อัพเดทไม่สำเร็จ');
+    // update client
+    const payload={id:u.inboundId, settings:JSON.stringify({...settings,clients:clients.map((c,i)=>i===clientIdx?client:c)})};
+    const res=await xuiPost(`/panel/api/inbounds/updateClient/${u.uuid}`,payload);
+    if(!res.success)throw new Error(res.msg||'อัพเดทไม่สำเร็จ');
 
     setAlert('mgmt','✅ ดำเนินการสำเร็จ!','ok');
     await loadUserList();
@@ -3416,16 +3285,7 @@ function copyNpvDirect(carrier){
 function sshSelPort(port){
   _sshPort=port;
   ['80','443'].forEach(p=>{document.getElementById('ssh-tab-'+p).className='port-tab'+(String(port)===p?' active-ssh':'')});
-  const is443=port===443;
-  // port 443 ซ่อน app/pro selectors
-  const appRow=document.getElementById('ssh-app-row');
-  const proRow=document.getElementById('ssh-pro-row');
-  const linkBox=document.getElementById('ssh-import-link');
-  const copyImport=document.getElementById('ssh-copy-import');
-  if(appRow)appRow.style.display=is443?'none':'';
-  if(proRow)proRow.style.display=is443?'none':'';
-  if(linkBox)linkBox.style.display=is443?'none':'';
-  if(copyImport)copyImport.style.display=is443?'none':'';
+  document.getElementById('ssh-sni-field').style.display=port===443?'':'none';
 }
 function sshSelApp(app){
   _sshApp=app;
@@ -3449,15 +3309,12 @@ async function createSSH(){
   if(!pass)return setAlert('ssh','❌ กรุณาใส่ Password','err');
   setLoading('ssh',true); setAlert('ssh','','');
   try{
-    const r=await fetch(SSH_API+'/create',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},body:JSON.stringify({user,pass,exp_days:days,ip_limit:ipLimit,port:String(_sshPort)})});
+    const r=await fetch(SSH_API+'/api/create',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},body:JSON.stringify({user,pass,exp_days:days,ip_limit:ipLimit,port:String(_sshPort)})});
     const d=await r.json();
     if(!d.ok&&!d.success)throw new Error(d.error||d.msg||'สร้างไม่สำเร็จ');
     const pro=PROS[_sshPro];
+    const link=_sshApp==='npv'?buildNpvLink(user,pass,pro,_sshPort):buildDarkLink(user,pass,pro,_sshPort);
     const expDate=new Date(Date.now()+days*86400000).toLocaleDateString('th-TH');
-    let link='';
-    if(_sshPort!==443){
-      link=_sshApp==='npv'?buildNpvLink(user,pass,pro,_sshPort):buildDarkLink(user,pass,pro,_sshPort);
-    }
     _sshSaved={user,pass,days,ipLimit,port:_sshPort,expDate,link};
     showSSHResult(_sshSaved);
     setAlert('ssh',`✅ สร้าง SSH user "${user}" สำเร็จ!`,'ok');
@@ -3466,24 +3323,17 @@ async function createSSH(){
 }
 function showSSHResult(d){
   const isNpv=_sshApp==='npv';
-  const is443=d.port===443;
   document.getElementById('ssh-info').innerHTML=`
     <div class="info-row"><span class="info-key">👤 Username</span><span class="info-val">${d.user}</span></div>
     <div class="info-row"><span class="info-key">🔑 Password</span><span class="info-val pass">${d.pass}</span></div>
     <div class="info-row"><span class="info-key">🌐 Host</span><span class="info-val">${HOST}</span></div>
-    <div class="info-row"><span class="info-key">🔌 WS Port</span><span class="info-val">${d.port}${is443?' (WSS-SSL 🔒':' (HTTP-WS)'}</span></div>
+    <div class="info-row"><span class="info-key">🔌 WS Port</span><span class="info-val">${d.port}</span></div>
     <div class="info-row"><span class="info-key">🐻 Dropbear</span><span class="info-val">143, 109</span></div>
     <div class="info-row"><span class="info-key">📅 หมดอายุ</span><span class="info-val">${d.expDate}</span></div>
     <div class="info-row"><span class="info-key">📱 IP Limit</span><span class="info-val">${d.ipLimit} IP</span></div>
-    ${!is443?`<div class="info-row"><span class="info-key">📲 App</span><span class="info-val">${isNpv?'NpvTunnel':'DarkTunnel'}</span></div>`:''}
-    ${is443?`<div class="info-row"><span class="info-key">📂 WS Path</span><span class="info-val">/ssh/</span></div>`:''}`;
+    <div class="info-row"><span class="info-key">📲 App</span><span class="info-val">${isNpv?'NpvTunnel':'DarkTunnel'}</span></div>`;
   const lb=document.getElementById('ssh-import-link');
-  if(lb){
-    lb.style.display=is443?'none':'';
-    if(!is443){lb.textContent=d.link; lb.className='link-box '+(isNpv?'npv-link':'dark-link');}
-  }
-  const copyImport=document.getElementById('ssh-copy-import');
-  if(copyImport)copyImport.style.display=is443?'none':'';
+  lb.textContent=d.link; lb.className='link-box '+(isNpv?'npv-link':'dark-link');
   document.getElementById('ssh-result').classList.add('show');
   setTimeout(()=>document.getElementById('ssh-result').scrollIntoView({behavior:'smooth',block:'nearest'}),100);
 }
@@ -3521,124 +3371,13 @@ function renderQR(elId,text){
 ══════════════════════════════════════ */
 
 /* ══════════════════════════════════════
-   MANAGE TAB FILTER
-══════════════════════════════════════ */
-function mgmtFilter(type){
-  const isSSH=type==='ssh';
-  document.getElementById('mgmt-vless-panel').style.display=isSSH?'none':'';
-  document.getElementById('mgmt-ssh-panel').style.display=isSSH?'':'none';
-  document.getElementById('mgmt-filter-vless').className='port-tab'+(isSSH?'':' active-ssh');
-  document.getElementById('mgmt-filter-ssh').className='port-tab'+(isSSH?' active-ssh':'');
-  if(isSSH)loadSSHUserList();
-}
-
-/* ══════════════════════════════════════
-   SSH USER MANAGEMENT
-══════════════════════════════════════ */
-let _allSSHUsers=[], _filteredSSHUsers=[];
-
-async function loadSSHUserList(){
-  const list=document.getElementById('ssh-user-list');
-  if(!list)return;
-  list.innerHTML='<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังโหลด...</div>';
-  try{
-    const r=await fetch(SSH_API+'/list',{headers:{'X-Token':TOK,'Authorization':'Bearer '+TOK}});
-    const d=await r.json();
-    if(!d.ok&&!Array.isArray(d.users))throw new Error(d.error||'โหลดไม่สำเร็จ');
-    _allSSHUsers=d.users||[];
-    _filteredSSHUsers=[..._allSSHUsers];
-    renderSSHUserList(_filteredSSHUsers);
-  }catch(e){
-    list.innerHTML=`<div class="empty-state"><div class="ei">⚠️</div><div>${e.message}</div></div>`;
-  }
-}
-
-function renderSSHUserList(users){
-  const list=document.getElementById('ssh-user-list');
-  if(!list)return;
-  if(!users.length){list.innerHTML='<div class="empty-state"><div class="ei">🔑</div><div>ไม่พบ SSH users</div></div>';return;}
-  const now=Date.now();
-  list.innerHTML=users.map(u=>{
-    const expMs=u.exp?new Date(u.exp).getTime():0;
-    const diff=expMs>0?expMs-now:1;
-    const days=Math.ceil(diff/86400000);
-    let statusHtml='',expStr='ไม่จำกัด';
-    if(expMs>0){
-      expStr=new Date(u.exp).toLocaleDateString('th-TH');
-      if(diff<0){expStr='หมดอายุ';statusHtml='<span class="status-badge status-dead">✗ Expired</span>';}
-      else if(days<=3){statusHtml=`<span class="status-badge status-exp">⚠ ${days}d</span>`;}
-      else{statusHtml='<span class="status-badge status-ok">✓ Active</span>';}
-    }else{statusHtml='<span class="status-badge status-ok">✓ Active</span>';}
-    return `<button type="button" class="user-row" data-sshuser="${u.user}" style="width:100%;text-align:left;border:none;background:none;cursor:pointer;">
-      <div class="user-avatar ua-ssh">${(u.user||'?')[0].toUpperCase()}</div>
-      <div class="user-info">
-        <div class="user-name">${u.user}</div>
-        <div class="user-meta">SSH · Dropbear 143/109 · ${expStr}</div>
-      </div>
-      ${statusHtml}
-    </button>`;
-  }).join('');
-}
-
-function filterSSHUsers(q){
-  const s=q.toLowerCase();
-  _filteredSSHUsers=_allSSHUsers.filter(u=>(u.user||'').toLowerCase().includes(s));
-  renderSSHUserList(_filteredSSHUsers);
-}
-
-document.addEventListener('DOMContentLoaded',function(){
-  var sl=document.getElementById('ssh-user-list');
-  if(sl){sl.addEventListener('click',function(e){var row=e.target.closest('[data-sshuser]');if(row)openSSHMgmtModal(row.getAttribute('data-sshuser'));});}
-});
-
-function openSSHMgmtModal(username){
-  const u=_allSSHUsers.find(x=>x.user===username);
-  if(!u)return;
-  document.getElementById('ssh-mgmt-name').textContent=username;
-  document.getElementById('ssh-mgmt-exp').textContent=u.exp||'ไม่จำกัด';
-  document.getElementById('ssh-mgmt-days').value=30;
-  const al=document.getElementById('ssh-mgmt-alert');
-  al.style.display='none'; al.textContent='';
-  openModal('ssh-mgmt');
-}
-
-async function doSSHRenew(){
-  const name=document.getElementById('ssh-mgmt-name').textContent;
-  const days=parseInt(document.getElementById('ssh-mgmt-days').value)||30;
-  const al=document.getElementById('ssh-mgmt-alert');
-  al.style.display='none';
-  try{
-    const r=await fetch(SSH_API+'/renew',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},body:JSON.stringify({user:name,exp_days:days})});
-    const d=await r.json();
-    if(!d.ok&&!d.success)throw new Error(d.error||'ต่ออายุไม่สำเร็จ');
-    al.className='alert ok'; al.textContent='✅ ต่ออายุสำเร็จ!'; al.style.display='block';
-    setTimeout(()=>{closeModal('ssh-mgmt');loadSSHUserList();},1500);
-  }catch(e){al.className='alert err'; al.textContent='❌ '+e.message; al.style.display='block';}
-}
-
-async function doSSHDelete(){
-  const name=document.getElementById('ssh-mgmt-name').textContent;
-  if(!confirm(`ยืนยันลบ SSH user "${name}" ถาวร?`))return;
-  const al=document.getElementById('ssh-mgmt-alert');
-  al.style.display='none';
-  try{
-    const r=await fetch(SSH_API+'/delete',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},body:JSON.stringify({user:name})});
-    const d=await r.json();
-    if(!d.ok&&!d.success)throw new Error(d.error||'ลบไม่สำเร็จ');
-    al.className='alert ok'; al.textContent='✅ ลบสำเร็จ!'; al.style.display='block';
-    setTimeout(()=>{closeModal('ssh-mgmt');loadSSHUserList();},1200);
-  }catch(e){al.className='alert err'; al.textContent='❌ '+e.message; al.style.display='block';}
-}
-
-/* ══════════════════════════════════════
    SERVICE MONITOR
 ══════════════════════════════════════ */
 const SERVICES=[
   {name:'x-ui Panel',     icon:'📡', ports:[54321], type:'xui'},
-  {name:'Python SSH API', icon:'🐍', ports:[2095],  path:SSH_API+'/status', type:'http'},
+  {name:'Python SSH API', icon:'🐍', ports:[6789],  path:SSH_API+'/api/status', type:'http'},
   {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'port'},
   {name:'nginx / WS',     icon:'🌐', ports:[80],    path:'/', type:'http'},
-  {name:'SSH-WS-SSL',     icon:'🔒', ports:[443],   path:'https://'+HOST+'/', type:'http'},
   {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'port'},
 ];
 
@@ -3785,7 +3524,7 @@ async function checkService(s){
 
 function doLogout(){
   sessionStorage.removeItem('chaiya_auth');
-  window.location.replace('index.html');
+  window.location.replace('chaiya-login.html');
 }
 
 window.addEventListener('load',()=>{
@@ -3799,7 +3538,6 @@ window.addEventListener('load',()=>{
 </script>
 </body>
 </html>
-
 DASHV8EOF
 
 # patch paths ใน sshws.html
