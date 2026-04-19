@@ -2760,21 +2760,6 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
       </div>
     </div>
 
-
-    <!-- Service Monitor -->
-    <div class="stat-card wide">
-      <div class="stat-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem">
-        <span>🛠 SERVICE MONITOR</span>
-        <button class="refresh-btn" id="svc-refresh-btn" onclick="loadServiceStatus()">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          เช็คสถานะ
-        </button>
-      </div>
-      <div id="svc-list">
-        <div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังตรวจสอบ...</div>
-      </div>
-    </div>
-
   </div><!-- /stats-grid -->
 
   <div style="font-size:.72rem;color:var(--text3);text-align:center;font-family:'Share Tech Mono',monospace" id="last-update">อัพเดทล่าสุด: --</div>
@@ -4194,11 +4179,11 @@ function renderQR(elId,text){
    SERVICE MONITOR
 ══════════════════════════════════════ */
 const SERVICES=[
-  {name:'x-ui Panel',     icon:'📡', ports:[54321], type:'xui'},
-  {name:'Python SSH API', icon:'🐍', ports:[6789],  path:SSH_API+'/api/status', type:'http'},
+  {name:'x-ui Panel',     icon:'📡', ports:[2053],    type:'xui'},
+  {name:'Python SSH API', icon:'🐍', ports:[2095],    path:SSH_API+'/status', type:'http'},
   {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'port'},
-  {name:'nginx / WS',     icon:'🌐', ports:[80],    path:'/', type:'http'},
-  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'port'},
+  {name:'nginx / WS',     icon:'🌐', ports:[80,443],  path:'/', type:'http'},
+  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],    type:'port'},
 ];
 
 async function loadServiceStatus(){
@@ -4242,19 +4227,26 @@ async function checkService(s){
       ]);
       return {...base,state:r.ok||r.status<500?'up':'warn'};
     }
-    // port: ใช้ no-cors fetch — ถ้าไม่ timeout แสดงว่า port เปิดอยู่
+    // port: ตรวจผ่าน SSH API /status แทน port scan (browser block บาง port)
     if(s.type==='port'){
-      const checks=await Promise.all(s.ports.map(async p=>{
-        try{
-          await Promise.race([
-            fetch(`http://${HOST}:${p}/`,{method:'HEAD',mode:'no-cors'}),
-            new Promise((_,rej)=>setTimeout(()=>rej(),2800))
-          ]);
-          return true;
-        }catch{return false;}
-      }));
-      const up=checks.filter(Boolean).length;
-      return {...base,state:up===s.ports.length?'up':up>0?'warn':'down'};
+      try{
+        const r=await Promise.race([
+          fetch(SSH_API+'/status',{headers:{'X-Token':TOK,'Authorization':'Bearer '+TOK}}),
+          new Promise((_,rej)=>setTimeout(()=>rej(),4000))
+        ]);
+        const d=await r.json();
+        // SSH API /status บอก service status
+        if(s.name.includes('Dropbear')){
+          return {...base,state:d.services&&d.services.dropbear?'up':'down'};
+        }
+        if(s.name.includes('badvpn')){
+          return {...base,state:d.services&&d.services.badvpn?'up':'down'};
+        }
+        if(s.name.includes('WS')||s.name.includes('Stunnel')){
+          return {...base,state:d.services&&(d.services.sshws||d.services.tunnel)?'up':'down'};
+        }
+      }catch(e){}
+      return {...base,state:'down'};
     }
   }catch(e){}
   return base;
@@ -4597,16 +4589,26 @@ grep -q "alias menu=" /root/.bashrc 2>/dev/null || echo 'alias menu="/usr/local/
 source /root/.bashrc 2>/dev/null || true
 ok "menu command พร้อม — พิมพ์ 'menu' เพื่อดูรายละเอียด"
 
-# ── ทดสอบ API ─────────────────────────────────────────────────
+# ── รอ services พร้อม แล้วทดสอบ ────────────────────────────────
 echo ""
+info "รอ services เริ่มต้น..."
+sleep 4
+# restart เพื่อให้แน่ใจ
+systemctl restart chaiya-badvpn 2>/dev/null || true
+systemctl restart dropbear 2>/dev/null || true
+systemctl restart chaiya-ssh-api 2>/dev/null || true
+sleep 3
+
 echo -n "  ทดสอบ SSH API... "
-sleep 2
-API_TEST=$(curl -s --max-time 5 http://127.0.0.1:$SSH_API_PORT/api/status 2>/dev/null)
-if echo "$API_TEST" | grep -q '"ok"'; then
-  echo -e "${GREEN}✅ API ทำงานปกติ${NC}"
-else
-  echo -e "${YELLOW}⚠️  API อาจยังไม่พร้อม — ลอง: systemctl restart chaiya-ssh-api${NC}"
-fi
+for _t in 1 2 3 4 5; do
+  API_TEST=$(curl -s --max-time 3 http://127.0.0.1:$SSH_API_PORT/api/status 2>/dev/null)
+  if echo "$API_TEST" | grep -q '"ok"'; then
+    echo -e "${GREEN}✅ API ทำงานปกติ${NC}"
+    break
+  fi
+  [[ $_t -lt 5 ]] && sleep 2
+  [[ $_t -eq 5 ]] && echo -e "${YELLOW}⚠️  API อาจยังไม่พร้อม — ลอง: systemctl restart chaiya-ssh-api${NC}"
+done
 
 # ── SUMMARY ───────────────────────────────────────────────────
 if [[ $USE_SSL -eq 1 ]]; then
