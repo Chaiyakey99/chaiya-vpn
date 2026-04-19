@@ -21,6 +21,12 @@ echo -e "${NC}"
 echo -e "${GREEN}[INFO]${NC} กำลังอัพเดท Chaiya VPN Panel..."
 echo ""
 
+# ── สร้าง directories ก่อนทุกอย่าง ──
+mkdir -p /opt/chaiya-panel /opt/chaiya-ssh-api
+mkdir -p /etc/chaiya /etc/chaiya/exp /etc/chaiya/sshws-users
+mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+mkdir -p /etc/systemd/system
+
 cat > /opt/chaiya-ssh-api/app.py << 'APPEOF'
 #!/usr/bin/env python3
 """Chaiya SSH API v5 — domain support, no port in links"""
@@ -418,10 +424,6 @@ server {
 
 NGINXEOF
 
-
-# ── สร้าง directories ──
-mkdir -p /opt/chaiya-panel /opt/chaiya-ssh-api /etc/chaiya /etc/chaiya/exp /etc/chaiya/sshws-users
-mkdir -p /etc/systemd/system
 
 # ── สร้าง chaiya-ssh-api service ──
 cat > /etc/systemd/system/chaiya-ssh-api.service << 'SVCEOF'
