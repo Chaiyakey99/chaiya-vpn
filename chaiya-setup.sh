@@ -285,71 +285,41 @@ _add_inbound() {
 
 if [[ "$LOGIN_OK" == "true" ]]; then
   EXISTING_PORTS=$(_get_existing_ports)
-  VMESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-  VLESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-  echo "$VMESS_UUID" > /etc/chaiya/vmess-uuid.conf
-  echo "$VLESS_UUID" > /etc/chaiya/vless-uuid.conf
-  chmod 600 /etc/chaiya/vmess-uuid.conf /etc/chaiya/vless-uuid.conf
 
-  if ! echo "$EXISTING_PORTS" | grep -qw "8080"; then
-    PAYLOAD=$(python3 -c "
-import json
-p = {
-  'up':0,'down':0,'total':0,'remark':'CHAIYA-VMess-WS',
-  'enable':True,'expiryTime':0,'listen':'','port':8080,'protocol':'vmess',
-  'settings': json.dumps({
-    'clients':[{'id':'${VMESS_UUID}','alterId':0,'email':'chaiya-default',
-      'limitIpCount':2,'totalGB':0,'expiryTime':0,'enable':True,'tgId':'','subId':''}]
-  }),
-  'streamSettings': json.dumps({
-    'network':'ws','security':'none',
-    'wsSettings':{'path':'/chaiya','headers':{}}
-  }),
-  'sniffing': json.dumps({'enabled':True,'destOverride':['http','tls','quic','fakedns']}),
-  'tag':'inbound-8080'
-}
-print(json.dumps(p))
-")
-    _add_inbound "$PAYLOAD"
-    ok "VMess-WS inbound พร้อม (port 8080, path /chaiya)"
-  else
-    ok "VMess-WS มีอยู่แล้ว (port 8080)"
-  fi
+  python3 << PYEOF
+import sqlite3, uuid, json, os
 
-  if ! echo "$EXISTING_PORTS" | grep -qw "8880"; then
-    PAYLOAD=$(python3 -c "
-import json
-p = {
-  'up':0,'down':0,'total':0,'remark':'CHAIYA-VLESS-WS',
-  'enable':True,'expiryTime':0,'listen':'','port':8880,'protocol':'vless',
-  'settings': json.dumps({
-    'clients':[{'id':'${VLESS_UUID}','flow':'','email':'chaiya-default',
-      'limitIpCount':2,'totalGB':0,'expiryTime':0,'enable':True,'tgId':'','subId':''}],
-    'decryption':'none','fallbacks':[]
-  }),
-  'streamSettings': json.dumps({
-    'network':'ws','security':'none',
-    'wsSettings':{'path':'/chaiya','headers':{}}
-  }),
-  'sniffing': json.dumps({'enabled':True,'destOverride':['http','tls','quic','fakedns']}),
-  'tag':'inbound-8880'
-}
-print(json.dumps(p))
-")
-    _add_inbound "$PAYLOAD"
-    ok "VLESS-WS inbound พร้อม (port 8880, path /chaiya)"
-  else
-    ok "VLESS-WS มีอยู่แล้ว (port 8880)"
-  fi
+DB = '/etc/x-ui/x-ui.db'
+con = sqlite3.connect(DB)
+existing = [r[0] for r in con.execute("SELECT port FROM inbounds").fetchall()]
+
+inbounds = [
+  (8080, 'AIS-กันรั่ว',  'cj-ebb.speedtest.net',          'inbound-8080'),
+  (8880, 'TRUE-VDO',     'true-internet.zoom.xyz.services', 'inbound-8880'),
+]
+
+for port, remark, host, tag in inbounds:
+  if port in existing:
+    print(f"[OK] {remark} มีอยู่แล้ว (port {port})")
+    continue
+  uid = str(uuid.uuid4())
+  settings = json.dumps({"clients":[{"id":uid,"flow":"","email":"chaiya-default","limitIp":2,"totalGB":0,"expiryTime":0,"enable":True,"tgId":"","subId":""}],"decryption":"none","fallbacks":[]})
+  stream   = json.dumps({"network":"ws","security":"none","wsSettings":{"path":"/vless","headers":{"Host":host}}})
+  sniffing = json.dumps({"enabled":True,"destOverride":["http","tls","quic","fakedns"]})
+  con.execute("INSERT INTO inbounds (user_id,up,down,total,remark,enable,expiry_time,listen,port,protocol,settings,stream_settings,tag,sniffing) VALUES (1,0,0,0,?,1,0,'',?,'vless',?,?,?,?)",
+    (remark, port, settings, stream, tag, sniffing))
+  key = 'ais' if port==8080 else 'true'
+  open(f'/etc/chaiya/{key}-uuid.conf','w').write(uid)
+  print(f"[OK] VLESS {remark} inbound พร้อม (port {port})")
+
+con.commit()
+con.close()
+PYEOF
 
   systemctl restart x-ui 2>/dev/null || true
   sleep 2
 else
   warn "Login x-ui ไม่สำเร็จ — ข้าม inbound setup"
-  VMESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-  VLESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-  echo "$VMESS_UUID" > /etc/chaiya/vmess-uuid.conf
-  echo "$VLESS_UUID" > /etc/chaiya/vless-uuid.conf
 fi
 rm -f "$XUI_COOKIE"
 
@@ -1178,7 +1148,6 @@ cat > /opt/chaiya-panel/sshws.html << 'DASHV8EOF'
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<script src="config.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CHAIYA V2RAY PRO MAX — Dashboard</title>
@@ -1540,7 +1509,7 @@ body{
 .user-list::-webkit-scrollbar{width:4px}
 .user-list::-webkit-scrollbar-thumb{background:rgba(0,0,0,.1);border-radius:2px}
 
-.user-row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+.user-row{
   padding:.75rem 1.2rem;
   border-bottom:1px solid var(--border);
   display:flex;align-items:center;gap:.8rem;
@@ -1827,41 +1796,50 @@ select option{background:#fff}
 ══════════════════════════════════════ */
 .site-header{
   text-align:center;
-  padding:2rem 1.5rem 1.6rem;
-  background:linear-gradient(160deg,#152515 0%,#0e1e2e 55%,#18182e 100%);
-  border-bottom:1px solid rgba(255,255,255,.05);
+  padding:2.2rem 1.5rem 1.8rem;
+  background:linear-gradient(175deg,#0a0f1a 0%,#0d1520 55%,#111820 100%);
+  border-bottom:1px solid rgba(255,255,255,.06);
   position:relative;overflow:hidden;
 }
 .site-header::before{
-  content:"";position:absolute;top:-60px;left:50%;transform:translateX(-50%);
-  width:380px;height:200px;
-  background:radial-gradient(ellipse,rgba(80,160,20,.18) 0%,transparent 70%);
-  pointer-events:none;
+  content:'';position:absolute;inset:0;
+  background:
+    radial-gradient(ellipse 60% 40% at 20% 50%,rgba(0,180,255,.07) 0%,transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 50%,rgba(180,0,255,.07) 0%,transparent 70%),
+    radial-gradient(ellipse 80% 60% at 50% 120%,rgba(0,255,150,.06) 0%,transparent 65%);
+  pointer-events:none;animation:hdrGlow 8s ease-in-out infinite alternate;
 }
 .site-logo{
   font-family:"Share Tech Mono",monospace;
-  font-size:.6rem;letter-spacing:.35em;
-  color:rgba(100,200,50,.65);
-  margin-bottom:.45rem;
-  display:flex;align-items:center;justify-content:center;gap:.7rem;
-  position:relative;z-index:1;
+  font-size:.6rem;letter-spacing:.38em;
+  color:rgba(160,220,255,.5);
+  margin-bottom:.5rem;
+  display:flex;align-items:center;justify-content:center;gap:.75rem;
+  position:relative;z-index:2;
 }
 .site-logo::before,.site-logo::after{
-  content:"";display:inline-block;height:1px;width:42px;
-  background:linear-gradient(90deg,transparent,rgba(100,200,50,.45));
+  content:"";display:inline-block;height:1px;width:44px;
+  background:linear-gradient(90deg,transparent,rgba(100,180,255,.35));
 }
-.site-logo::after{background:linear-gradient(90deg,rgba(100,200,50,.45),transparent)}
+.site-logo::after{background:linear-gradient(90deg,rgba(100,180,255,.35),transparent)}
 .site-title{
-  font-family:"Rajdhani",sans-serif;font-size:2.4rem;font-weight:700;letter-spacing:.08em;
-  color:#eef6ff;position:relative;z-index:1;line-height:1.1;
+  font-family:"Rajdhani",sans-serif;font-size:2.45rem;font-weight:700;
+  letter-spacing:.09em;color:#e8f4ff;
+  position:relative;z-index:2;line-height:1.1;
+  text-shadow:0 0 30px rgba(80,160,255,.2);
 }
-.site-title span{color:#72d124;text-shadow:0 0 22px rgba(100,200,30,.4)}
+.site-title .rgb-word{
+  background:linear-gradient(90deg,#7ee8fa,#80ff72,#7ee8fa);
+  background-size:200% auto;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:rgbShift 4s linear infinite;
+}
 .site-sub{
-  font-size:.72rem;color:rgba(255,255,255,.35);margin-top:.4rem;
+  font-size:.7rem;color:rgba(255,255,255,.3);margin-top:.4rem;
   font-family:"Share Tech Mono",monospace;letter-spacing:.07em;
-  position:relative;z-index:1;
+  position:relative;z-index:2;
 }
-.site-sub .dot{margin:0 .4rem;color:rgba(110,200,50,.45)}
+.site-sub .dot{margin:0 .4rem;color:rgba(130,200,255,.35)}
 
 /* ══════════════════════════════════════
    TAB NAV UPGRADE
@@ -2293,6 +2271,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
         </div>
         <div style="flex:1">
           <div style="font-size:.78rem;color:var(--text2)" id="xui-ver">เวอร์ชัน: --</div>
+          <div style="font-size:.72rem;color:var(--green);font-weight:600;margin-top:.2rem" id="xui-admin"></div>
           <div style="font-size:.72rem;color:var(--text3);font-family:'Share Tech Mono',monospace" id="xui-traffic">Traffic inbounds: --</div>
         </div>
       </div>
@@ -2314,19 +2293,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
     </div>
 
 
-    <!-- Service Monitor -->
-    <div class="stat-card wide">
-      <div class="stat-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem">
-        <span>🛠 SERVICE MONITOR</span>
-        <button class="refresh-btn" id="svc-refresh-btn" onclick="loadServiceStatus()">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          เช็คสถานะ
-        </button>
-      </div>
-      <div id="svc-list">
-        <div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังตรวจสอบ...</div>
-      </div>
-    </div>
+
 
   </div><!-- /stats-grid -->
 
@@ -2697,14 +2664,12 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 ══════════════════════════════════════ */
 (function(){
   const SESSION_KEY = 'chaiya_auth';
-  const LOGIN_PAGE  = 'index.html';
+  const LOGIN_PAGE  = 'chaiya-login.html';
   const saved = sessionStorage.getItem(SESSION_KEY);
   if (!saved) { window.location.replace(LOGIN_PAGE); return; }
   try {
     const s = JSON.parse(saved);
-    // รองรับทั้ง token (ระบบใหม่) และ user/pass (ระบบเก่า)
-    const valid = (s.token || (s.user && s.pass)) && Date.now() < s.exp;
-    if (!valid) {
+    if (!s.user || !s.pass || Date.now() >= s.exp) {
       sessionStorage.removeItem(SESSION_KEY);
       window.location.replace(LOGIN_PAGE);
     }
@@ -2717,7 +2682,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 const CFG    = (typeof window.CHAIYA_CONFIG !== 'undefined') ? window.CHAIYA_CONFIG : {};
 const HOST   = CFG.host       || location.hostname;
 const XUI_API = '/xui-api';
-const SSH_API = '/api';
+const SSH_API = '/sshws-api';
 const TOK    = CFG.ssh_token  || '';
 
 const PROS = {
@@ -2745,7 +2710,6 @@ function switchTab(tab) {
   event.currentTarget.classList.add('active');
   if(tab==='dash') loadStats();
   if(tab==='online') loadOnlineUsers();
-  if(tab==='manage') loadUserList();
 }
 
 /* ══════════════════════════════════════
@@ -2807,7 +2771,11 @@ function copyToClipboard(text,btnId){
 async function xuiLogin(){
   const SESSION_KEY = 'chaiya_auth';
   let user = CFG.xui_user||'admin', pass = CFG.xui_pass||'';
-
+  try {
+    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY)||'{}');
+    if(s.user) user = s.user;
+    if(s.pass) pass = s.pass;
+  } catch(e){}
   const form=new URLSearchParams({username:user,password:pass});
   const r=await fetch(XUI_API+'/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:form.toString()});
   const d=await r.json(); _xuiCookieSet=!!d.success; return d.success;
@@ -2909,7 +2877,9 @@ async function loadStats(){
 
       /* x-ui version */
       setBadge(true,'ออนไลน์');
-      document.getElementById('xui-ver').textContent='เวอร์ชัน: '+(o.xrayVersion||'--');
+      document.getElementById('xui-ver').textContent='เวอร์ชัน: '+(o.appVersion||o.xrayVersion||'--');
+      const adminEl=document.getElementById('xui-admin');
+      if(adminEl)adminEl.textContent='🤫ADMIN: CHAIYA😆';
     }
 
     /* ── 2. Inbound count ── */
@@ -2939,7 +2909,6 @@ function setBadge(ok,text){
    USER LIST
 ══════════════════════════════════════ */
 async function loadUserList(){
-  if(!_xuiCookieSet)await xuiLogin();
   const list=document.getElementById('user-list');
   list.innerHTML='<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังโหลด...</div>';
   try{
@@ -2987,26 +2956,16 @@ function renderUserList(users){
       else if(days<=3){expStr=`เหลือ ${days} วัน`;statusHtml=`<span class="status-badge status-exp">⚠ ${days}d</span>`}
       else{expStr=`${days} วัน`;statusHtml='<span class="status-badge status-ok">✓ Active</span>'}
     }
-    return `<button type="button" class="user-row" data-email="${u.email}" style="width:100%;text-align:left;border:none;background:none;cursor:pointer;">
+    return `<div class="user-row" onclick="openMgmtModal(${JSON.stringify(u.email)})">
       <div class="user-avatar ${avatarClass}">${initial}</div>
       <div class="user-info">
         <div class="user-name">${u.email}</div>
         <div class="user-meta">Port ${u.inboundPort} · ${expStr}</div>
       </div>
       ${statusHtml}
-    </button>`;
+    </div>`;
   }).join('');
 }
-
-document.addEventListener('DOMContentLoaded',function(){
-  var ul=document.getElementById('user-list');
-  if(ul){
-    ul.addEventListener('click',function(e){
-      var row=e.target.closest('.user-row');
-      if(row){var em=row.getAttribute('data-email');if(em)openMgmtModal(em);}
-    });
-  }
-});
 
 function filterUsers(q){
   const s=q.toLowerCase();
@@ -3368,9 +3327,9 @@ function renderQR(elId,text){
 const SERVICES=[
   {name:'x-ui Panel',     icon:'📡', ports:[54321], type:'xui'},
   {name:'Python SSH API', icon:'🐍', ports:[6789],  path:SSH_API+'/api/status', type:'http'},
-  {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'port'},
+  {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'api', key:'dropbear'},
   {name:'nginx / WS',     icon:'🌐', ports:[80],    path:'/', type:'http'},
-  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'port'},
+  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'api', key:'badvpn'},
 ];
 
 async function loadServiceStatus(){
@@ -3415,6 +3374,13 @@ async function checkService(s){
       return {...base,state:r.ok||r.status<500?'up':'warn'};
     }
     // port: ใช้ no-cors fetch — ถ้าไม่ timeout แสดงว่า port เปิดอยู่
+    if(s.type==='api'){
+      try{
+        const r=await fetch('/api/status');
+        const d=await r.json();
+        return {...base,state:(d.services&&d.services[s.key])?'up':'down'};
+      }catch{return base;}
+    }
     if(s.type==='port'){
       const checks=await Promise.all(s.ports.map(async p=>{
         try{
@@ -3516,7 +3482,7 @@ async function checkService(s){
 
 function doLogout(){
   sessionStorage.removeItem('chaiya_auth');
-  window.location.replace('index.html');
+  window.location.replace('chaiya-login.html');
 }
 
 window.addEventListener('load',()=>{
@@ -3685,6 +3651,29 @@ fi
 
 rm -f /etc/nginx/sites-enabled/chaiya-http 2>/dev/null || true
 ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/
+
+# เพิ่ม port 2535 proxy → x-ui
+grep -q "listen 2535" /etc/nginx/sites-available/chaiya 2>/dev/null || cat >> /etc/nginx/sites-available/chaiya << NGINXEOF
+
+server {
+    listen 2535 ssl http2;
+    server_name $DOMAIN;
+    ssl_certificate     $SSL_CERT;
+    ssl_certificate_key $SSL_KEY;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    location / {
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Cookie \$http_cookie;
+        proxy_read_timeout 60s;
+    }
+}
+NGINXEOF
+ufw allow 2535/tcp &>/dev/null || true
+
 nginx -t &>/dev/null && systemctl restart nginx && ok "Nginx พร้อม" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
 
 # ── CERTBOT AUTO-RENEW ─────────────────────────────────────────
@@ -3746,7 +3735,7 @@ echo -e "  └──────────────────────
 echo ""
 echo -e "${B}  ┌─ 🔗 Access URLs ─────────────────────────────┐${N}"
 echo -e "  │  Panel URL    : ${C}${B}$PANEL_URL${N}"
-echo -e "  │  3x-ui Panel  : ${C}http://$SERVER_IP:$XUI_PORT${N}"
+echo -e "  │  3x-ui Panel  : ${C}https://$HOST_DISPLAY:2535${N}"
 echo -e "  │  (via domain) : ${C}${PANEL_URL}/xui-api/${N}"
 echo -e "  └──────────────────────────────────────────────┘"
 echo ""
@@ -3794,6 +3783,24 @@ fi
 echo -e "  └──────────────────────────────────────────────┘"
 echo ""
 echo -e "  เปิด Panel ได้เลย: ${C}${B}$PANEL_URL${N}"
+echo ""
+echo -e "  ─────────────────────────────────────────────"
+echo -e "  [P] เปลี่ยนรหัสผ่าน Panel Login"
+echo -e "  ─────────────────────────────────────────────"
+echo -ne "  กด P แล้ว Enter เพื่อเปลี่ยนรหัส (หรือ Enter เพื่อข้าม): "
+read -r _choice
+if [[ "$_choice" == "p" || "$_choice" == "P" ]]; then
+  read -rsp "  รหัสผ่านใหม่: " _np; echo
+  read -rsp "  ยืนยันรหัสผ่าน: " _np2; echo
+  if [[ -z "$_np" ]]; then
+    echo -e "  ${R}❌ รหัสผ่านห้ามว่าง${N}"
+  elif [[ "$_np" != "$_np2" ]]; then
+    echo -e "  ${R}❌ รหัสผ่านไม่ตรงกัน${N}"
+  else
+    echo -n "$_np" | python3 -c "import hashlib,sys; open('/etc/chaiya/panel-pass.hash','w').write(hashlib.sha256(sys.stdin.read().encode()).hexdigest())"
+    echo -e "  ${G}✅ เปลี่ยนรหัสผ่านสำเร็จ${N}"
+  fi
+fi
 echo ""
 echo -e "${G}${B}════════════════════════════════════════════════${N}"
 MENUEOF
