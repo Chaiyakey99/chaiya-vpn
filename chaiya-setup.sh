@@ -526,7 +526,10 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         elif self.path == '/api/users':
-            respond(self, 200, {"users": list_users()})
+            respond(self, 200, {"ok": True, "users": list_users()})
+
+        elif self.path == '/api/list':
+            respond(self, 200, {"ok": True, "users": list_users()})
 
         elif self.path == '/api/info':
             xui_port_f = '/etc/chaiya/xui-port.conf'
@@ -640,6 +643,37 @@ class Handler(BaseHTTPRequestHandler):
                 with open(db, 'w') as f: f.writelines(lines)
             remove_xui_client(user)
             respond(self, 200, {'ok': True})
+
+        elif self.path == '/api/renew':
+            user = data.get('user', '').strip()
+            exp_days = int(data.get('exp_days', 30))
+            if not user:
+                return respond(self, 400, {'error': 'user required'})
+            exp = (datetime.date.today() + datetime.timedelta(days=exp_days)).strftime('%Y-%m-%d')
+            run_cmd(f"chage -E {exp} {user} 2>/dev/null || true")
+            os.makedirs('/etc/chaiya/exp', exist_ok=True)
+            with open(f'/etc/chaiya/exp/{user}', 'w') as f:
+                f.write(exp)
+            # update users.db
+            db = '/etc/chaiya/sshws-users/users.db'
+            if os.path.exists(db):
+                lines = open(db).readlines()
+                updated = []
+                found = False
+                for l in lines:
+                    parts = l.strip().split()
+                    if parts and parts[0] == user:
+                        if len(parts) >= 3:
+                            parts[1] = str(exp_days)
+                            parts[2] = exp
+                        updated.append(' '.join(parts) + '\n')
+                        found = True
+                    else:
+                        updated.append(l)
+                if not found:
+                    updated.append(f"{user} {exp_days} {exp} 0 2\n")
+                with open(db, 'w') as f: f.writelines(updated)
+            respond(self, 200, {'ok': True, 'user': user, 'exp': exp})
 
         elif self.path == '/api/service':
             action = data.get('action', '')
@@ -1758,8 +1792,6 @@ select option{background:#1a2235;color:var(--text)}
 .action-icon{font-size:1.4rem;margin-bottom:.3rem}
 .action-name{font-family:'Rajdhani',sans-serif;font-size:.9rem;font-weight:700;color:var(--text)}
 .action-desc{font-size:.7rem;color:var(--text3);margin-top:.15rem}
-
-/* user detail panel */
 .udetail{
   background:rgba(255,255,255,.03);border-radius:12px;padding:.85rem 1rem;
   border:1px solid var(--border2);margin-bottom:.9rem;
@@ -2033,45 +2065,45 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 
 /* link-box upgrade */
 .link-box{
-  background:#f0f5fb;border-radius:10px;padding:.7rem .9rem;
+  background:rgba(255,255,255,.04);border-radius:10px;padding:.7rem .9rem;
   font-family:"Share Tech Mono",monospace;font-size:.62rem;
   word-break:break-all;line-height:1.75;margin-bottom:.75rem;
-  border:1px solid #dde3ec;color:var(--text2);
+  border:1px solid var(--border2);color:var(--text3);
 }
-.link-box.vless-link{border-left:3px solid #4d9a0e;color:#316808}
-.link-box.npv-link{border-left:3px solid #1568a6;color:#0c4f84}
-.link-box.dark-link{border-left:3px solid #7c3aed;color:#5b21b6}
+.link-box.vless-link{border-left:3px solid var(--ais);color:var(--ais)}
+.link-box.npv-link{border-left:3px solid var(--ssh);color:var(--ssh)}
+.link-box.dark-link{border-left:3px solid var(--purple);color:var(--purple)}
 
 /* copy buttons upgrade */
 .copy-btn{
   flex:1;min-width:110px;padding:.52rem .7rem;
-  border-radius:10px;border:1.5px solid var(--border);
-  background:#fff;font-family:"Rajdhani",sans-serif;font-size:.85rem;
+  border-radius:10px;border:1.5px solid var(--border2);
+  background:rgba(255,255,255,.04);font-family:"Rajdhani",sans-serif;font-size:.85rem;
   font-weight:700;letter-spacing:.06em;cursor:pointer;
   transition:all .18s;color:var(--text2);
 }
-.copy-btn.vless{border-color:#b5e08a;color:#316808}
-.copy-btn.vless:hover{background:#edf7e3;border-color:#4d9a0e}
-.copy-btn.npv{border-color:#82c0ee;color:#0c4f84}
-.copy-btn.npv:hover{background:#e6f3fc;border-color:#1568a6}
-.copy-btn.ssh-copy{border-color:#82c0ee;color:#0c4f84}
-.copy-btn.ssh-copy:hover{background:#e6f3fc;border-color:#1568a6}
+.copy-btn.vless{border-color:var(--ais-bdr);color:var(--ais)}
+.copy-btn.vless:hover{background:rgba(114,209,36,.1)}
+.copy-btn.npv{border-color:var(--ssh-bdr);color:var(--ssh)}
+.copy-btn.npv:hover{background:rgba(56,189,248,.1)}
+.copy-btn.ssh-copy{border-color:var(--ssh-bdr);color:var(--ssh)}
+.copy-btn.ssh-copy:hover{background:rgba(56,189,248,.1)}
 
 /* port tabs upgrade */
 .port-tab{
   flex:1;padding:.5rem;border-radius:10px;font-size:.8rem;cursor:pointer;
-  border:1.5px solid #d8e2ee;background:#f6f9fc;color:var(--text2);
+  border:1.5px solid var(--border2);background:rgba(255,255,255,.03);color:var(--text2);
   font-family:"Rajdhani",sans-serif;font-weight:600;transition:all .18s;
 }
-.port-tab.active-ssh{border-color:#1568a6;background:#e6f3fc;color:#0c4f84}
+.port-tab.active-ssh{border-color:var(--ssh);background:rgba(56,189,248,.15);color:var(--ssh)}
 
 /* action card upgrade */
 .action-card{
-  background:#f6f9fc;border:1.5px solid #d8e2ee;border-radius:14px;
+  background:rgba(255,255,255,.03);border:1.5px solid var(--border2);border-radius:14px;
   padding:.9rem .9rem;cursor:pointer;transition:all .18s;text-align:center;
 }
-.action-card:hover{border-color:#1568a6;background:#e6f3fc;transform:translateY(-1px)}
-.action-card.selected{border-color:#7c3aed;background:#f5f3ff;box-shadow:0 0 0 3px rgba(124,58,237,.08)}
+.action-card:hover{border-color:var(--ssh);background:rgba(56,189,248,.08);transform:translateY(-1px)}
+.action-card.selected{border-color:var(--purple);background:rgba(167,139,250,.1);box-shadow:0 0 0 3px rgba(167,139,250,.12)}
 
 /* result card upgrade */
 .result-card{
@@ -2080,8 +2112,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 }
 .result-card.show{display:block}
 
-/* bg upgrade */
-:root { --bg: #ebeff6; }
+/* bg: keep dark theme */
 .main{max-width:520px;margin:0 auto;padding:1.5rem 1rem 4rem;display:flex;flex-direction:column;gap:1.3rem}
 
 
@@ -2094,7 +2125,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
   transition:background .15s;
 }
 .online-user-row:last-child{border-bottom:none}
-.online-user-row:hover{background:#f6faff}
+.online-user-row:hover{background:rgba(126,232,250,.03)}
 .online-avatar{
   width:40px;height:40px;border-radius:12px;
   display:flex;align-items:center;justify-content:center;
@@ -2389,9 +2420,18 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 ══════════════════════════════════════ -->
 <div class="tab-panel" id="tab-manage">
 <div class="main">
+
+  <!-- Filter tabs -->
+  <div class="port-tabs" style="margin-bottom:0">
+    <button class="port-tab active-ssh" id="mgmt-filter-vless" onclick="mgmtFilter('vless')">📡 VLESS / x-ui</button>
+    <button class="port-tab" id="mgmt-filter-ssh" onclick="mgmtFilter('ssh')">🔑 SSH Users</button>
+  </div>
+
+  <!-- VLESS panel -->
+  <div id="mgmt-vless-panel">
   <div class="mgmt-panel">
     <div class="mgmt-header">
-      <div class="mgmt-title">🔧 จัดการยูสเซอร์ VLESS</div>
+      <div class="mgmt-title">🔧 จัดการยูสเซอร์ทั้งหมด</div>
       <button class="refresh-btn" onclick="loadUserList()">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         โหลด
@@ -2407,6 +2447,30 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
       </div>
     </div>
   </div>
+  </div>
+
+  <!-- SSH panel -->
+  <div id="mgmt-ssh-panel" style="display:none">
+  <div class="mgmt-panel">
+    <div class="mgmt-header">
+      <div class="mgmt-title">🔑 จัดการ SSH Users</div>
+      <button class="refresh-btn" onclick="loadSSHUserList()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        โหลด
+      </button>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="ssh-search-input" placeholder="🔍 ค้นหา SSH username..." oninput="filterSSHUsers(this.value)">
+    </div>
+    <div class="user-list" id="ssh-user-list">
+      <div class="empty-state">
+        <div class="ei">🔑</div>
+        <div>กดปุ่ม "โหลด" เพื่อดึง SSH users</div>
+      </div>
+    </div>
+  </div>
+  </div>
+
 </div>
 </div>
 
@@ -2671,6 +2735,52 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
       </div>
 
       <div class="alert" id="mgmt-alert"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     MODAL: SSH USER MANAGEMENT
+══════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-ssh-mgmt">
+  <div class="modal modal-mgmt">
+    <div class="modal-header">
+      <span class="modal-title">🔑 จัดการ SSH User: <span id="ssh-mgmt-name" style="color:var(--ssh)"></span></span>
+      <button class="modal-close" onclick="closeModal('ssh-mgmt')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="udetail" style="margin-bottom:.9rem">
+        <div class="udetail-row">
+          <span class="dk">👤 Username</span>
+          <span class="dv" id="ssh-mgmt-name-detail"></span>
+        </div>
+        <div class="udetail-row">
+          <span class="dk">📅 หมดอายุ</span>
+          <span class="dv" id="ssh-mgmt-exp"></span>
+        </div>
+        <div class="udetail-row">
+          <span class="dk">🔌 Ports</span>
+          <span class="dv">Dropbear 143, 109</span>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Renew -->
+      <div style="margin-bottom:.8rem">
+        <label style="margin-bottom:.45rem;display:block;font-family:'Share Tech Mono',monospace;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3)">📅 ต่ออายุ (วัน นับจากวันนี้)</label>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input type="number" id="ssh-mgmt-days" value="30" min="1" class="ssh-focus" style="max-width:120px">
+          <button class="submit-btn ssh-btn" onclick="doSSHRenew()" style="margin-top:0;flex:1">🔄 ต่ออายุ</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Delete -->
+      <button class="submit-btn danger-btn" onclick="doSSHDelete()" style="margin-top:.5rem">🗑️ ลบ SSH User ถาวร</button>
+
+      <div class="alert" id="ssh-mgmt-alert" style="display:none"></div>
     </div>
   </div>
 </div>
@@ -3402,15 +3512,125 @@ function renderQR(elId,text){
 ══════════════════════════════════════ */
 
 /* ══════════════════════════════════════
+   MANAGE TAB FILTER
+══════════════════════════════════════ */
+function mgmtFilter(type){
+  const isSSH=type==='ssh';
+  document.getElementById('mgmt-vless-panel').style.display=isSSH?'none':'';
+  document.getElementById('mgmt-ssh-panel').style.display=isSSH?'':'none';
+  document.getElementById('mgmt-filter-vless').className='port-tab'+(isSSH?'':' active-ssh');
+  document.getElementById('mgmt-filter-ssh').className='port-tab'+(isSSH?' active-ssh':'');
+  if(isSSH)loadSSHUserList();
+}
+
+/* ══════════════════════════════════════
+   SSH USER MANAGEMENT
+══════════════════════════════════════ */
+let _allSSHUsers=[], _filteredSSHUsers=[];
+
+async function loadSSHUserList(){
+  const list=document.getElementById('ssh-user-list');
+  if(!list)return;
+  list.innerHTML='<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังโหลด...</div>';
+  try{
+    const r=await fetch(SSH_API+'/list',{headers:{'X-Token':TOK,'Authorization':'Bearer '+TOK}});
+    const d=await r.json();
+    if(!d.ok&&!Array.isArray(d.users))throw new Error(d.error||'โหลดไม่สำเร็จ');
+    _allSSHUsers=d.users||[];
+    _filteredSSHUsers=[..._allSSHUsers];
+    renderSSHUserList(_filteredSSHUsers);
+  }catch(e){
+    list.innerHTML=`<div class="empty-state"><div class="ei">⚠️</div><div>${e.message}</div></div>`;
+  }
+}
+
+function renderSSHUserList(users){
+  const list=document.getElementById('ssh-user-list');
+  if(!list)return;
+  if(!users.length){list.innerHTML='<div class="empty-state"><div class="ei">🔑</div><div>ไม่พบ SSH users</div></div>';return;}
+  const now=Date.now();
+  list.innerHTML=users.map(u=>{
+    const expMs=u.exp?new Date(u.exp).getTime():0;
+    const diff=expMs>0?expMs-now:1;
+    const days=Math.ceil(diff/86400000);
+    let statusHtml='',expStr='ไม่จำกัด';
+    if(expMs>0){
+      expStr=new Date(u.exp).toLocaleDateString('th-TH');
+      if(diff<0){expStr='หมดอายุ';statusHtml='<span class="status-badge status-dead">✗ Expired</span>';}
+      else if(days<=3){statusHtml=`<span class="status-badge status-exp">⚠ ${days}d</span>`;}
+      else{statusHtml='<span class="status-badge status-ok">✓ Active</span>';}
+    }else{statusHtml='<span class="status-badge status-ok">✓ Active</span>';}
+    return `<button type="button" class="user-row" data-sshuser="${u.user}" style="width:100%;text-align:left;border:none;background:none;cursor:pointer;">
+      <div class="user-avatar ua-ssh">${(u.user||'?')[0].toUpperCase()}</div>
+      <div class="user-info">
+        <div class="user-name">${u.user}</div>
+        <div class="user-meta">SSH · Dropbear 143/109 · ${expStr}</div>
+      </div>
+      ${statusHtml}
+    </button>`;
+  }).join('');
+}
+
+function filterSSHUsers(q){
+  const s=q.toLowerCase();
+  _filteredSSHUsers=_allSSHUsers.filter(u=>(u.user||'').toLowerCase().includes(s));
+  renderSSHUserList(_filteredSSHUsers);
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  var sl=document.getElementById('ssh-user-list');
+  if(sl){sl.addEventListener('click',function(e){var row=e.target.closest('[data-sshuser]');if(row)openSSHMgmtModal(row.getAttribute('data-sshuser'));});}
+});
+
+function openSSHMgmtModal(username){
+  const u=_allSSHUsers.find(x=>x.user===username);
+  if(!u)return;
+  document.getElementById('ssh-mgmt-name').textContent=username;
+  document.getElementById('ssh-mgmt-exp').textContent=u.exp||'ไม่จำกัด';
+  document.getElementById('ssh-mgmt-days').value=30;
+  const al=document.getElementById('ssh-mgmt-alert');
+  al.style.display='none'; al.textContent='';
+  openModal('ssh-mgmt');
+}
+
+async function doSSHRenew(){
+  const name=document.getElementById('ssh-mgmt-name').textContent;
+  const days=parseInt(document.getElementById('ssh-mgmt-days').value)||30;
+  const al=document.getElementById('ssh-mgmt-alert');
+  al.style.display='none';
+  try{
+    const r=await fetch(SSH_API+'/renew',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},body:JSON.stringify({user:name,exp_days:days})});
+    const d=await r.json();
+    if(!d.ok&&!d.success)throw new Error(d.error||'ต่ออายุไม่สำเร็จ');
+    al.className='alert ok'; al.textContent='✅ ต่ออายุสำเร็จ!'; al.style.display='block';
+    setTimeout(()=>{closeModal('ssh-mgmt');loadSSHUserList();},1500);
+  }catch(e){al.className='alert err'; al.textContent='❌ '+e.message; al.style.display='block';}
+}
+
+async function doSSHDelete(){
+  const name=document.getElementById('ssh-mgmt-name').textContent;
+  if(!confirm(`ยืนยันลบ SSH user "${name}" ถาวร?`))return;
+  const al=document.getElementById('ssh-mgmt-alert');
+  al.style.display='none';
+  try{
+    const r=await fetch(SSH_API+'/delete',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},body:JSON.stringify({user:name})});
+    const d=await r.json();
+    if(!d.ok&&!d.success)throw new Error(d.error||'ลบไม่สำเร็จ');
+    al.className='alert ok'; al.textContent='✅ ลบสำเร็จ!'; al.style.display='block';
+    setTimeout(()=>{closeModal('ssh-mgmt');loadSSHUserList();},1200);
+  }catch(e){al.className='alert err'; al.textContent='❌ '+e.message; al.style.display='block';}
+}
+
+/* ══════════════════════════════════════
    SERVICE MONITOR
 ══════════════════════════════════════ */
 const SERVICES=[
   {name:'x-ui Panel',     icon:'📡', ports:[54321], type:'xui'},
   {name:'Python SSH API', icon:'🐍', ports:[2095],  path:SSH_API+'/status', type:'http'},
-  {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'api', key:'dropbear'},
+  {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'port'},
   {name:'nginx / WS',     icon:'🌐', ports:[80],    path:'/', type:'http'},
   {name:'SSH-WS-SSL',     icon:'🔒', ports:[443],   path:'https://'+HOST+'/', type:'http'},
-  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'api', key:'badvpn'},
+  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'port'},
 ];
 
 async function loadServiceStatus(){
