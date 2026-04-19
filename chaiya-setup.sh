@@ -1536,7 +1536,7 @@ body{
 .user-list::-webkit-scrollbar{width:4px}
 .user-list::-webkit-scrollbar-thumb{background:rgba(0,0,0,.1);border-radius:2px}
 
-.user-row{
+.user-row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
   padding:.75rem 1.2rem;
   border-bottom:1px solid var(--border);
   display:flex;align-items:center;gap:.8rem;
@@ -2741,6 +2741,7 @@ function switchTab(tab) {
   event.currentTarget.classList.add('active');
   if(tab==='dash') loadStats();
   if(tab==='online') loadOnlineUsers();
+  if(tab==='manage') loadUserList();
 }
 
 /* ══════════════════════════════════════
@@ -2802,11 +2803,7 @@ function copyToClipboard(text,btnId){
 async function xuiLogin(){
   const SESSION_KEY = 'chaiya_auth';
   let user = CFG.xui_user||'admin', pass = CFG.xui_pass||'';
-  try {
-    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY)||'{}');
-    if(s.user) user = s.user;
-    if(s.pass) pass = s.pass;
-  } catch(e){}
+
   const form=new URLSearchParams({username:user,password:pass});
   const r=await fetch(XUI_API+'/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:form.toString()});
   const d=await r.json(); _xuiCookieSet=!!d.success; return d.success;
@@ -2938,6 +2935,7 @@ function setBadge(ok,text){
    USER LIST
 ══════════════════════════════════════ */
 async function loadUserList(){
+  if(!_xuiCookieSet)await xuiLogin();
   const list=document.getElementById('user-list');
   list.innerHTML='<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังโหลด...</div>';
   try{
@@ -2985,16 +2983,26 @@ function renderUserList(users){
       else if(days<=3){expStr=`เหลือ ${days} วัน`;statusHtml=`<span class="status-badge status-exp">⚠ ${days}d</span>`}
       else{expStr=`${days} วัน`;statusHtml='<span class="status-badge status-ok">✓ Active</span>'}
     }
-    return `<div class="user-row" onclick="openMgmtModal(${JSON.stringify(u.email)})">
+    return `<button type="button" class="user-row" data-email="${u.email}" style="width:100%;text-align:left;border:none;background:none;cursor:pointer;">
       <div class="user-avatar ${avatarClass}">${initial}</div>
       <div class="user-info">
         <div class="user-name">${u.email}</div>
         <div class="user-meta">Port ${u.inboundPort} · ${expStr}</div>
       </div>
       ${statusHtml}
-    </div>`;
+    </button>`;
   }).join('');
 }
+
+document.addEventListener('DOMContentLoaded',function(){
+  var ul=document.getElementById('user-list');
+  if(ul){
+    ul.addEventListener('click',function(e){
+      var row=e.target.closest('.user-row');
+      if(row){var em=row.getAttribute('data-email');if(em)openMgmtModal(em);}
+    });
+  }
+});
 
 function filterUsers(q){
   const s=q.toLowerCase();
