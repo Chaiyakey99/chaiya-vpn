@@ -537,6 +537,130 @@ class Handler(BaseHTTPRequestHandler):
                 "udpgw_port": 7300,
             })
 
+
+        elif self.path == '/api/ban':
+            user = data.get('user', '').strip()
+            hours = float(data.get('hours', 2))
+            if not user:
+                return respond(self, 400, {'error': 'user required'})
+            import time
+            ban_dir = '/etc/chaiya/bans'
+            os.makedirs(ban_dir, exist_ok=True)
+            ban_until = time.time() + hours * 3600
+            with open(f'{ban_dir}/{user}', 'w') as bf:
+                bf.write(str(ban_until))
+            # iptables block SSH login for this user via chage expire immediately
+            run_cmd(f"chage -E 0 {user} 2>/dev/null || true")
+            # iptables drop established connections from this user via pkill
+            run_cmd(f"pkill -u {user} 2>/dev/null || true")
+            respond(self, 200, {'ok': True, 'user': user, 'ban_until': ban_until, 'hours': hours})
+
+        elif self.path == '/api/unban':
+            user = data.get('user', '').strip()
+            if not user:
+                return respond(self, 400, {'error': 'user required'})
+            import time
+            ban_dir = '/etc/chaiya/bans'
+            ban_file = f'{ban_dir}/{user}'
+            if os.path.exists(ban_file):
+                os.remove(ban_file)
+            # restore account expiry from exp file
+            exp_f = f'/etc/chaiya/exp/{user}'
+            if os.path.exists(exp_f):
+                exp_date = open(exp_f).read().strip()
+                run_cmd(f"chage -E {exp_date} {user} 2>/dev/null || true")
+            else:
+                run_cmd(f"chage -E -1 {user} 2>/dev/null || true")
+            # re-enable x-ui client
+            import sqlite3 as _sq, json as _js
+            for port in (8080, 8880):
+                try:
+                    con = _sq.connect('/etc/x-ui/x-ui.db')
+                    row = con.execute("SELECT id, settings FROM inbounds WHERE port=?", (port,)).fetchone()
+                    if row:
+                        inb_id, s = row
+                        settings = _js.loads(s)
+                        for c in settings.get('clients', []):
+                            if c.get('email') == user:
+                                c['enable'] = True
+                        con.execute("UPDATE inbounds SET settings=? WHERE id=?", (_js.dumps(settings), inb_id))
+                        con.commit()
+                    con.close()
+                except: pass
+            run_cmd("systemctl restart x-ui 2>/dev/null || true")
+            respond(self, 200, {'ok': True, 'user': user})
+
+        elif self.path == '/api/unban_vless':
+            # ปลดแบน x-ui VLESS client เท่านั้น (ไม่ต้องมี system user)
+            user = data.get('user', '').strip()
+            inbound_id = data.get('inbound_id')
+            uuid = data.get('uuid', '').strip()
+            if not user or inbound_id is None:
+                return respond(self, 400, {'error': 'user and inbound_id required'})
+            import sqlite3 as _sq, json as _js
+            try:
+                con = _sq.connect('/etc/x-ui/x-ui.db')
+                row = con.execute("SELECT id, settings FROM inbounds WHERE id=?", (inbound_id,)).fetchone()
+                if row:
+                    inb_id, s = row
+                    settings = _js.loads(s)
+                    for c in settings.get('clients', []):
+                        if c.get('email') == user or c.get('id') == uuid:
+                            c['enable'] = True
+                    con.execute("UPDATE inbounds SET settings=? WHERE id=?", (_js.dumps(settings), inb_id))
+                    con.commit()
+                con.close()
+                run_cmd("systemctl restart x-ui 2>/dev/null || true")
+                respond(self, 200, {'ok': True, 'user': user})
+            except Exception as e:
+                respond(self, 500, {'error': str(e)})
+
+
+        elif self.path == '/api/banned':
+            import time
+            ban_dir = '/etc/chaiya/bans'
+            banned = []
+            if os.path.exists(ban_dir):
+                now_ts = time.time()
+                for fname in os.listdir(ban_dir):
+                    fpath = os.path.join(ban_dir, fname)
+                    try:
+                        ban_until = float(open(fpath).read().strip())
+                        if ban_until > now_ts:
+                            banned.append({'user': fname, 'ban_until': ban_until})
+                        else:
+                            # หมดเวลาแบนแล้ว — ลบไฟล์และ restore account
+                            os.remove(fpath)
+                            exp_f = f'/etc/chaiya/exp/{fname}'
+                            if os.path.exists(exp_f):
+                                exp_date = open(exp_f).read().strip()
+                                run_cmd(f"chage -E {exp_date} {fname} 2>/dev/null || true")
+                            else:
+                                run_cmd(f"chage -E -1 {fname} 2>/dev/null || true")
+                    except: pass
+            respond(self, 200, {'banned': banned, 'count': len(banned)})
+
+        elif self.path == '/api/online':
+            # SSH online users — ตรวจจาก ss connections
+            import subprocess as _sp
+            result = _sp.run(
+                "ss -tnp state established 2>/dev/null | grep -E ':(143|109)\b' | grep -oP 'users:\(\("[^"]+"' | grep -oP '"[^"]+"' | sort -u | tr -d '"'",
+                shell=True, capture_output=True, text=True, timeout=5
+            )
+            online_procs = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
+            # แปลง process name เป็น username
+            online_users = []
+            db_path = '/etc/chaiya/sshws-users/users.db'
+            if os.path.exists(db_path):
+                all_users = [line.strip().split()[0] for line in open(db_path) if line.strip()]
+                for user in all_users:
+                    chk = _sp.run(f"ps -u {user} 2>/dev/null | grep -c .", shell=True, capture_output=True, text=True)
+                    try:
+                        if int(chk.stdout.strip()) > 0:
+                            online_users.append(user)
+                    except: pass
+            respond(self, 200, {'users': online_users, 'online': online_users, 'count': len(online_users)})
+
         else:
             respond(self, 404, {'error': 'Not found'})
 
@@ -855,7 +979,7 @@ cat > /opt/chaiya-panel/index.html << 'LOGINEOF'
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
-  background:var(--bg);
+  background:radial-gradient(ellipse 120% 120% at 50% 0%, #0a1628 0%, #060d1a 45%, #030810 100%);
   color:var(--text);
   font-family:'Kanit',sans-serif;
   font-weight:400;
@@ -872,21 +996,17 @@ body{
 body::before{
   content:'';position:fixed;inset:0;pointer-events:none;
   background:
-    radial-gradient(ellipse 70% 50% at 15% 40%, rgba(0,160,255,.055) 0%,transparent 65%),
-    radial-gradient(ellipse 60% 50% at 85% 60%, rgba(160,0,255,.05)  0%,transparent 65%),
-    radial-gradient(ellipse 80% 40% at 50% 100%,rgba(0,255,140,.04)  0%,transparent 60%);
+    radial-gradient(ellipse 70% 55% at 20% 30%, rgba(40,100,200,.09) 0%,transparent 65%),
+    radial-gradient(ellipse 60% 50% at 80% 70%, rgba(20,60,160,.07)  0%,transparent 65%),
+    radial-gradient(ellipse 90% 50% at 50% 100%,rgba(80,140,255,.05) 0%,transparent 60%);
   animation:ambientPulse 9s ease-in-out infinite alternate;
 }
 @keyframes ambientPulse{
   0%  {opacity:.7}50%{opacity:1}100%{opacity:.6}
 }
 
-/* grid dots */
-body::after{
-  content:'';position:fixed;inset:0;pointer-events:none;
-  background-image:radial-gradient(rgba(126,232,250,.06) 1px,transparent 1px);
-  background-size:32px 32px;
-}
+/* grid dots — ลบออก ใช้หิมะแทน */
+body::after{ content:''; }
 
 /* snow canvas */
 #snow-canvas{position:fixed;inset:0;pointer-events:none;z-index:1}
@@ -1233,7 +1353,7 @@ window.addEventListener('load', () => {
   document.getElementById('inp-user').focus();
   if (CFG.xui_user) document.getElementById('inp-user').value = CFG.xui_user;
 
-  startSnow();
+  startSnow('snow-canvas', 55, true);
 });
 
 function updateClock() {
@@ -1333,87 +1453,161 @@ function hideAlert() {
   document.getElementById('login-alert').style.display = 'none';
 }
 
-/* ══════════════════════════════════════
-   SNOWFLAKE CANVAS — เกล็ด 8 แฉก
-   (เหมือนกับ dashboard)
-══════════════════════════════════════ */
-function startSnow() {
-  const canvas = document.getElementById('snow-canvas');
+function startSnow(canvasId, count, isFull) {
+  const canvas = document.getElementById(canvasId || 'snow-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
 
   function resize() {
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight;
+    if (isFull) {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    } else {
+      canvas.width  = canvas.offsetWidth  || canvas.parentElement.offsetWidth  || 400;
+      canvas.height = canvas.offsetHeight || canvas.parentElement.offsetHeight || 200;
+    }
   }
   resize();
   window.addEventListener('resize', resize);
 
-  const COLORS = [
-    'rgba(180,230,255,',
-    'rgba(200,255,220,',
-    'rgba(220,200,255,',
-    'rgba(255,210,240,'
-  ];
-  const COUNT = 38;
+  const N = count || 48;
   const flakes = [];
 
-  function rnd(a, b) { return Math.random() * (b - a) + a; }
-  function mkFlake() {
+  // ขนาดหลายระดับ: เกล็ดใหญ่น้อยใหญ่สลับกัน
+  function mkFlake(scatter) {
+    const tier = Math.random();
+    const size = tier < 0.15 ? (Math.random() * 9 + 10)   // ใหญ่มาก
+               : tier < 0.45 ? (Math.random() * 5 + 5.5)  // กลาง
+               : (Math.random() * 3 + 2);                  // เล็ก
     return {
-      x:        rnd(0, canvas.width),
-      y:        rnd(-20, canvas.height),
-      size:     rnd(4, 10),
-      speed:    rnd(.2, .55),
-      drift:    rnd(-.25, .25),
-      rot:      rnd(0, Math.PI),
-      rotSpeed: rnd(-.018, .018),
-      color:    COLORS[Math.floor(Math.random() * COLORS.length)],
-      opacity:  rnd(.2, .55),
+      x:        Math.random() * (canvas.width  || 400),
+      y:        scatter ? Math.random() * (canvas.height || 300) : -size * 2,
+      size,
+      speed:    (0.18 + Math.random() * 0.35) * (1 + (18 - Math.min(size, 18)) * 0.015),
+      drift:    (Math.random() - 0.5) * 0.28,
+      rot:      Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.012,
+      alpha:    0.18 + Math.random() * 0.55,
+      glowR:    180 + Math.floor(Math.random() * 55),  // โทนขาว-ฟ้าน้ำแข็ง
+      glowG:    210 + Math.floor(Math.random() * 40),
+      glowB:    255,
+      sway:     0,
+      swaySpeed: (Math.random() - 0.5) * 0.018,
+      swayAmp:  Math.random() * 0.45 + 0.1,
     };
   }
-  for (let i = 0; i < COUNT; i++) flakes.push(mkFlake());
 
+  for (let i = 0; i < N; i++) flakes.push(mkFlake(true));
+
+  // วาดเกล็ดหิมะ 6 แฉก (dendrite) พร้อม sub-branch
   function drawFlake(f) {
     ctx.save();
     ctx.translate(f.x, f.y);
     ctx.rotate(f.rot);
-    ctx.strokeStyle = f.color + f.opacity + ')';
-    ctx.lineWidth   = 1.1;
-    ctx.lineCap     = 'round';
     const s = f.size;
-    for (let i = 0; i < 4; i++) {
-      ctx.save();
-      ctx.rotate(i * Math.PI / 4);
-      ctx.beginPath(); ctx.moveTo(0, -s); ctx.lineTo(0, s); ctx.stroke();
-      // กิ่งซ้าย-ขวา
-      const b = s * .42;
+    const col = `${f.glowR},${f.glowG},${f.glowB}`;
+
+    // glow รอบเกล็ด (เฉพาะเกล็ดใหญ่)
+    if (s > 6) {
+      const grd = ctx.createRadialGradient(0, 0, s * 0.1, 0, 0, s * 1.5);
+      grd.addColorStop(0, `rgba(${col},${f.alpha * 0.4})`);
+      grd.addColorStop(1, `rgba(${col},0)`);
       ctx.beginPath();
-      ctx.moveTo(-b, -s * .48); ctx.lineTo(0, -s * .48 + b * .5); ctx.lineTo(b, -s * .48);
+      ctx.arc(0, 0, s * 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = grd;
+      ctx.fill();
+    }
+
+    ctx.strokeStyle = `rgba(${col},${f.alpha})`;
+    ctx.lineCap = 'round';
+
+    // 6 แขน
+    for (let arm = 0; arm < 6; arm++) {
+      ctx.save();
+      ctx.rotate((arm * Math.PI) / 3);
+
+      // เส้นหลัก
+      ctx.lineWidth = Math.max(0.6, s * 0.11);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, -s);
       ctx.stroke();
+
+      // กิ่งระดับ 1 (2 คู่)
+      const bw = s * 0.13;
+      [[s * 0.35, s * 0.28], [s * 0.62, s * 0.22]].forEach(([pos, len]) => {
+        ctx.lineWidth = Math.max(0.4, bw);
+        [1, -1].forEach(dir => {
+          ctx.beginPath();
+          ctx.moveTo(0, -pos);
+          ctx.lineTo(dir * len * 0.7, -pos - len * 0.5);
+          ctx.stroke();
+        });
+      });
+
+      // กิ่งระดับ 2 (เฉพาะเกล็ดใหญ่)
+      if (s > 7) {
+        ctx.lineWidth = Math.max(0.3, bw * 0.55);
+        const pos3 = s * 0.5, len3 = s * 0.14;
+        [1, -1].forEach(dir => {
+          ctx.beginPath();
+          ctx.moveTo(0, -pos3);
+          ctx.lineTo(dir * len3, -pos3 - len3 * 0.6);
+          ctx.stroke();
+        });
+      }
+
+      // จุดปลายแขน
+      if (s > 4) {
+        ctx.beginPath();
+        ctx.arc(0, -s, Math.max(0.6, s * 0.1), 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${col},${Math.min(f.alpha + 0.3, 1)})`;
+        ctx.fill();
+      }
+
       ctx.restore();
     }
-    // จุดกลาง
+
+    // แกนกลาง
     ctx.beginPath();
-    ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = f.color + Math.min(f.opacity + .25, 1) + ')';
+    ctx.arc(0, 0, Math.max(0.8, s * 0.14), 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${col},${Math.min(f.alpha + 0.35, 1)})`;
     ctx.fill();
+
+    // วงแหวนกลาง (เฉพาะเกล็ดใหญ่)
+    if (s > 8) {
+      ctx.beginPath();
+      ctx.arc(0, 0, s * 0.28, 0, Math.PI * 2);
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = `rgba(${col},${f.alpha * 0.6})`;
+      ctx.stroke();
+    }
+
     ctx.restore();
   }
 
+  let frame;
   function tick() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     flakes.forEach(f => {
+      f.sway += f.swaySpeed;
       f.y   += f.speed;
-      f.x   += f.drift;
+      f.x   += f.drift + Math.sin(f.sway) * f.swayAmp;
       f.rot += f.rotSpeed;
-      if (f.y > canvas.height + 20) Object.assign(f, mkFlake(), { y: -10, x: rnd(0, canvas.width) });
+      if (f.y > (canvas.height || 300) + 20 || f.x < -30 || f.x > (canvas.width || 400) + 30) {
+        Object.assign(f, mkFlake(false));
+        f.x = Math.random() * (canvas.width || 400);
+      }
       drawFlake(f);
     });
-    requestAnimationFrame(tick);
+    frame = requestAnimationFrame(tick);
   }
   tick();
+  return () => cancelAnimationFrame(frame);
 }
+
+// Login page เรียก startSnow แบบ full-screen
+
 </script>
 </body>
 </html>
@@ -1489,7 +1683,7 @@ body{
 .site-header{
   text-align:center;
   padding:2.2rem 1.5rem 1.8rem;
-  background:linear-gradient(175deg,#0a0f1a 0%,#0d1520 55%,#111820 100%);
+  background:radial-gradient(ellipse 140% 130% at 50% -10%, #0d1f3c 0%, #060e1e 55%, #020810 100%);
   border-bottom:1px solid rgba(255,255,255,.06);
   position:relative;overflow:hidden;
 }
@@ -1497,9 +1691,9 @@ body{
 .site-header::before{
   content:'';position:absolute;inset:0;
   background:
-    radial-gradient(ellipse 60% 40% at 20% 50%,rgba(0,180,255,.07) 0%,transparent 70%),
-    radial-gradient(ellipse 60% 40% at 80% 50%,rgba(180,0,255,.07) 0%,transparent 70%),
-    radial-gradient(ellipse 80% 60% at 50% 120%,rgba(0,255,150,.06) 0%,transparent 65%);
+    radial-gradient(ellipse 60% 50% at 20% 40%,rgba(80,150,255,.10) 0%,transparent 70%),
+    radial-gradient(ellipse 60% 50% at 80% 60%,rgba(40,100,220,.08) 0%,transparent 70%),
+    radial-gradient(ellipse 90% 60% at 50% 120%,rgba(120,180,255,.07) 0%,transparent 65%);
   pointer-events:none;animation:hdrGlow 8s ease-in-out infinite alternate;
 }
 @keyframes hdrGlow{
@@ -2080,7 +2274,7 @@ select option{background:#fff}
 .site-header{
   text-align:center;
   padding:2rem 1.5rem 1.6rem;
-  background:linear-gradient(160deg,#152515 0%,#0e1e2e 55%,#18182e 100%);
+  background:radial-gradient(ellipse 140% 130% at 50% -10%, #0d1f3c 0%, #060e1e 55%, #020810 100%);
   border-bottom:1px solid rgba(255,255,255,.05);
   position:relative;overflow:hidden;
 }
@@ -2443,6 +2637,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
   <button class="tab-btn" onclick="switchTab('create')">➕ สร้างยูส</button>
   <button class="tab-btn" onclick="switchTab('manage')">🔧 จัดการยูส</button>
   <button class="tab-btn" onclick="switchTab('online')">🟢 ออนไลน์</button>
+  <button class="tab-btn" onclick="switchTab('ban')">🚫 ปลดแบน</button>
 </nav>
 
 <!-- ══════════════════════════════════════
@@ -2650,7 +2845,20 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 ══════════════════════════════════════ -->
 <div class="tab-panel" id="tab-manage">
 <div class="main">
-  <div class="mgmt-panel">
+  <!-- Type selector buttons -->
+  <div style="display:flex;gap:.7rem;margin-bottom:1rem">
+    <button id="mgmt-btn-vless" onclick="switchMgmtType('vless')"
+      style="flex:1;padding:.75rem;border-radius:12px;border:2px solid var(--green);background:var(--green);color:#001a00;font-family:'Orbitron',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:.08em;cursor:pointer;transition:all .2s">
+      📡 VLESS
+    </button>
+    <button id="mgmt-btn-ssh" onclick="switchMgmtType('ssh')"
+      style="flex:1;padding:.75rem;border-radius:12px;border:2px solid var(--ssh);background:transparent;color:var(--ssh);font-family:'Orbitron',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:.08em;cursor:pointer;transition:all .2s">
+      🔐 SSH-WS
+    </button>
+  </div>
+
+  <!-- VLESS Panel -->
+  <div id="mgmt-panel-vless" class="mgmt-panel">
     <div class="mgmt-header">
       <div class="mgmt-title">🔧 จัดการยูสเซอร์ VLESS</div>
       <button class="refresh-btn" onclick="loadUserList()">
@@ -2668,11 +2876,31 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
       </div>
     </div>
   </div>
+
+  <!-- SSH-WS Panel -->
+  <div id="mgmt-panel-ssh" class="mgmt-panel" style="display:none">
+    <div class="mgmt-header">
+      <div class="mgmt-title">🔐 จัดการยูสเซอร์ SSH-WS</div>
+      <button class="refresh-btn" onclick="loadSSHUserList()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        โหลด
+      </button>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="ssh-search-input" placeholder="🔍 ค้นหา username..." oninput="filterSSHUsers(this.value)">
+    </div>
+    <div class="user-list" id="ssh-user-list">
+      <div class="empty-state">
+        <div class="ei">📋</div>
+        <div>กดปุ่ม "โหลด" เพื่อดึงข้อมูล SSH Users</div>
+      </div>
+    </div>
+  </div>
 </div>
 </div>
 
 <!-- ══════════════════════════════════════
-     TAB: ONLINE
+     TAB: ONLINE (v2 — VLESS + SSH รวมกัน)
 ══════════════════════════════════════ -->
 <div class="tab-panel" id="tab-online">
 <div class="main">
@@ -2684,14 +2912,88 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
         รีเฟรช
       </button>
     </div>
-    <div style="padding:.7rem 1.2rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.7rem">
-      <span id="online-count-badge" class="online-badge"><span class="online-dot"></span><span id="online-count">0</span> ออนไลน์</span>
-      <span style="font-size:.75rem;color:var(--text3)" id="online-time">--</span>
+    <div style="padding:.65rem 1.2rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+      <div style="display:flex;align-items:center;gap:.55rem">
+        <span id="online-count-badge" class="online-badge"><span class="online-dot"></span><span id="online-count">0</span> ออนไลน์</span>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:.6rem;background:#eff6ff;border:1px solid #93c5fd;color:#1e40af;padding:.15rem .5rem;border-radius:20px" id="online-vless-badge">VLESS 0</span>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:.6rem;background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:.15rem .5rem;border-radius:20px" id="online-ssh-badge">SSH 0</span>
+      </div>
+      <span style="font-size:.72rem;color:var(--text3);font-family:'Share Tech Mono',monospace" id="online-time">--</span>
     </div>
     <div class="user-list" id="online-list">
       <div class="empty-state">
-        <div class="ei">🟢</div>
-        <div>กดรีเฟรชเพื่อดูยูสออนไลน์</div>
+        <div class="ei">😴</div>
+        <div>ไม่มียูสออนไลน์ตอนนี้</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════
+     TAB: BAN
+══════════════════════════════════════ -->
+<div class="tab-panel" id="tab-ban">
+<div class="main">
+  <div class="mgmt-panel">
+    <div class="mgmt-header">
+      <div class="mgmt-title">🚫 ระบบปลดแบน</div>
+      <button class="refresh-btn" id="ban-refresh" onclick="loadBanList()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        รีเฟรช
+      </button>
+    </div>
+
+    <!-- คำอธิบาย -->
+    <div style="padding:.75rem 1.2rem;border-bottom:1px solid var(--border);background:#fffbeb;display:flex;align-items:flex-start;gap:.6rem">
+      <span style="font-size:1rem;flex-shrink:0">⚠️</span>
+      <div style="font-size:.75rem;color:#92400e;line-height:1.55">
+        แบนอัตโนมัติ <strong>2 ชั่วโมง</strong> — ลูกค้าที่ถูกแบนจะไม่สามารถเชื่อมต่อได้ กดปลดแบนเพื่อให้ใช้งานได้ทันที
+      </div>
+    </div>
+
+    <!-- แบนด้วยตนเอง -->
+    <div style="padding:.9rem 1.2rem;border-bottom:1px solid var(--border)">
+      <div style="font-family:'Rajdhani',sans-serif;font-size:.8rem;font-weight:700;letter-spacing:.1em;color:var(--text2);margin-bottom:.55rem">🔨 แบนด้วยตนเอง (SSH-WS)</div>
+      <div style="display:flex;gap:.5rem">
+        <input type="text" id="ban-manual-user" placeholder="username ที่ต้องการแบน" style="flex:1;font-size:.82rem">
+        <select id="ban-manual-hours" style="width:100px;font-size:.82rem">
+          <option value="1">1 ชั่วโมง</option>
+          <option value="2" selected>2 ชั่วโมง</option>
+          <option value="6">6 ชั่วโมง</option>
+          <option value="24">24 ชั่วโมง</option>
+        </select>
+        <button onclick="doBanUser()" style="padding:.52rem .9rem;border-radius:10px;border:none;background:linear-gradient(135deg,#991b1b,#dc2626);color:#fff;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.82rem;cursor:pointer;white-space:nowrap;box-shadow:0 3px 10px rgba(220,38,38,.25)">แบน</button>
+      </div>
+      <div id="ban-manual-alert" style="display:none;margin-top:.5rem;font-size:.78rem;padding:.4rem .75rem;border-radius:8px"></div>
+    </div>
+
+    <!-- รายชื่อที่ถูกแบน -->
+    <div style="padding:.7rem 1.2rem .5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.55rem">
+      <span style="font-family:'Rajdhani',sans-serif;font-size:.82rem;font-weight:700;color:var(--text2);letter-spacing:.08em">รายชื่อที่ถูกแบน</span>
+      <span style="font-family:'Share Tech Mono',monospace;font-size:.6rem;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:.12rem .5rem;border-radius:20px" id="ban-count-badge">0 คน</span>
+    </div>
+    <div class="user-list" id="ban-list">
+      <div class="empty-state">
+        <div class="ei">✅</div>
+        <div>ไม่มีใครถูกแบนตอนนี้</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VLESS Ban section -->
+  <div class="mgmt-panel" style="margin-top:.2rem">
+    <div class="mgmt-header">
+      <div class="mgmt-title">📡 ปลดแบน VLESS (x-ui)</div>
+      <button class="refresh-btn" onclick="loadVlessBanList()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        โหลด
+      </button>
+    </div>
+    <div class="user-list" id="vless-ban-list">
+      <div class="empty-state">
+        <div class="ei">📡</div>
+        <div>กดโหลดเพื่อดูรายชื่อ VLESS</div>
       </div>
     </div>
   </div>
@@ -2939,6 +3241,30 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<!-- ══════════════════════════════════════
+     MODAL: SSH USER MANAGEMENT
+══════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-ssh-mgmt">
+  <div class="modal modal-mgmt">
+    <div class="modal-header">
+      <span class="modal-title" id="ssh-mgmt-title">⚙️ SSH User</span>
+      <button class="modal-close" onclick="closeModal('ssh-mgmt')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="udetail" id="ssh-mgmt-detail"></div>
+      <div class="divider" style="margin:1rem 0"></div>
+      <div class="fgrid">
+        <div class="field span2">
+          <label>📅 เพิ่มกี่วัน (ต่อจากวันหมดอายุเดิม)</label>
+          <input type="number" id="ssh-mgmt-adddays" value="30" min="1" class="mgmt-focus">
+        </div>
+      </div>
+      <button class="submit-btn ssh-btn" id="ssh-mgmt-submit" onclick="doSSHAddDays()">📅 เพิ่มวันใช้งาน</button>
+      <div class="alert" id="ssh-mgmt-alert"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ══════════════════════════════════════
    CONFIG
@@ -2995,6 +3321,7 @@ function switchTab(tab) {
   event.currentTarget.classList.add('active');
   if(tab==='dash') loadStats();
   if(tab==='online') loadOnlineUsers();
+  if(tab==='ban'){ loadBanList(); loadVlessBanList(); }
 }
 
 /* ══════════════════════════════════════
@@ -3257,76 +3584,228 @@ function filterUsers(q){
 }
 
 /* ══════════════════════════════════════
-   ONLINE USERS
+   ONLINE USERS v2 — VLESS + SSH รวมกัน
 ══════════════════════════════════════ */
 async function loadOnlineUsers(){
   const btn=document.getElementById('online-refresh');
   if(btn)btn.classList.add('spin');
   const list=document.getElementById('online-list');
   list.innerHTML='<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--green)"></span>กำลังโหลด...</div>';
+
   try{
-    if(!_xuiCookieSet)await xuiLogin();
-    // x-ui v2 online clients endpoint
-    const d=await xuiGet('/panel/api/inbounds/onlines').catch(()=>null)
-         || await xuiGet('/panel/inbound/onlines').catch(()=>null);
-    let onlines=[];
-    if(d&&(d.success||Array.isArray(d.obj))){
-      onlines=d.obj||[];
-    }
-    document.getElementById('online-count').textContent=onlines.length;
-    document.getElementById('online-time').textContent='อัพเดท: '+new Date().toLocaleTimeString('th-TH');
-    if(!onlines.length){
+    // โหลด VLESS online จาก x-ui
+    let vlessOnlineEmails = [];
+    let vlessUserMap = {};
+    try{
+      if(!_xuiCookieSet) await xuiLogin();
+      // ดึง online list จาก x-ui
+      const od = await xuiGet('/panel/api/inbounds/onlines').catch(()=>null);
+      if(od && (od.success || Array.isArray(od.obj))){
+        vlessOnlineEmails = od.obj || [];
+      }
+      // ดึง user detail ทั้งหมด
+      if(!_allUsers.length) await loadUserList().catch(()=>{});
+      _allUsers.forEach(u=>{ vlessUserMap[u.email]=u; });
+    }catch(e){ console.warn('VLESS online error:', e.message); }
+
+    // โหลด SSH online จาก SSH API — ใช้ /api/users แล้วเช็ค active connection
+    let sshOnlineUsers = [];
+    try{
+      // SSH API ไม่มี "online" endpoint ที่แน่นอน
+      // จะใช้ /api/status ดู connection count แล้วเอา users ที่ active + ไม่หมดอายุ
+      // และใช้ /api/users ดึงรายชื่อ
+      const statusR = await fetch(SSH_API+'/api/status', {
+        headers:{'X-Token':TOK,'Authorization':'Bearer '+TOK}
+      });
+      const statusD = await statusR.json();
+
+      // ดึง user list
+      const usersR = await fetch(SSH_API+'/api/users', {
+        headers:{'X-Token':TOK,'Authorization':'Bearer '+TOK}
+      });
+      const usersD = await usersR.json();
+      const allSSH = usersD.users || [];
+
+      // กรองเฉพาะที่ active (ยังไม่หมดอายุ) — SSH ไม่มี real online tracking แบบ x-ui
+      // แสดง active users ที่มี connection จริง (ตรวจจาก connection count)
+      const today = new Date().toISOString().split('T')[0];
+      const connCount = statusD.conn_143 + statusD.conn_109 || 0;
+
+      // ดึงรายชื่อ SSH ที่ active จริงจาก /api/online ถ้ามี
+      let sshOnlineList = [];
+      try{
+        const onR = await fetch(SSH_API+'/api/online', {
+          headers:{'X-Token':TOK,'Authorization':'Bearer '+TOK}
+        });
+        if(onR.ok){
+          const onD = await onR.json();
+          sshOnlineList = onD.users || onD.online || [];
+        }
+      }catch(e){}
+
+      if(sshOnlineList.length > 0){
+        // ถ้า API /api/online มีข้อมูล ใช้ตัวนั้น
+        sshOnlineUsers = allSSH.filter(u => sshOnlineList.includes(u.user));
+      } else {
+        // fallback: ไม่แสดง SSH users ถ้าไม่มี real online data
+        // (ไม่มั่วแสดงทั้งหมด — ตาม requirement)
+        sshOnlineUsers = [];
+      }
+    }catch(e){ console.warn('SSH online error:', e.message); }
+
+    const totalOnline = vlessOnlineEmails.length + sshOnlineUsers.length;
+    document.getElementById('online-count').textContent = totalOnline;
+    document.getElementById('online-vless-badge').textContent = 'VLESS ' + vlessOnlineEmails.length;
+    document.getElementById('online-ssh-badge').textContent = 'SSH ' + sshOnlineUsers.length;
+    document.getElementById('online-time').textContent = 'อัพเดท: '+new Date().toLocaleTimeString('th-TH');
+
+    if(totalOnline === 0){
       list.innerHTML='<div class="empty-state"><div class="ei">😴</div><div>ไม่มียูสออนไลน์ตอนนี้</div></div>';
       return;
     }
-    // โหลด user list ก่อนถ้ายังไม่มี
-    if(!_allUsers.length){
-      try{ await loadUserList(); }catch(e){}
-    }
-    const now2=Date.now();
-    list.innerHTML=onlines.map(email=>{
-      const u=_allUsers.find(x=>x.email===email)||null;
-      const portLabel=u?`Port ${u.inboundPort}`:'VLESS';
-      // คำนวณ data
-      let dataBar='', dataLabel='ไม่จำกัด', dataPct=0, dataColor='#22c55e';
-      if(u&&u.totalGB>0){
-        const usedBytes=(u.upBytes||0)+(u.downBytes||0);
-        const totalBytes=u.totalGB*1073741824;
-        dataPct=Math.min(Math.round(usedBytes/totalBytes*100),100);
-        const usedGB=(usedBytes/1073741824).toFixed(2);
-        dataLabel=`${usedGB} / ${u.totalGB} GB`;
-        dataColor=dataPct>85?'#ef4444':dataPct>60?'#f97316':'#22c55e';
+
+    const now = Date.now();
+    let rows = '';
+
+    // ─── VLESS rows ───────────────────────────────
+    vlessOnlineEmails.forEach(email=>{
+      const u = vlessUserMap[email] || null;
+      const isAis = u && u.inboundPort===8080;
+      const portLabel = u ? `Port ${u.inboundPort}` : 'VLESS';
+      const typeLabel = isAis ? 'AIS' : 'TRUE';
+      const avatarBg = isAis ? '#edf7e3' : '#fff0f0';
+      const avatarBd = isAis ? '#b5e08a' : '#f5909a';
+      const avatarColor = isAis ? '#316808' : '#a6000c';
+
+      // data bar — totalGB ใน x-ui เก็บเป็น bytes แล้ว
+      let dataPct=0, dataLabel='ไม่จำกัด', dataColor='#22c55e', isFullBar=false;
+      if(u && u.totalGB > 0){
+        // totalGB จาก x-ui คือ bytes จริงๆ (เพราะส่งไปเป็น GB*1024^3)
+        const totalBytes = u.totalGB;
+        const usedBytes = (u.upBytes||0) + (u.downBytes||0);
+        dataPct = Math.min(Math.round(usedBytes/totalBytes*100), 100);
+        const usedGB = (usedBytes/1073741824).toFixed(2);
+        const totalGB = (totalBytes/1073741824).toFixed(0);
+        dataLabel = `${usedGB} / ${totalGB} GB`;
+        dataColor = dataPct>85?'#ef4444':dataPct>60?'#f97316':'#22c55e';
       }
+
       // วันหมดอายุ
       let expLabel='ไม่จำกัด', expClass='exp-ok';
-      if(u&&u.expiryTime>0){
-        const diff=u.expiryTime-now2;
-        const daysLeft=Math.ceil(diff/86400000);
-        expLabel=new Date(u.expiryTime).toLocaleDateString('th-TH');
-        expClass=diff<0?'exp-dead':daysLeft<=3?'exp-warn':'exp-ok';
-        if(diff<0) expLabel='หมดอายุแล้ว';
-        else expLabel=`${daysLeft}d — ${expLabel}`;
+      if(u && u.expiryTime > 0){
+        const diff = u.expiryTime - now;
+        const daysLeft = Math.ceil(diff/86400000);
+        if(diff < 0){ expLabel='หมดอายุแล้ว'; expClass='exp-dead'; }
+        else{
+          expLabel = `${daysLeft}d — ${new Date(u.expiryTime).toLocaleDateString('th-TH')}`;
+          expClass = daysLeft<=3?'exp-warn':'exp-ok';
+        }
       }
-      const isAis=u&&u.inboundPort===8080;
-      const avatarBg=isAis?'#edf7e3':'#fff0f0';
-      const avatarBd=isAis?'#b5e08a':'#f5909a';
-      const avatarColor=isAis?'#316808':'#a6000c';
-      return `<div class="online-user-row">
+
+      rows += `<div class="online-user-row">
         <div class="online-avatar" style="background:${avatarBg};border-color:${avatarBd};color:${avatarColor}">${(email||'?')[0].toUpperCase()}</div>
         <div class="online-info">
           <div class="online-name">
             <span>${email}</span>
             <span class="online-port-chip">${portLabel}</span>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:.6rem;background:${isAis?'#f0f9e8':'#fff0f0'};border:1px solid ${isAis?'#b5e08a':'#f5909a'};color:${isAis?'#316808':'#a6000c'};padding:.1rem .4rem;border-radius:20px">${typeLabel}</span>
           </div>
           <div class="online-data-row">
             <div class="online-data-bar-wrap">
-              <div class="online-data-bar" style="width:${u&&u.totalGB>0?dataPct:100}%;background:${u&&u.totalGB>0?dataColor:'#22c55e'};${u&&u.totalGB>0?'':'opacity:.35'}"></div>
+              <div class="online-data-bar" style="width:${u&&u.totalGB>0?dataPct:0}%;background:${dataColor}"></div>
             </div>
             <span class="online-data-label">${dataLabel}</span>
           </div>
           <div class="online-exp ${expClass}">📅 ${expLabel}</div>
         </div>
         <span class="online-live-dot"></span>
+      </div>`;
+    });
+
+    // ─── SSH rows ───────────────────────────────
+    sshOnlineUsers.forEach(u=>{
+      const expLabel2 = u.exp || 'ไม่จำกัด';
+      const expClass2 = !u.exp ? 'exp-ok' : (u.exp < new Date().toISOString().split('T')[0] ? 'exp-dead' : 'exp-ok');
+      rows += `<div class="online-user-row">
+        <div class="online-avatar" style="background:#e8f0fe;border-color:#7c9ff5;color:#1a4faf">${(u.user||'?')[0].toUpperCase()}</div>
+        <div class="online-info">
+          <div class="online-name">
+            <span>${u.user}</span>
+            <span class="online-port-chip">SSH-WS</span>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:.6rem;background:#e8f0fe;border:1px solid #7c9ff5;color:#1a4faf;padding:.1rem .4rem;border-radius:20px">SSH</span>
+          </div>
+          <div class="online-data-row">
+            <div class="online-data-bar-wrap">
+              <div class="online-data-bar" style="width:100%;background:#22c55e;opacity:.35"></div>
+            </div>
+            <span class="online-data-label">ไม่จำกัด</span>
+          </div>
+          <div class="online-exp ${expClass2}">📅 ${expLabel2}</div>
+        </div>
+        <span class="online-live-dot"></span>
+      </div>`;
+    });
+
+    list.innerHTML = rows;
+
+  }catch(e){
+    list.innerHTML=`<div class="empty-state"><div class="ei">⚠️</div><div>${e.message}</div></div>`;
+  }finally{
+    if(btn)btn.classList.remove('spin');
+  }
+}
+
+/* ══════════════════════════════════════
+   BAN SYSTEM
+══════════════════════════════════════ */
+async function loadBanList(){
+  const btn=document.getElementById('ban-refresh');
+  if(btn)btn.classList.add('spin');
+  const list=document.getElementById('ban-list');
+  list.innerHTML='<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:#dc2626"></span>กำลังโหลด...</div>';
+  try{
+    // ดึงรายชื่อที่ถูกแบน (เช็คจากไฟล์ /etc/chaiya/bans/ ผ่าน SSH API)
+    // เนื่องจากไม่มี /api/banned ให้ดึง SSH users แล้วเช็ค status
+    const r = await fetch(SSH_API+'/api/users', {
+      headers:{'X-Token':TOK,'Authorization':'Bearer '+TOK}
+    });
+    const d = await r.json();
+    const allUsers = d.users || [];
+
+    // กรองเฉพาะที่ถูกแบน (active=false หรือ exp เป็น 0000 หรือมีไฟล์แบน)
+    // ใช้ endpoint /api/banned ถ้ามี
+    let banned = [];
+    try{
+      const br = await fetch(SSH_API+'/api/banned', {
+        headers:{'X-Token':TOK,'Authorization':'Bearer '+TOK}
+      });
+      if(br.ok){
+        const bd = await br.json();
+        banned = bd.banned || [];
+      }
+    }catch(e){
+      // fallback: ถ้าไม่มี endpoint แสดงว่าไม่มีระบบแบน
+      banned = [];
+    }
+
+    document.getElementById('ban-count-badge').textContent = banned.length + ' คน';
+
+    if(!banned.length){
+      list.innerHTML='<div class="empty-state"><div class="ei">✅</div><div>ไม่มีใครถูกแบนตอนนี้</div></div>';
+      return;
+    }
+    const now = Date.now();
+    list.innerHTML = banned.map(b=>{
+      const banUntil = b.ban_until ? new Date(b.ban_until*1000) : null;
+      const remaining = banUntil ? Math.max(0, Math.ceil((banUntil-now)/60000)) : 0;
+      const timeStr = banUntil ? `หมดแบน: ${banUntil.toLocaleTimeString('th-TH')} (อีก ${remaining} นาที)` : 'ถาวร';
+      return `<div class="online-user-row" style="align-items:center">
+        <div class="online-avatar" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b">${(b.user||'?')[0].toUpperCase()}</div>
+        <div class="online-info" style="flex:1">
+          <div class="online-name"><span style="font-weight:600">${b.user}</span><span style="font-family:'Share Tech Mono',monospace;font-size:.6rem;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:.1rem .4rem;border-radius:20px">🚫 BANNED</span></div>
+          <div style="font-size:.68rem;color:#dc2626;font-family:'Share Tech Mono',monospace;margin-top:.2rem">⏱ ${timeStr}</div>
+        </div>
+        <button onclick="doUnban('${b.user}')" style="padding:.4rem .85rem;border-radius:9px;border:1.5px solid #16a34a;background:#f0fdf4;color:#15803d;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.82rem;cursor:pointer;white-space:nowrap;transition:all .18s" onmouseover="this.style.background='#dcfce7'" onmouseout="this.style.background='#f0fdf4'">✅ ปลดแบน</button>
       </div>`;
     }).join('');
   }catch(e){
@@ -3336,116 +3815,223 @@ async function loadOnlineUsers(){
   }
 }
 
-/* ══════════════════════════════════════
-   USER MANAGEMENT MODAL
-══════════════════════════════════════ */
-function openMgmtModal(email){
-  const u=_allUsers.find(x=>x.email===email);
-  if(!u)return;
-  _mgmtUser=u; _mgmtAction=null;
-  document.getElementById('mgmt-modal-title').textContent='⚙️ '+email;
+async function doBanUser(){
+  const user = document.getElementById('ban-manual-user').value.trim();
+  const hours = parseFloat(document.getElementById('ban-manual-hours').value) || 2;
+  const alertEl = document.getElementById('ban-manual-alert');
 
-  // render detail
-  const now=Date.now();
-  let expStr='ไม่จำกัด', expClass='ok';
-  if(u.expiryTime>0){
-    const diff=u.expiryTime-now;
-    expStr=new Date(u.expiryTime).toLocaleDateString('th-TH');
-    expClass=diff<0?'dead':diff<259200000?'exp':'ok';
-  }
-  const dataStr=u.totalGB>0?u.totalGB+' GB':'ไม่จำกัด';
-  document.getElementById('mgmt-user-detail').innerHTML=`
-    <div class="udetail-row"><span class="dk">👤 Username</span><span class="dv">${u.email}</span></div>
-    <div class="udetail-row"><span class="dk">🔌 Port</span><span class="dv">${u.inboundPort}</span></div>
-    <div class="udetail-row"><span class="dk">📅 หมดอายุ</span><span class="dv ${expClass}">${expStr}</span></div>
-    <div class="udetail-row"><span class="dk">📦 Data</span><span class="dv">${dataStr}</span></div>
-    <div class="udetail-row"><span class="dk">📱 IP Limit</span><span class="dv">${u.limitIp||'ไม่จำกัด'}</span></div>
-    <div class="udetail-row"><span class="dk">📊 Traffic ↑↓</span><span class="dv">${u.upMB} / ${u.downMB} MB</span></div>
-    <div class="udetail-row"><span class="dk">🆔 UUID</span><span class="dv" style="font-family:'Share Tech Mono',monospace;font-size:.65rem;color:var(--ssh)">${u.uuid}</span></div>
-  `;
+  if(!user){ alertEl.style.display='block'; alertEl.style.background='#fef2f2'; alertEl.style.border='1px solid #fca5a5'; alertEl.style.color='#991b1b'; alertEl.textContent='❌ กรุณาใส่ username'; return; }
 
-  // reset action form
-  document.getElementById('action-form').style.display='none';
-  ['renew','adddays','adddata','setdata','resettraffic','delete'].forEach(a=>{
-    document.getElementById('form-'+a).style.display='none';
-    document.getElementById('act-'+a).classList.remove('selected');
-  });
-  setAlert('mgmt','','');
-  openModal('mgmt');
-}
-
-function selectAction(action){
-  _mgmtAction=action;
-  ['renew','adddays','adddata','setdata','resettraffic','delete'].forEach(a=>{
-    document.getElementById('form-'+a).style.display='none';
-    document.getElementById('act-'+a).classList.remove('selected');
-  });
-  document.getElementById('act-'+action).classList.add('selected');
-  document.getElementById('form-'+action).style.display='';
-  document.getElementById('action-form').style.display='';
-  setAlert('mgmt','','');
-}
-
-async function doAction(action){
-  if(!_mgmtUser)return;
-  const u=_mgmtUser;
-  setAlert('mgmt','⏳ กำลังดำเนินการ...','info');
+  alertEl.style.display='block'; alertEl.style.background='#f0f9ff'; alertEl.style.border='1px solid #7dd3fc'; alertEl.style.color='#0369a1'; alertEl.textContent='⏳ กำลังแบน...';
   try{
-    // get current client settings from inbound
-    const ibData=await xuiGet('/panel/api/inbounds/list');
-    if(!ibData.success)throw new Error('โหลด inbound ไม่สำเร็จ');
-    const ib=(ibData.obj||[]).find(x=>x.id===u.inboundId);
-    if(!ib)throw new Error('ไม่พบ inbound');
-    const settings=typeof ib.settings==='string'?JSON.parse(ib.settings):ib.settings;
-    const clients=settings.clients||[];
-    const clientIdx=clients.findIndex(c=>c.id===u.uuid||c.email===u.email);
-    if(clientIdx<0)throw new Error('ไม่พบ client ใน inbound');
-    const client={...clients[clientIdx]};
-    const now=Date.now();
+    const r = await fetch(SSH_API+'/api/ban', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},
+      body:JSON.stringify({user, hours})
+    });
+    const d = await r.json();
+    if(!d.ok && !d.success) throw new Error(d.error||'ไม่สำเร็จ');
+    alertEl.style.background='#f0fdf4'; alertEl.style.border='1px solid #86efac'; alertEl.style.color='#15803d';
+    alertEl.textContent=`✅ แบน "${user}" ${hours} ชั่วโมง สำเร็จ`;
+    document.getElementById('ban-manual-user').value='';
+    setTimeout(()=>loadBanList(), 800);
+  }catch(e){
+    alertEl.style.background='#fef2f2'; alertEl.style.border='1px solid #fca5a5'; alertEl.style.color='#991b1b';
+    alertEl.textContent='❌ '+e.message;
+  }
+}
 
-    if(action==='renew'){
-      const days=parseInt(val('mgmt-renew-days'))||30;
-      const data=parseInt(val('mgmt-renew-data'))||0;
-      client.expiryTime=now+days*86400000;
-      client.totalGB=data>0?data*1073741824:0;
-      client.enable=true;
-    } else if(action==='adddays'){
-      const days=parseInt(val('mgmt-adddays-val'))||30;
-      const base=client.expiryTime>0?client.expiryTime:now;
-      client.expiryTime=base+days*86400000;
-      client.enable=true;
-    } else if(action==='adddata'){
-      const addGB=parseInt(val('mgmt-adddata-val'))||10;
-      const curBytes=client.totalGB||0;
-      client.totalGB=curBytes+(addGB*1073741824);
-    } else if(action==='setdata'){
-      const gb=parseInt(val('mgmt-setdata-val'))||0;
-      client.totalGB=gb>0?gb*1073741824:0;
-    } else if(action==='resettraffic'){
-      const res=await xuiPost(`/panel/api/inbounds/${u.inboundId}/resetClientTraffic/${u.email}`,{});
-      if(!res.success)throw new Error(res.msg||'รีเซตไม่สำเร็จ');
-      setAlert('mgmt','✅ รีเซต Traffic สำเร็จ','ok');
-      await loadUserList();
-      return;
-    } else if(action==='delete'){
-      const res=await xuiPost(`/panel/api/inbounds/${u.inboundId}/delClient/${u.uuid}`,{});
-      if(!res.success)throw new Error(res.msg||'ลบไม่สำเร็จ');
-      setAlert('mgmt','✅ ลบยูสสำเร็จ','ok');
-      setTimeout(()=>{closeModal('mgmt');loadUserList();},1500);
+async function doUnban(user){
+  try{
+    const r = await fetch(SSH_API+'/api/unban', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},
+      body:JSON.stringify({user})
+    });
+    const d = await r.json();
+    if(!d.ok && !d.success) throw new Error(d.error||'ไม่สำเร็จ');
+    toast('✅ ปลดแบน '+user+' สำเร็จ');
+    loadBanList();
+  }catch(e){ toast('❌ '+e.message, false); }
+}
+
+async function loadVlessBanList(){
+  const list = document.getElementById('vless-ban-list');
+  list.innerHTML='<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ais)"></span>กำลังโหลด...</div>';
+  try{
+    if(!_xuiCookieSet) await xuiLogin();
+    const d = await xuiGet('/panel/api/inbounds/list');
+    if(!d.success) throw new Error('โหลด inbound ไม่สำเร็จ');
+    let disabledClients = [];
+    (d.obj||[]).forEach(ib=>{
+      const settings = typeof ib.settings==='string'?JSON.parse(ib.settings):ib.settings;
+      (settings.clients||[]).forEach(c=>{
+        if(c.enable===false){
+          disabledClients.push({
+            email: c.email||c.id,
+            uuid: c.id,
+            inboundId: ib.id,
+            inboundPort: ib.port,
+            protocol: ib.protocol
+          });
+        }
+      });
+    });
+    if(!disabledClients.length){
+      list.innerHTML='<div class="empty-state"><div class="ei">✅</div><div>ไม่มี VLESS ที่ถูกปิดการใช้งาน</div></div>';
       return;
     }
-
-    // update client
-    const payload={id:u.inboundId, settings:JSON.stringify({...settings,clients:clients.map((c,i)=>i===clientIdx?client:c)})};
-    const res=await xuiPost(`/panel/api/inbounds/updateClient/${u.uuid}`,payload);
-    if(!res.success)throw new Error(res.msg||'อัพเดทไม่สำเร็จ');
-
-    setAlert('mgmt','✅ ดำเนินการสำเร็จ!','ok');
-    await loadUserList();
-    // refresh mgmt user
-    _mgmtUser=_allUsers.find(x=>x.uuid===u.uuid)||_mgmtUser;
+    list.innerHTML = disabledClients.map(c=>{
+      const isAis=c.inboundPort===8080;
+      return `<div class="online-user-row" style="align-items:center">
+        <div class="online-avatar" style="background:${isAis?'#edf7e3':'#fff0f0'};border-color:${isAis?'#b5e08a':'#f5909a'};color:${isAis?'#316808':'#a6000c'}">${(c.email||'?')[0].toUpperCase()}</div>
+        <div class="online-info" style="flex:1">
+          <div class="online-name"><span style="font-weight:600">${c.email}</span><span class="online-port-chip">Port ${c.inboundPort}</span><span style="font-family:'Share Tech Mono',monospace;font-size:.6rem;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:.1rem .4rem;border-radius:20px">🔴 Disabled</span></div>
+          <div style="font-size:.68rem;color:var(--text3);font-family:'Share Tech Mono',monospace;margin-top:.2rem">UUID: ${c.uuid.substring(0,18)}...</div>
+        </div>
+        <button onclick="doUnbanVless('${c.email}',${c.inboundId},'${c.uuid}')" style="padding:.4rem .85rem;border-radius:9px;border:1.5px solid #16a34a;background:#f0fdf4;color:#15803d;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.82rem;cursor:pointer;white-space:nowrap;transition:all .18s" onmouseover="this.style.background='#dcfce7'" onmouseout="this.style.background='#f0fdf4'">✅ Enable</button>
+      </div>`;
+    }).join('');
   }catch(e){
-    setAlert('mgmt','❌ '+e.message,'err');
+    list.innerHTML=`<div class="empty-state"><div class="ei">⚠️</div><div>${e.message}</div></div>`;
+  }
+}
+
+async function doUnbanVless(email, inboundId, uuid){
+  try{
+    const r = await fetch(SSH_API+'/api/unban_vless', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},
+      body:JSON.stringify({user:email, inbound_id:inboundId, uuid})
+    });
+    const d = await r.json();
+    if(!d.ok && !d.success) throw new Error(d.error||'ไม่สำเร็จ');
+    toast('✅ Enable '+email+' สำเร็จ');
+    loadVlessBanList();
+  }catch(e){ toast('❌ '+e.message, false); }
+}
+
+/* ══════════════════════════════════════
+   SWITCH TAB (override เพิ่ม ban)
+══════════════════════════════════════ */
+
+/* ══════════════════════════════════════
+   MANAGE TAB TYPE SWITCH
+══════════════════════════════════════ */
+let _mgmtType = 'vless';
+function switchMgmtType(type) {
+  _mgmtType = type;
+  const isVless = type === 'vless';
+  document.getElementById('mgmt-panel-vless').style.display = isVless ? '' : 'none';
+  document.getElementById('mgmt-panel-ssh').style.display   = isVless ? 'none' : '';
+  const btnV = document.getElementById('mgmt-btn-vless');
+  const btnS = document.getElementById('mgmt-btn-ssh');
+  if(isVless){
+    btnV.style.background = 'var(--green)'; btnV.style.color = '#001a00'; btnV.style.borderColor = 'var(--green)';
+    btnS.style.background = 'transparent'; btnS.style.color = 'var(--ssh)'; btnS.style.borderColor = 'var(--ssh)';
+    if(!_allUsers.length) loadUserList();
+  } else {
+    btnS.style.background = 'var(--ssh)'; btnS.style.color = '#fff'; btnS.style.borderColor = 'var(--ssh)';
+    btnV.style.background = 'transparent'; btnV.style.color = 'var(--green)'; btnV.style.borderColor = 'var(--green)';
+    if(!_allSSHUsers.length) loadSSHUserList();
+  }
+}
+
+/* ══════════════════════════════════════
+   SSH USER LIST
+══════════════════════════════════════ */
+let _allSSHUsers = [], _filteredSSHUsers = [], _sshMgmtUser = null;
+
+async function loadSSHUserList() {
+  const list = document.getElementById('ssh-user-list');
+  list.innerHTML = '<div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังโหลด...</div>';
+  try {
+    const r = await fetch(SSH_API + '/api/users', {
+      headers: { 'X-Token': TOK, 'Authorization': 'Bearer ' + TOK }
+    });
+    const d = await r.json();
+    if (d.error || !d.users) throw new Error(d.error || 'โหลดไม่สำเร็จ');
+    _allSSHUsers = d.users || [];
+    _filteredSSHUsers = [..._allSSHUsers];
+    renderSSHUserList(_filteredSSHUsers);
+  } catch(e) {
+    list.innerHTML = `<div class="empty-state"><div class="ei">⚠️</div><div>${e.message}</div></div>`;
+  }
+}
+
+function renderSSHUserList(users) {
+  const list = document.getElementById('ssh-user-list');
+  if (!users.length) {
+    list.innerHTML = '<div class="empty-state"><div class="ei">🔍</div><div>ไม่พบยูสเซอร์ SSH</div></div>';
+    return;
+  }
+  const today = new Date().toISOString().split('T')[0];
+  list.innerHTML = users.map(u => {
+    const expired = u.exp && u.exp < today;
+    let statusHtml, expStr;
+    if (!u.exp) { expStr = 'ไม่จำกัด'; statusHtml = '<span class="status-badge status-ok">✓ Active</span>'; }
+    else if (expired) { expStr = 'หมดอายุ'; statusHtml = '<span class="status-badge status-dead">✗ Expired</span>'; }
+    else {
+      const days = Math.ceil((new Date(u.exp) - new Date()) / 86400000);
+      expStr = days + ' วัน';
+      statusHtml = days <= 3
+        ? `<span class="status-badge status-exp">⚠ ${days}d</span>`
+        : '<span class="status-badge status-ok">✓ Active</span>';
+    }
+    return `<div class="user-row" onclick="openSSHMgmtModal(${JSON.stringify(u.user)})">
+      <div class="user-avatar ua-ssh" style="background:#e8f0fe;border-color:#7c9ff5;color:#1a4faf">${(u.user||'?')[0].toUpperCase()}</div>
+      <div class="user-info">
+        <div class="user-name">${u.user}</div>
+        <div class="user-meta">SSH-WS · ${expStr}</div>
+      </div>
+      ${statusHtml}
+    </div>`;
+  }).join('');
+}
+
+function filterSSHUsers(q) {
+  const s = q.toLowerCase();
+  _filteredSSHUsers = _allSSHUsers.filter(u => (u.user||'').toLowerCase().includes(s));
+  renderSSHUserList(_filteredSSHUsers);
+}
+
+function openSSHMgmtModal(username) {
+  const u = _allSSHUsers.find(x => x.user === username);
+  if (!u) return;
+  _sshMgmtUser = u;
+  document.getElementById('ssh-mgmt-title').textContent = '⚙️ ' + username;
+  const expStr = u.exp || 'ไม่จำกัด';
+  document.getElementById('ssh-mgmt-detail').innerHTML = `
+    <div class="udetail-row"><span class="dk">👤 Username</span><span class="dv">${u.user}</span></div>
+    <div class="udetail-row"><span class="dk">📅 หมดอายุ</span><span class="dv">${expStr}</span></div>
+    <div class="udetail-row"><span class="dk">📱 IP Limit</span><span class="dv">${u.ip_limit || u.iplimit || '2'}</span></div>
+  `;
+  document.getElementById('ssh-mgmt-adddays').value = 30;
+  setAlert('ssh-mgmt', '', '');
+  openModal('ssh-mgmt');
+}
+
+async function doSSHAddDays() {
+  if (!_sshMgmtUser) return;
+  const days = parseInt(document.getElementById('ssh-mgmt-adddays').value) || 30;
+  const btn = document.getElementById('ssh-mgmt-submit');
+  btn.disabled = true;
+  setAlert('ssh-mgmt', '⏳ กำลังดำเนินการ...', 'info');
+  try {
+    const r = await fetch(SSH_API + '/api/renew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Token': TOK, 'Authorization': 'Bearer ' + TOK },
+      body: JSON.stringify({ user: _sshMgmtUser.user, days })
+    });
+    const d = await r.json();
+    if (!d.ok && !d.success) throw new Error(d.error || d.msg || 'ดำเนินการไม่สำเร็จ');
+    setAlert('ssh-mgmt', `✅ เพิ่ม ${days} วันสำเร็จ!`, 'ok');
+    toast(`✅ ${_sshMgmtUser.user} +${days} วัน`);
+    setTimeout(() => { closeModal('ssh-mgmt'); loadSSHUserList(); }, 1500);
+  } catch(e) {
+    setAlert('ssh-mgmt', '❌ ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -3676,85 +4262,9 @@ async function checkService(s){
 
 
 /* ══════════════════════════════════════
-   SNOWFLAKE CANVAS — เกล็ดแปดแฉก
+   SNOWFLAKE CANVAS — เกล็ด 6 แฉก dendrite
 ══════════════════════════════════════ */
-(function(){
-  const canvas=document.getElementById('snow-canvas');
-  if(!canvas)return;
-  const ctx=canvas.getContext('2d');
-
-  function resize(){
-    canvas.width=canvas.offsetWidth;
-    canvas.height=canvas.offsetHeight;
-  }
-  resize();
-  window.addEventListener('resize',resize);
-
-  const COLORS=['rgba(180,230,255,','rgba(200,255,220,','rgba(220,200,255,','rgba(255,200,240,'];
-  const flakes=[];
-  const COUNT=28;
-
-  function randomFlake(){
-    return{
-      x:Math.random()*canvas.width,
-      y:Math.random()*canvas.height-canvas.height,
-      size:Math.random()*7+4,
-      speed:Math.random()*.5+.25,
-      drift:Math.random()*.4-.2,
-      rot:Math.random()*Math.PI,
-      rotSpeed:(Math.random()-.5)*.02,
-      color:COLORS[Math.floor(Math.random()*COLORS.length)],
-      opacity:Math.random()*.5+.3,
-    };
-  }
-  for(let i=0;i<COUNT;i++){
-    const f=randomFlake();
-    f.y=Math.random()*canvas.height; // กระจายแรก
-    flakes.push(f);
-  }
-
-  // วาดเกล็ด 8 แฉก
-  function drawFlake(f){
-    ctx.save();
-    ctx.translate(f.x,f.y);
-    ctx.rotate(f.rot);
-    ctx.strokeStyle=f.color+f.opacity+')';
-    ctx.lineWidth=1.2;
-    ctx.lineCap='round';
-    const s=f.size;
-    // 4 เส้นหลัก (8 แฉก)
-    for(let i=0;i<4;i++){
-      ctx.save();
-      ctx.rotate(i*Math.PI/4);
-      ctx.beginPath();ctx.moveTo(0,-s);ctx.lineTo(0,s);ctx.stroke();
-      // กิ่งก้าน
-      const b=s*.45;
-      ctx.beginPath();ctx.moveTo(-b,-s*.5);ctx.lineTo(0,-s*.5+b*.4);ctx.lineTo(b,-s*.5);ctx.stroke();
-      ctx.restore();
-    }
-    // จุดกลาง
-    ctx.beginPath();ctx.arc(0,0,1.4,0,Math.PI*2);
-    ctx.fillStyle=f.color+Math.min(f.opacity+.2,1)+')';
-    ctx.fill();
-    ctx.restore();
-  }
-
-  function tick(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    flakes.forEach(f=>{
-      f.y+=f.speed;
-      f.x+=f.drift;
-      f.rot+=f.rotSpeed;
-      if(f.y>canvas.height+20){
-        Object.assign(f,randomFlake());
-        f.y=-10;
-      }
-      drawFlake(f);
-    });
-    requestAnimationFrame(tick);
-  }
-  tick();
-})();
+startSnow('snow-canvas', 32, false);
 
 function doLogout(){
   sessionStorage.removeItem('chaiya_auth');
