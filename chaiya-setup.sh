@@ -833,59 +833,108 @@ cat > /opt/chaiya-panel/index.html << 'LOGINEOF'
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CHAIYA VPN PANEL — Login</title>
-<script src="config.js"></script>
+<title>CHAIYA V2RAY PRO MAX — Login</title>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Kanit:wght@300;400;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
+/* ══════════════════════════════════════
+   ROOT
+══════════════════════════════════════ */
 :root{
-  --bg:#070d14;--card:#0d1622;
-  --border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.13);
-  --text:#e8f4ff;--text2:rgba(255,255,255,.45);--text3:rgba(255,255,255,.25);
-  --green:#72d124;--blue:#7ee8fa;--purple:#a78bfa;--red:#f87171;
+  --bg:     #070d14;
+  --card:   #0d1622;
+  --border: rgba(255,255,255,.08);
+  --border2:rgba(255,255,255,.13);
+  --text:   #e8f4ff;
+  --text2:  rgba(255,255,255,.45);
+  --text3:  rgba(255,255,255,.25);
+  --green:  #72d124;
+  --blue:   #7ee8fa;
+  --purple: #a78bfa;
+  --red:    #f87171;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
-  background:var(--bg);color:var(--text);font-family:'Kanit',sans-serif;
-  min-height:100vh;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;overflow:hidden;position:relative;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Kanit',sans-serif;
+  font-weight:400;
+  min-height:100vh;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  overflow:hidden;position:relative;
 }
+
+/* ══════════════════════════════════════
+   BACKGROUND LAYERS
+══════════════════════════════════════ */
+/* ambient RGB glow */
 body::before{
   content:'';position:fixed;inset:0;pointer-events:none;
   background:
-    radial-gradient(ellipse 70% 50% at 15% 40%,rgba(0,160,255,.055) 0%,transparent 65%),
-    radial-gradient(ellipse 60% 50% at 85% 60%,rgba(160,0,255,.05) 0%,transparent 65%),
-    radial-gradient(ellipse 80% 40% at 50% 100%,rgba(0,255,140,.04) 0%,transparent 60%);
+    radial-gradient(ellipse 70% 50% at 15% 40%, rgba(0,160,255,.055) 0%,transparent 65%),
+    radial-gradient(ellipse 60% 50% at 85% 60%, rgba(160,0,255,.05)  0%,transparent 65%),
+    radial-gradient(ellipse 80% 40% at 50% 100%,rgba(0,255,140,.04)  0%,transparent 60%);
   animation:ambientPulse 9s ease-in-out infinite alternate;
 }
-@keyframes ambientPulse{0%{opacity:.7}50%{opacity:1}100%{opacity:.6}}
+@keyframes ambientPulse{
+  0%  {opacity:.7}50%{opacity:1}100%{opacity:.6}
+}
+
+/* grid dots */
 body::after{
   content:'';position:fixed;inset:0;pointer-events:none;
   background-image:radial-gradient(rgba(126,232,250,.06) 1px,transparent 1px);
   background-size:32px 32px;
 }
+
+/* snow canvas */
 #snow-canvas{position:fixed;inset:0;pointer-events:none;z-index:1}
-.login-wrap{position:relative;z-index:10;width:100%;max-width:380px;padding:1.2rem;}
+
+/* ══════════════════════════════════════
+   LOGIN CARD
+══════════════════════════════════════ */
+.login-wrap{
+  position:relative;z-index:10;
+  width:100%;max-width:380px;
+  padding:1.2rem;
+}
+
+/* glow ring รอบ card */
 .card-glow{
   position:absolute;inset:-1px;border-radius:27px;
   background:linear-gradient(135deg,rgba(126,232,250,.18),rgba(167,139,250,.12),rgba(114,209,36,.14),rgba(126,232,250,.18));
   background-size:300% 300%;
-  animation:borderGlow 6s linear infinite;z-index:0;
+  animation:borderGlow 6s linear infinite;
+  z-index:0;
 }
 @keyframes borderGlow{to{background-position:300% 300%}}
+
 .login-card{
-  position:relative;z-index:1;background:var(--card);border-radius:26px;
-  padding:2.2rem 2rem 2rem;border:1px solid var(--border2);
+  position:relative;z-index:1;
+  background:var(--card);
+  border-radius:26px;
+  padding:2.2rem 2rem 2rem;
+  border:1px solid var(--border2);
   box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.06);
-  animation:floatCard 6s ease-in-out infinite;
 }
-@keyframes floatCard{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+
+/* ══════════════════════════════════════
+   LOGO AREA
+══════════════════════════════════════ */
 .logo-area{text-align:center;margin-bottom:1.8rem}
 .logo-badge{
   display:inline-flex;align-items:center;gap:.55rem;
   font-family:'Share Tech Mono',monospace;font-size:.58rem;
-  letter-spacing:.38em;color:rgba(126,232,250,.5);margin-bottom:.8rem;
+  letter-spacing:.38em;color:rgba(126,232,250,.5);
+  margin-bottom:.8rem;
 }
+.logo-badge::before,.logo-badge::after{
+  content:'';display:inline-block;height:1px;width:28px;
+  background:linear-gradient(90deg,transparent,rgba(126,232,250,.35));
+}
+.logo-badge::after{background:linear-gradient(90deg,rgba(126,232,250,.35),transparent)}
+
 .logo-icon{
   width:64px;height:64px;border-radius:18px;
   background:linear-gradient(135deg,#0f1f0a,#1a3512);
@@ -893,8 +942,14 @@ body::after{
   display:flex;align-items:center;justify-content:center;
   margin:0 auto .9rem;
   box-shadow:0 0 0 6px rgba(114,209,36,.06),0 8px 24px rgba(0,0,0,.3);
-  font-size:1.8rem;position:relative;overflow:hidden;
+  font-size:1.8rem;
+  position:relative;overflow:hidden;
 }
+.logo-icon::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(126,232,250,.08),transparent 60%);
+}
+
 .logo-title{
   font-family:'Rajdhani',sans-serif;font-size:1.9rem;font-weight:700;
   letter-spacing:.1em;color:var(--text);line-height:1;
@@ -903,145 +958,292 @@ body::after{
   background:linear-gradient(90deg,#7ee8fa,#a78bfa,#80ff72,#7ee8fa);
   background-size:250% auto;
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-  background-clip:text;animation:rgbFlow 4s linear infinite;
+  background-clip:text;
+  animation:rgbFlow 4s linear infinite;
 }
 @keyframes rgbFlow{to{background-position:250% center}}
-.logo-sub{font-family:'Share Tech Mono',monospace;font-size:.65rem;color:var(--text3);letter-spacing:.1em;margin-top:.35rem;}
-.server-strip{
-  display:flex;align-items:center;justify-content:center;gap:.5rem;
-  background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;
-  padding:.5rem .8rem;margin-bottom:1.4rem;
-  font-family:'Share Tech Mono',monospace;font-size:.65rem;color:var(--text3);
+
+.logo-sub{
+  font-family:'Share Tech Mono',monospace;
+  font-size:.65rem;color:var(--text3);letter-spacing:.1em;
+  margin-top:.35rem;
 }
-.server-dot{
-  width:6px;height:6px;border-radius:50%;background:#22c55e;
-  box-shadow:0 0 5px rgba(34,197,94,.6);animation:pingDot 2s infinite;flex-shrink:0;
-}
-@keyframes pingDot{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ══════════════════════════════════════
+   FORM
+══════════════════════════════════════ */
 .form-group{margin-bottom:1rem;position:relative}
 .form-label{
   display:flex;align-items:center;gap:.35rem;
-  font-family:'Share Tech Mono',monospace;font-size:.62rem;
-  letter-spacing:.12em;text-transform:uppercase;color:var(--text2);margin-bottom:.45rem;
+  font-family:'Share Tech Mono',monospace;
+  font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text2);margin-bottom:.45rem;
 }
 .input-wrap{position:relative}
-.input-icon{position:absolute;left:.9rem;top:50%;transform:translateY(-50%);font-size:.95rem;pointer-events:none;}
+.input-icon{
+  position:absolute;left:.9rem;top:50%;transform:translateY(-50%);
+  font-size:.95rem;pointer-events:none;
+}
 .form-input{
-  width:100%;background:rgba(255,255,255,.04);border:1.5px solid rgba(255,255,255,.1);
-  border-radius:12px;padding:.72rem .9rem .72rem 2.6rem;color:var(--text);
-  font-family:'Kanit',sans-serif;font-size:.92rem;outline:none;
+  width:100%;
+  background:rgba(255,255,255,.04);
+  border:1.5px solid rgba(255,255,255,.1);
+  border-radius:12px;
+  padding:.72rem .9rem .72rem 2.6rem;
+  color:var(--text);
+  font-family:'Kanit',sans-serif;font-size:.92rem;
+  outline:none;
   transition:border-color .2s,box-shadow .2s,background .2s;
 }
 .form-input::placeholder{color:var(--text3)}
 .form-input:focus{
-  background:rgba(255,255,255,.07);border-color:rgba(126,232,250,.4);
+  background:rgba(255,255,255,.07);
+  border-color:rgba(126,232,250,.4);
   box-shadow:0 0 0 3px rgba(126,232,250,.08),inset 0 1px 0 rgba(255,255,255,.04);
 }
+
+/* eye toggle */
 .eye-btn{
   position:absolute;right:.9rem;top:50%;transform:translateY(-50%);
-  background:none;border:none;cursor:pointer;color:var(--text3);font-size:1rem;
-  padding:.2rem;transition:color .2s;
+  background:none;border:none;cursor:pointer;
+  color:var(--text3);font-size:1rem;padding:.2rem;
+  transition:color .2s;
 }
 .eye-btn:hover{color:var(--text2)}
+
+/* ══════════════════════════════════════
+   LOGIN BUTTON
+══════════════════════════════════════ */
 .login-btn{
-  width:100%;margin-top:.4rem;padding:.88rem;border:none;border-radius:13px;
+  width:100%;margin-top:.4rem;
+  padding:.88rem;border:none;border-radius:13px;
   font-family:'Rajdhani',sans-serif;font-size:1.06rem;font-weight:700;
-  letter-spacing:.14em;cursor:pointer;position:relative;overflow:hidden;
-  background:linear-gradient(135deg,#1a3a10,#2d6016,#3d8018);color:#d4f8a0;
+  letter-spacing:.14em;cursor:pointer;
+  position:relative;overflow:hidden;
+  background:linear-gradient(135deg,#1a3a10,#2d6016,#3d8018);
+  color:#d4f8a0;
   box-shadow:0 4px 20px rgba(72,160,20,.25),inset 0 1px 0 rgba(255,255,255,.1);
   transition:all .22s;
 }
-.login-btn:hover{box-shadow:0 6px 28px rgba(72,160,20,.38);transform:translateY(-1px);}
+.login-btn::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,rgba(126,232,250,.15),rgba(167,139,250,.1),rgba(114,209,36,.12),rgba(126,232,250,.15));
+  background-size:300% auto;
+  animation:btnRgb 4s linear infinite;opacity:0;
+  transition:opacity .3s;
+}
+@keyframes btnRgb{to{background-position:300% center}}
+.login-btn:hover::before{opacity:1}
+.login-btn:hover{
+  box-shadow:0 6px 28px rgba(72,160,20,.38),inset 0 1px 0 rgba(255,255,255,.12);
+  transform:translateY(-1px);
+}
 .login-btn:active{transform:translateY(0)}
 .login-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
-.btn-inner{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:.5rem}
+.login-btn .btn-inner{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:.5rem}
+
+/* spinner */
 .spin-ring{
   display:inline-block;width:16px;height:16px;
-  border:2px solid rgba(255,255,255,.25);border-top-color:rgba(255,255,255,.8);
-  border-radius:50%;animation:spin .7s linear infinite;
+  border:2px solid rgba(255,255,255,.25);
+  border-top-color:rgba(255,255,255,.8);
+  border-radius:50%;
+  animation:spin .7s linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* ══════════════════════════════════════
+   ALERT
+══════════════════════════════════════ */
 .login-alert{
-  display:none;margin-top:.85rem;padding:.65rem .9rem;border-radius:10px;
+  display:none;margin-top:.85rem;
+  padding:.65rem .9rem;border-radius:10px;
   font-size:.8rem;line-height:1.5;text-align:center;
 }
-.login-alert.err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.25);color:#fca5a5;}
-.login-alert.ok{background:rgba(114,209,36,.1);border:1px solid rgba(114,209,36,.25);color:#a3e635;}
+.login-alert.err{
+  background:rgba(248,113,113,.1);
+  border:1px solid rgba(248,113,113,.25);
+  color:#fca5a5;
+}
+.login-alert.ok{
+  background:rgba(114,209,36,.1);
+  border:1px solid rgba(114,209,36,.25);
+  color:#a3e635;
+}
+
+/* ══════════════════════════════════════
+   FOOTER INFO
+══════════════════════════════════════ */
 .login-footer{
-  text-align:center;margin-top:1.5rem;font-family:'Share Tech Mono',monospace;
-  font-size:.6rem;color:var(--text3);letter-spacing:.06em;line-height:1.8;
+  text-align:center;margin-top:1.5rem;
+  font-family:'Share Tech Mono',monospace;
+  font-size:.6rem;color:var(--text3);letter-spacing:.06em;
+  line-height:1.8;
 }
 .login-footer .dot{margin:0 .3rem;color:rgba(126,232,250,.2)}
+
+/* ══════════════════════════════════════
+   SERVER INFO STRIP
+══════════════════════════════════════ */
+.server-strip{
+  display:flex;align-items:center;justify-content:center;gap:.5rem;
+  background:rgba(255,255,255,.03);
+  border:1px solid var(--border);border-radius:10px;
+  padding:.5rem .8rem;margin-bottom:1.4rem;
+  font-family:'Share Tech Mono',monospace;font-size:.65rem;
+  color:var(--text3);
+}
+.server-dot{
+  width:6px;height:6px;border-radius:50%;background:#22c55e;
+  box-shadow:0 0 5px rgba(34,197,94,.6);
+  animation:pingDot 2s infinite;flex-shrink:0;
+}
+@keyframes pingDot{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ══════════════════════════════════════
+   SNOWFLAKE EFFECT ที่ card
+══════════════════════════════════════ */
+@keyframes floatCard{
+  0%,100%{transform:translateY(0)}
+  50%    {transform:translateY(-4px)}
+}
+.login-card{animation:floatCard 6s ease-in-out infinite}
+
+/* shake on error */
 @keyframes shake{
-  0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}
-  40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}
+  0%,100%{transform:translateX(0)}
+  20%    {transform:translateX(-6px)}
+  40%    {transform:translateX(6px)}
+  60%    {transform:translateX(-4px)}
+  80%    {transform:translateX(4px)}
 }
 .shake{animation:shake .4s ease-in-out!important}
 </style>
 </head>
 <body>
+
 <canvas id="snow-canvas"></canvas>
+
 <div class="login-wrap">
+  <!-- glow border -->
   <div class="card-glow"></div>
+
   <div class="login-card" id="login-card">
+
+    <!-- Logo -->
     <div class="logo-area">
-      <div class="logo-badge">CHAIYA VPN PANEL v4</div>
+      <div class="logo-badge">CHAIYA V2RAY PRO MAX</div>
       <div class="logo-icon">🛡️</div>
       <div class="logo-title">ADMIN <span class="rgb">PANEL</span></div>
-      <div class="logo-sub">SSH + V2Ray Management System</div>
+      <div class="logo-sub">x-ui Management Dashboard</div>
     </div>
+
+    <!-- Server strip -->
     <div class="server-strip">
       <span class="server-dot"></span>
       <span id="srv-host">กำลังเชื่อมต่อ...</span>
     </div>
+
+    <!-- Username -->
     <div class="form-group">
-      <div class="form-label">🔑 Panel Password</div>
+      <div class="form-label">👤 Username</div>
+      <div class="input-wrap">
+        <span class="input-icon">👤</span>
+        <input
+          type="text" id="inp-user"
+          class="form-input" placeholder="admin"
+          autocomplete="username"
+          onkeydown="if(event.key==='Enter')doLogin()"
+        >
+      </div>
+    </div>
+
+    <!-- Password -->
+    <div class="form-group">
+      <div class="form-label">🔑 Password</div>
       <div class="input-wrap">
         <span class="input-icon">🔑</span>
-        <input type="password" id="inp-pass" class="form-input"
-          placeholder="••••••••" autocomplete="current-password"
+        <input
+          type="password" id="inp-pass"
+          class="form-input" placeholder="••••••••"
+          autocomplete="current-password"
           onkeydown="if(event.key==='Enter')doLogin()"
-          style="padding-right:2.8rem">
+          style="padding-right:2.8rem"
+        >
         <button class="eye-btn" id="eye-btn" onclick="toggleEye()" type="button">👁</button>
       </div>
     </div>
+
+    <!-- Login Button -->
     <button class="login-btn" id="login-btn" onclick="doLogin()">
-      <span class="btn-inner" id="btn-inner">⚡ เข้าสู่ระบบ</span>
+      <span class="btn-inner" id="btn-inner">
+        ⚡ เข้าสู่ระบบ
+      </span>
     </button>
+
+    <!-- Alert -->
     <div class="login-alert" id="login-alert"></div>
+
+    <!-- Footer -->
     <div class="login-footer">
       <span id="login-time">--</span>
-      <span class="dot">·</span>CHAIYA VPN SYSTEM<span class="dot">·</span>v4.0
+      <span class="dot">·</span>
+      CHAIYA VPN SYSTEM
+      <span class="dot">·</span>
+      v8.0
     </div>
-  </div>
-</div>
-<script>
-const CFG = (typeof window.CHAIYA_CONFIG !== 'undefined') ? window.CHAIYA_CONFIG : {};
-const HOST = CFG.domain || CFG.host || location.hostname;
-const SESSION_KEY = 'chaiya_auth';
-const DASHBOARD = 'sshws.html';
 
+  </div><!-- /login-card -->
+</div>
+
+<script>
+/* ══════════════════════════════════════
+   CONFIG — อ่านจาก CHAIYA_CONFIG เหมือน dashboard
+══════════════════════════════════════ */
+const CFG     = (typeof window.CHAIYA_CONFIG !== 'undefined') ? window.CHAIYA_CONFIG : {};
+const HOST    = CFG.host      || location.hostname;
+const XUI_API = '/xui-api';
+// ชื่อ key ที่จะเก็บใน sessionStorage
+const SESSION_KEY = 'chaiya_auth';
+// หน้า dashboard ที่จะ redirect ไป
+const DASHBOARD = CFG.dashboard_url || 'sshws.html';
+
+/* ══════════════════════════════════════
+   INIT
+══════════════════════════════════════ */
 window.addEventListener('load', () => {
+  // ถ้า login ค้างไว้แล้ว ข้ามไป dashboard เลย
   const saved = sessionStorage.getItem(SESSION_KEY);
   if (saved) {
     try {
       const s = JSON.parse(saved);
-      if (s.token && Date.now() < s.exp) { window.location.replace(DASHBOARD); return; }
+      if (s.user && s.pass && Date.now() < s.exp) {
+        window.location.replace(DASHBOARD);
+        return;
+      }
     } catch(e) {}
     sessionStorage.removeItem(SESSION_KEY);
   }
-  document.getElementById('srv-host').textContent = 'https://' + HOST;
+
+  document.getElementById('srv-host').textContent = HOST;
   updateClock();
   setInterval(updateClock, 1000);
-  document.getElementById('inp-pass').focus();
+
+  // focus username
+  document.getElementById('inp-user').focus();
+  if (CFG.xui_user) document.getElementById('inp-user').value = CFG.xui_user;
+
   startSnow();
 });
 
 function updateClock() {
   document.getElementById('login-time').textContent =
-    new Date().toLocaleTimeString('th-TH', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+/* ══════════════════════════════════════
+   EYE TOGGLE
+══════════════════════════════════════ */
 let eyeOpen = false;
 function toggleEye() {
   eyeOpen = !eyeOpen;
@@ -1049,82 +1251,163 @@ function toggleEye() {
   document.getElementById('eye-btn').textContent = eyeOpen ? '🙈' : '👁';
 }
 
+/* ══════════════════════════════════════
+   LOGIN LOGIC
+══════════════════════════════════════ */
 async function doLogin() {
+  const user = document.getElementById('inp-user').value.trim();
   const pass = document.getElementById('inp-pass').value;
+
+  if (!user) return showAlert('กรุณาใส่ Username', 'err');
   if (!pass) return showAlert('กรุณาใส่ Password', 'err');
-  setLoading(true); hideAlert();
+
+  setLoading(true);
+  hideAlert();
+
   try {
-    const res = await Promise.race([
-      fetch('/api/verify', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({password: pass})
+    // POST ไป x-ui login endpoint
+    const form = new URLSearchParams({ username: user, password: pass });
+    const res  = await Promise.race([
+      fetch(XUI_API + '/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString()
       }),
-      new Promise((_,rej) => setTimeout(() => rej(new Error('Connection timeout')), 8000))
+      new Promise((_, rej) => setTimeout(() => rej(new Error('Connection timeout')), 8000))
     ]);
+
     const data = await res.json();
-    if (data.ok) {
+
+    if (data.success) {
+      // บันทึก session 8 ชั่วโมง
       sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-        token: btoa(pass), exp: Date.now() + 8 * 3600 * 1000
+        user, pass,
+        exp: Date.now() + 8 * 3600 * 1000
       }));
       showAlert('✅ เข้าสู่ระบบสำเร็จ กำลัง redirect...', 'ok');
-      setTimeout(() => window.location.replace(DASHBOARD), 900);
+
+      // flash สีเขียวแล้ว redirect
+      setTimeout(() => {
+        window.location.replace(DASHBOARD);
+      }, 900);
     } else {
-      throw new Error('Password ไม่ถูกต้อง');
+      throw new Error(data.msg || 'Username หรือ Password ไม่ถูกต้อง');
     }
-  } catch(e) {
+  } catch (e) {
     showAlert('❌ ' + e.message, 'err');
+    // shake card
     const card = document.getElementById('login-card');
-    card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
+    card.classList.remove('shake');
+    void card.offsetWidth; // reflow
+    card.classList.add('shake');
     setTimeout(() => card.classList.remove('shake'), 450);
-    document.getElementById('inp-pass').style.borderColor = 'rgba(248,113,113,.5)';
-    setTimeout(() => { document.getElementById('inp-pass').style.borderColor = ''; }, 1500);
-  } finally { setLoading(false); }
+    // เขย่า input
+    ['inp-user','inp-pass'].forEach(id => {
+      document.getElementById(id).style.borderColor = 'rgba(248,113,113,.5)';
+      setTimeout(() => {
+        document.getElementById(id).style.borderColor = '';
+      }, 1500);
+    });
+  } finally {
+    setLoading(false);
+  }
 }
 
 function setLoading(on) {
   const btn = document.getElementById('login-btn');
   const inner = document.getElementById('btn-inner');
   btn.disabled = on;
-  inner.innerHTML = on ? '<span class="spin-ring"></span> กำลังตรวจสอบ...' : '⚡ เข้าสู่ระบบ';
+  inner.innerHTML = on
+    ? '<span class="spin-ring"></span> กำลังตรวจสอบ...'
+    : '⚡ เข้าสู่ระบบ';
 }
+
 function showAlert(msg, type) {
   const el = document.getElementById('login-alert');
-  el.textContent = msg; el.className = 'login-alert ' + type; el.style.display = 'block';
+  el.textContent = msg;
+  el.className = 'login-alert ' + type;
+  el.style.display = 'block';
 }
-function hideAlert() { document.getElementById('login-alert').style.display = 'none'; }
+function hideAlert() {
+  document.getElementById('login-alert').style.display = 'none';
+}
 
+/* ══════════════════════════════════════
+   SNOWFLAKE CANVAS — เกล็ด 8 แฉก
+   (เหมือนกับ dashboard)
+══════════════════════════════════════ */
 function startSnow() {
   const canvas = document.getElementById('snow-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-  resize(); window.addEventListener('resize', resize);
-  const COLORS = ['rgba(180,230,255,','rgba(200,255,220,','rgba(220,200,255,','rgba(255,210,240,'];
-  const COUNT = 38; const flakes = [];
-  function rnd(a,b){return Math.random()*(b-a)+a}
-  function mkFlake(){return{x:rnd(0,canvas.width),y:rnd(-20,canvas.height),size:rnd(4,10),
-    speed:rnd(.2,.55),drift:rnd(-.25,.25),rot:rnd(0,Math.PI),rotSpeed:rnd(-.018,.018),
-    color:COLORS[Math.floor(Math.random()*COLORS.length)],opacity:rnd(.2,.55)}}
-  for(let i=0;i<COUNT;i++)flakes.push(mkFlake());
-  function drawFlake(f){
-    ctx.save();ctx.translate(f.x,f.y);ctx.rotate(f.rot);
-    ctx.strokeStyle=f.color+f.opacity+')';ctx.lineWidth=1.1;ctx.lineCap='round';
-    const s=f.size;
-    for(let i=0;i<4;i++){
-      ctx.save();ctx.rotate(i*Math.PI/4);
-      ctx.beginPath();ctx.moveTo(0,-s);ctx.lineTo(0,s);ctx.stroke();
-      const b=s*.42;
-      ctx.beginPath();ctx.moveTo(-b,-s*.48);ctx.lineTo(0,-s*.48+b*.5);ctx.lineTo(b,-s*.48);ctx.stroke();
+
+  function resize() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const COLORS = [
+    'rgba(180,230,255,',
+    'rgba(200,255,220,',
+    'rgba(220,200,255,',
+    'rgba(255,210,240,'
+  ];
+  const COUNT = 38;
+  const flakes = [];
+
+  function rnd(a, b) { return Math.random() * (b - a) + a; }
+  function mkFlake() {
+    return {
+      x:        rnd(0, canvas.width),
+      y:        rnd(-20, canvas.height),
+      size:     rnd(4, 10),
+      speed:    rnd(.2, .55),
+      drift:    rnd(-.25, .25),
+      rot:      rnd(0, Math.PI),
+      rotSpeed: rnd(-.018, .018),
+      color:    COLORS[Math.floor(Math.random() * COLORS.length)],
+      opacity:  rnd(.2, .55),
+    };
+  }
+  for (let i = 0; i < COUNT; i++) flakes.push(mkFlake());
+
+  function drawFlake(f) {
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.rotate(f.rot);
+    ctx.strokeStyle = f.color + f.opacity + ')';
+    ctx.lineWidth   = 1.1;
+    ctx.lineCap     = 'round';
+    const s = f.size;
+    for (let i = 0; i < 4; i++) {
+      ctx.save();
+      ctx.rotate(i * Math.PI / 4);
+      ctx.beginPath(); ctx.moveTo(0, -s); ctx.lineTo(0, s); ctx.stroke();
+      // กิ่งซ้าย-ขวา
+      const b = s * .42;
+      ctx.beginPath();
+      ctx.moveTo(-b, -s * .48); ctx.lineTo(0, -s * .48 + b * .5); ctx.lineTo(b, -s * .48);
+      ctx.stroke();
       ctx.restore();
     }
-    ctx.beginPath();ctx.arc(0,0,1.5,0,Math.PI*2);
-    ctx.fillStyle=f.color+Math.min(f.opacity+.25,1)+')';ctx.fill();ctx.restore();
+    // จุดกลาง
+    ctx.beginPath();
+    ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = f.color + Math.min(f.opacity + .25, 1) + ')';
+    ctx.fill();
+    ctx.restore();
   }
-  function tick(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    flakes.forEach(f=>{
-      f.y+=f.speed;f.x+=f.drift;f.rot+=f.rotSpeed;
-      if(f.y>canvas.height+20)Object.assign(f,mkFlake(),{y:-10,x:rnd(0,canvas.width)});
+
+  function tick() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    flakes.forEach(f => {
+      f.y   += f.speed;
+      f.x   += f.drift;
+      f.rot += f.rotSpeed;
+      if (f.y > canvas.height + 20) Object.assign(f, mkFlake(), { y: -10, x: rnd(0, canvas.width) });
       drawFlake(f);
     });
     requestAnimationFrame(tick);
@@ -1796,50 +2079,41 @@ select option{background:#fff}
 ══════════════════════════════════════ */
 .site-header{
   text-align:center;
-  padding:2.2rem 1.5rem 1.8rem;
-  background:linear-gradient(175deg,#0a0f1a 0%,#0d1520 55%,#111820 100%);
-  border-bottom:1px solid rgba(255,255,255,.06);
+  padding:2rem 1.5rem 1.6rem;
+  background:linear-gradient(160deg,#152515 0%,#0e1e2e 55%,#18182e 100%);
+  border-bottom:1px solid rgba(255,255,255,.05);
   position:relative;overflow:hidden;
 }
 .site-header::before{
-  content:'';position:absolute;inset:0;
-  background:
-    radial-gradient(ellipse 60% 40% at 20% 50%,rgba(0,180,255,.07) 0%,transparent 70%),
-    radial-gradient(ellipse 60% 40% at 80% 50%,rgba(180,0,255,.07) 0%,transparent 70%),
-    radial-gradient(ellipse 80% 60% at 50% 120%,rgba(0,255,150,.06) 0%,transparent 65%);
-  pointer-events:none;animation:hdrGlow 8s ease-in-out infinite alternate;
+  content:"";position:absolute;top:-60px;left:50%;transform:translateX(-50%);
+  width:380px;height:200px;
+  background:radial-gradient(ellipse,rgba(80,160,20,.18) 0%,transparent 70%);
+  pointer-events:none;
 }
 .site-logo{
   font-family:"Share Tech Mono",monospace;
-  font-size:.6rem;letter-spacing:.38em;
-  color:rgba(160,220,255,.5);
-  margin-bottom:.5rem;
-  display:flex;align-items:center;justify-content:center;gap:.75rem;
-  position:relative;z-index:2;
+  font-size:.6rem;letter-spacing:.35em;
+  color:rgba(100,200,50,.65);
+  margin-bottom:.45rem;
+  display:flex;align-items:center;justify-content:center;gap:.7rem;
+  position:relative;z-index:1;
 }
 .site-logo::before,.site-logo::after{
-  content:"";display:inline-block;height:1px;width:44px;
-  background:linear-gradient(90deg,transparent,rgba(100,180,255,.35));
+  content:"";display:inline-block;height:1px;width:42px;
+  background:linear-gradient(90deg,transparent,rgba(100,200,50,.45));
 }
-.site-logo::after{background:linear-gradient(90deg,rgba(100,180,255,.35),transparent)}
+.site-logo::after{background:linear-gradient(90deg,rgba(100,200,50,.45),transparent)}
 .site-title{
-  font-family:"Rajdhani",sans-serif;font-size:2.45rem;font-weight:700;
-  letter-spacing:.09em;color:#e8f4ff;
-  position:relative;z-index:2;line-height:1.1;
-  text-shadow:0 0 30px rgba(80,160,255,.2);
+  font-family:"Rajdhani",sans-serif;font-size:2.4rem;font-weight:700;letter-spacing:.08em;
+  color:#eef6ff;position:relative;z-index:1;line-height:1.1;
 }
-.site-title .rgb-word{
-  background:linear-gradient(90deg,#7ee8fa,#80ff72,#7ee8fa);
-  background-size:200% auto;
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-  animation:rgbShift 4s linear infinite;
-}
+.site-title span{color:#72d124;text-shadow:0 0 22px rgba(100,200,30,.4)}
 .site-sub{
-  font-size:.7rem;color:rgba(255,255,255,.3);margin-top:.4rem;
+  font-size:.72rem;color:rgba(255,255,255,.35);margin-top:.4rem;
   font-family:"Share Tech Mono",monospace;letter-spacing:.07em;
-  position:relative;z-index:2;
+  position:relative;z-index:1;
 }
-.site-sub .dot{margin:0 .4rem;color:rgba(130,200,255,.35)}
+.site-sub .dot{margin:0 .4rem;color:rgba(110,200,50,.45)}
 
 /* ══════════════════════════════════════
    TAB NAV UPGRADE
@@ -2271,7 +2545,6 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
         </div>
         <div style="flex:1">
           <div style="font-size:.78rem;color:var(--text2)" id="xui-ver">เวอร์ชัน: --</div>
-          <div style="font-size:.72rem;color:var(--green);font-weight:600;margin-top:.2rem" id="xui-admin"></div>
           <div style="font-size:.72rem;color:var(--text3);font-family:'Share Tech Mono',monospace" id="xui-traffic">Traffic inbounds: --</div>
         </div>
       </div>
@@ -2293,7 +2566,19 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
     </div>
 
 
-
+    <!-- Service Monitor -->
+    <div class="stat-card wide">
+      <div class="stat-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem">
+        <span>🛠 SERVICE MONITOR</span>
+        <button class="refresh-btn" id="svc-refresh-btn" onclick="loadServiceStatus()">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          เช็คสถานะ
+        </button>
+      </div>
+      <div id="svc-list">
+        <div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังตรวจสอบ...</div>
+      </div>
+    </div>
 
   </div><!-- /stats-grid -->
 
@@ -2877,9 +3162,7 @@ async function loadStats(){
 
       /* x-ui version */
       setBadge(true,'ออนไลน์');
-      document.getElementById('xui-ver').textContent='เวอร์ชัน: '+(o.appVersion||o.xrayVersion||'--');
-      const adminEl=document.getElementById('xui-admin');
-      if(adminEl)adminEl.textContent='🤫ADMIN: CHAIYA😆';
+      document.getElementById('xui-ver').textContent='เวอร์ชัน: '+(o.xrayVersion||'--');
     }
 
     /* ── 2. Inbound count ── */
@@ -3327,9 +3610,9 @@ function renderQR(elId,text){
 const SERVICES=[
   {name:'x-ui Panel',     icon:'📡', ports:[54321], type:'xui'},
   {name:'Python SSH API', icon:'🐍', ports:[6789],  path:SSH_API+'/api/status', type:'http'},
-  {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'api', key:'dropbear'},
+  {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'port'},
   {name:'nginx / WS',     icon:'🌐', ports:[80],    path:'/', type:'http'},
-  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'api', key:'badvpn'},
+  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'port'},
 ];
 
 async function loadServiceStatus(){
@@ -3374,13 +3657,6 @@ async function checkService(s){
       return {...base,state:r.ok||r.status<500?'up':'warn'};
     }
     // port: ใช้ no-cors fetch — ถ้าไม่ timeout แสดงว่า port เปิดอยู่
-    if(s.type==='api'){
-      try{
-        const r=await fetch('/api/status');
-        const d=await r.json();
-        return {...base,state:(d.services&&d.services[s.key])?'up':'down'};
-      }catch{return base;}
-    }
     if(s.type==='port'){
       const checks=await Promise.all(s.ports.map(async p=>{
         try{
@@ -3505,6 +3781,8 @@ with open('/opt/chaiya-panel/sshws.html','r') as f: c=f.read()
 c=c.replace("const SSH_API = '/sshws-api';","const SSH_API = '/api';")
 c=c.replace("window.location.replace('chaiya-login.html');","window.location.replace('index.html');")
 c=c.replace("!s.user || !s.pass || Date.now()","!(s.token || (s.user && s.pass)) || Date.now()")
+c=c.replace("ports:[54321]","ports:[2053]")
+c=c.replace("path:SSH_API+'/api/status'","path:SSH_API+'/status'")
 with open('/opt/chaiya-panel/sshws.html','w') as f: f.write(c)
 print("patch OK")
 PYEOF
