@@ -198,156 +198,112 @@ XUIEOF
 fi
 
 systemctl stop x-ui 2>/dev/null || true
-sleep 2
+sleep 3
 
 XUI_DB="/etc/x-ui/x-ui.db"
+REAL_XUI_PORT="$XUI_PORT"
 
-XUI_PASS_HASH=$(python3 -c "
-import bcrypt, sys
-pw = sys.argv[1].encode()
-print(bcrypt.hashpw(pw, bcrypt.gensalt()).decode())
-" "$XUI_PASS" 2>/dev/null)
-[[ -z "$XUI_PASS_HASH" ]] && XUI_PASS_HASH="$XUI_PASS"
+# ── เขียน credentials + inbound ลง DB ตรงๆ (ไม่ต้อง login) ──
+VMESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+VLESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+echo "$VMESS_UUID" > /etc/chaiya/vmess-uuid.conf
+echo "$VLESS_UUID" > /etc/chaiya/vless-uuid.conf
+chmod 600 /etc/chaiya/vmess-uuid.conf /etc/chaiya/vless-uuid.conf
 
-if [[ -f "$XUI_DB" ]]; then
-  sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS_HASH}' WHERE id=1;" 2>/dev/null || true
-  for _key in webPort webUsername webPassword; do
-    sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
-  done
-  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"       2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"   2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPassword','${XUI_PASS_HASH}');" 2>/dev/null || true
-  ok "x-ui credentials + port ตั้งค่าใน DB เรียบร้อย"
-fi
+python3 << DBEOF
+import sqlite3, json, sys, subprocess, os
+
+db_path = "/etc/x-ui/x-ui.db"
+xui_user = """${XUI_USER}"""
+xui_pass = """${XUI_PASS}"""
+xui_port = ${XUI_PORT}
+vmess_uuid = """${VMESS_UUID}"""
+vless_uuid = """${VLESS_UUID}"""
+
+if not os.path.exists(db_path):
+    print("[WARN] ไม่พบ x-ui DB — ข้าม")
+    sys.exit(0)
+
+# hash password ด้วย bcrypt
+try:
+    import bcrypt
+    pw_hash = bcrypt.hashpw(xui_pass.encode(), bcrypt.gensalt()).decode()
+except Exception:
+    pw_hash = xui_pass  # fallback plain
+
+con = sqlite3.connect(db_path)
+cur = con.cursor()
+
+# อัพเดท user
+try:
+    cur.execute("UPDATE users SET username=?, password=? WHERE id=1", (xui_user, pw_hash))
+except: pass
+
+# อัพเดท settings
+for key, val in [("webPort", str(xui_port)), ("webUsername", xui_user), ("webPassword", pw_hash)]:
+    cur.execute("DELETE FROM settings WHERE key=?", (key,))
+    cur.execute("INSERT INTO settings(key,value) VALUES(?,?)", (key, val))
+
+# สร้าง inbounds ถ้ายังไม่มี
+existing = set()
+try:
+    rows = cur.execute("SELECT port FROM inbounds").fetchall()
+    existing = {r[0] for r in rows}
+except: pass
+
+vmess_settings = json.dumps({"clients":[{"id":vmess_uuid,"alterId":0,"email":"chaiya-default",
+    "limitIpCount":2,"totalGB":0,"expiryTime":0,"enable":True,"tgId":"","subId":""}]})
+vmess_stream = json.dumps({"network":"ws","security":"none","wsSettings":{"path":"/chaiya","headers":{}}})
+vmess_sniff  = json.dumps({"enabled":True,"destOverride":["http","tls","quic","fakedns"]})
+
+vless_settings = json.dumps({"clients":[{"id":vless_uuid,"flow":"","email":"chaiya-default",
+    "limitIpCount":2,"totalGB":0,"expiryTime":0,"enable":True,"tgId":"","subId":""}],
+    "decryption":"none","fallbacks":[]})
+vless_stream = json.dumps({"network":"ws","security":"none","wsSettings":{"path":"/chaiya","headers":{}}})
+vless_sniff  = json.dumps({"enabled":True,"destOverride":["http","tls","quic","fakedns"]})
+
+if 8080 not in existing:
+    cur.execute("""INSERT INTO inbounds
+        (user_id,up,down,total,remark,enable,expiry_time,listen,port,protocol,settings,stream_settings,tag,sniffing)
+        VALUES (1,0,0,0,'CHAIYA-VMess-WS',1,0,'',8080,'vmess',?,?,'inbound-8080',?)""",
+        (vmess_settings, vmess_stream, vmess_sniff))
+    print("[OK] VMess-WS inbound (port 8080) สร้างแล้ว")
+else:
+    print("[OK] VMess-WS มีอยู่แล้ว (port 8080)")
+
+if 8880 not in existing:
+    cur.execute("""INSERT INTO inbounds
+        (user_id,up,down,total,remark,enable,expiry_time,listen,port,protocol,settings,stream_settings,tag,sniffing)
+        VALUES (1,0,0,0,'CHAIYA-VLESS-WS',1,0,'',8880,'vless',?,?,'inbound-8880',?)""",
+        (vless_settings, vless_stream, vless_sniff))
+    print("[OK] VLESS-WS inbound (port 8880) สร้างแล้ว")
+else:
+    print("[OK] VLESS-WS มีอยู่แล้ว (port 8880)")
+
+con.commit()
+con.close()
+print("[OK] x-ui DB อัพเดทสำเร็จ")
+DBEOF
+
+echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
+ok "x-ui credentials + port + inbounds ตั้งค่าใน DB เรียบร้อย"
 
 systemctl start x-ui 2>/dev/null || true
 
 info "รอ x-ui เริ่มต้น..."
-REAL_XUI_PORT="$XUI_PORT"
 XUI_READY=0
-for _i in $(seq 1 10); do
-  sleep 2
+for _i in $(seq 1 15); do
+  sleep 3
   _ssport=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K\d+' | head -1)
-  [[ -n "$_ssport" ]] && REAL_XUI_PORT="$_ssport"
-  _http=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null)
+  [[ -n "$_ssport" ]] && REAL_XUI_PORT="$_ssport" && echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
+  _http=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null)
   if [[ "$_http" =~ ^[123] ]]; then
     XUI_READY=1; break
   fi
 done
-[[ -z "$REAL_XUI_PORT" ]] && REAL_XUI_PORT=$XUI_PORT
-echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
 
 [[ $XUI_READY -eq 1 ]] && ok "3x-ui พร้อม (port $REAL_XUI_PORT)" || \
   warn "3x-ui อาจยังไม่พร้อม — ตรวจสอบด้วย: systemctl status x-ui"
-
-# ── สร้าง Inbounds ใน x-ui ───────────────────────────────────
-info "สร้าง Inbounds ใน x-ui (VMess-WS:8080, VLESS-WS:8880)..."
-XUI_BASE="http://127.0.0.1:${REAL_XUI_PORT}"
-XUI_COOKIE=$(mktemp)
-
-LOGIN_OK="false"
-for _attempt in 1 2 3; do
-  LOGIN_RESP=$(curl -s --max-time 10 -c "$XUI_COOKIE" -X POST "${XUI_BASE}/login" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    --data-urlencode "username=${XUI_USER}" \
-    --data-urlencode "password=${XUI_PASS}" 2>/dev/null)
-  LOGIN_OK=$(echo "$LOGIN_RESP" | python3 -c \
-"import sys,json
-try:
-  d=json.load(sys.stdin)
-  print(str(d.get('success',False)).lower())
-except:
-  print('false')
-" 2>/dev/null)
-  [[ "$LOGIN_OK" == "true" ]] && break
-  [[ $_attempt -lt 3 ]] && sleep 3
-done
-
-_get_existing_ports() {
-  curl -s -b "$XUI_COOKIE" "${XUI_BASE}/xui/API/inbounds" 2>/dev/null | \
-    python3 -c "
-import sys,json
-try:
-  d=json.load(sys.stdin)
-  print(' '.join(str(x.get('port','')) for x in d.get('obj',[])))
-except: print('')
-" 2>/dev/null
-}
-
-_add_inbound() {
-  curl -s -b "$XUI_COOKIE" -X POST "${XUI_BASE}/xui/API/inbounds/add" \
-    -H "Content-Type: application/json" -d "$1" >/dev/null 2>&1
-}
-
-if [[ "$LOGIN_OK" == "true" ]]; then
-  EXISTING_PORTS=$(_get_existing_ports)
-  VMESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-  VLESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-  echo "$VMESS_UUID" > /etc/chaiya/vmess-uuid.conf
-  echo "$VLESS_UUID" > /etc/chaiya/vless-uuid.conf
-  chmod 600 /etc/chaiya/vmess-uuid.conf /etc/chaiya/vless-uuid.conf
-
-  if ! echo "$EXISTING_PORTS" | grep -qw "8080"; then
-    PAYLOAD=$(python3 -c "
-import json
-p = {
-  'up':0,'down':0,'total':0,'remark':'CHAIYA-VMess-WS',
-  'enable':True,'expiryTime':0,'listen':'','port':8080,'protocol':'vmess',
-  'settings': json.dumps({
-    'clients':[{'id':'${VMESS_UUID}','alterId':0,'email':'chaiya-default',
-      'limitIpCount':2,'totalGB':0,'expiryTime':0,'enable':True,'tgId':'','subId':''}]
-  }),
-  'streamSettings': json.dumps({
-    'network':'ws','security':'none',
-    'wsSettings':{'path':'/chaiya','headers':{}}
-  }),
-  'sniffing': json.dumps({'enabled':True,'destOverride':['http','tls','quic','fakedns']}),
-  'tag':'inbound-8080'
-}
-print(json.dumps(p))
-")
-    _add_inbound "$PAYLOAD"
-    ok "VMess-WS inbound พร้อม (port 8080, path /chaiya)"
-  else
-    ok "VMess-WS มีอยู่แล้ว (port 8080)"
-  fi
-
-  if ! echo "$EXISTING_PORTS" | grep -qw "8880"; then
-    PAYLOAD=$(python3 -c "
-import json
-p = {
-  'up':0,'down':0,'total':0,'remark':'CHAIYA-VLESS-WS',
-  'enable':True,'expiryTime':0,'listen':'','port':8880,'protocol':'vless',
-  'settings': json.dumps({
-    'clients':[{'id':'${VLESS_UUID}','flow':'','email':'chaiya-default',
-      'limitIpCount':2,'totalGB':0,'expiryTime':0,'enable':True,'tgId':'','subId':''}],
-    'decryption':'none','fallbacks':[]
-  }),
-  'streamSettings': json.dumps({
-    'network':'ws','security':'none',
-    'wsSettings':{'path':'/chaiya','headers':{}}
-  }),
-  'sniffing': json.dumps({'enabled':True,'destOverride':['http','tls','quic','fakedns']}),
-  'tag':'inbound-8880'
-}
-print(json.dumps(p))
-")
-    _add_inbound "$PAYLOAD"
-    ok "VLESS-WS inbound พร้อม (port 8880, path /chaiya)"
-  else
-    ok "VLESS-WS มีอยู่แล้ว (port 8880)"
-  fi
-
-  systemctl restart x-ui 2>/dev/null || true
-  sleep 2
-else
-  warn "Login x-ui ไม่สำเร็จ — ข้าม inbound setup"
-  VMESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-  VLESS_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-  echo "$VMESS_UUID" > /etc/chaiya/vmess-uuid.conf
-  echo "$VLESS_UUID" > /etc/chaiya/vless-uuid.conf
-fi
-rm -f "$XUI_COOKIE"
 
 # ── SSH API (Python) ──────────────────────────────────────────
 info "ติดตั้ง SSH API..."
@@ -2801,21 +2757,36 @@ function copyToClipboard(text,btnId){
    x-ui API
 ══════════════════════════════════════ */
 async function xuiLogin(){
-  const SESSION_KEY = 'chaiya_auth';
   let user = CFG.xui_user||'admin', pass = CFG.xui_pass||'';
-
-  const form=new URLSearchParams({username:user,password:pass});
-  const r=await fetch(XUI_API+'/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:form.toString()});
-  const d=await r.json(); _xuiCookieSet=!!d.success; return d.success;
+  try{
+    const form=new URLSearchParams({username:user,password:pass});
+    const r=await fetch(XUI_API+'/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:form.toString()});
+    const d=await r.json(); _xuiCookieSet=!!d.success; return d.success;
+  }catch(e){ _xuiCookieSet=false; return false; }
 }
 async function xuiPost(path,payload){
-  if(!_xuiCookieSet)await xuiLogin();
+  if(!_xuiCookieSet){ await xuiLogin(); }
   const r=await fetch(XUI_API+path,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  return r.json();
+  const d=await r.json();
+  // cookie หมดอายุ — re-login แล้วลองใหม่
+  if(d&&d.success===false&&d.msg&&d.msg.includes('login')){
+    await xuiLogin();
+    const r2=await fetch(XUI_API+path,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    return r2.json();
+  }
+  return d;
 }
 async function xuiGet(path){
-  if(!_xuiCookieSet)await xuiLogin();
-  const r=await fetch(XUI_API+path,{credentials:'include'}); return r.json();
+  if(!_xuiCookieSet){ await xuiLogin(); }
+  const r=await fetch(XUI_API+path,{credentials:'include'});
+  const d=await r.json();
+  // cookie หมดอายุ — re-login แล้วลองใหม่
+  if(d&&d.success===false&&d.msg&&d.msg.includes('login')){
+    await xuiLogin();
+    const r2=await fetch(XUI_API+path,{credentials:'include'});
+    return r2.json();
+  }
+  return d;
 }
 async function getInboundId(port){
   const d=await xuiGet('/panel/api/inbounds/list');
@@ -3297,7 +3268,7 @@ async function createSSH(){
   if(!pass)return setAlert('ssh','❌ กรุณาใส่ Password','err');
   setLoading('ssh',true); setAlert('ssh','','');
   try{
-    const r=await fetch(SSH_API+'/api/create',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},body:JSON.stringify({user,pass,exp_days:days,ip_limit:ipLimit,port:String(_sshPort)})});
+    const r=await fetch(SSH_API+'/create',{method:'POST',headers:{'Content-Type':'application/json','X-Token':TOK,'Authorization':'Bearer '+TOK},body:JSON.stringify({user,pass,exp_days:days,ip_limit:ipLimit,port:String(_sshPort)})});
     const d=await r.json();
     if(!d.ok&&!d.success)throw new Error(d.error||d.msg||'สร้างไม่สำเร็จ');
     const pro=PROS[_sshPro];
@@ -3363,7 +3334,7 @@ function renderQR(elId,text){
 ══════════════════════════════════════ */
 const SERVICES=[
   {name:'x-ui Panel',     icon:'📡', ports:[54321], type:'xui'},
-  {name:'Python SSH API', icon:'🐍', ports:[6789],  path:SSH_API+'/api/status', type:'http'},
+  {name:'Python SSH API', icon:'🐍', ports:[2095],  path:SSH_API+'/status', type:'http'},
   {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'port'},
   {name:'nginx / WS',     icon:'🌐', ports:[80],    path:'/', type:'http'},
   {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'port'},
@@ -3529,11 +3500,9 @@ window.addEventListener('load',()=>{
 
 DASHV8EOF
 
-# patch config.js และ paths ให้ตรงกับ nginx proxy
-sed -i 's|const LOGIN_PAGE.*=.*chaiya-login.html.*|const LOGIN_PAGE  = '"'"'index.html'"'"';|g' /opt/chaiya-panel/sshws.html
-sed -i "s|const SSH_API = '/sshws-api';|const SSH_API = '/api';|g" /opt/chaiya-panel/sshws.html
-sed -i "s|window.location.replace('chaiya-login.html');|window.location.replace('index.html');|g" /opt/chaiya-panel/sshws.html
-sed -i "s|!s.user || !s.pass || Date.now()|!(s.token || (s.user \&\& s.pass)) || Date.now()|g" /opt/chaiya-panel/sshws.html
+# patch paths ใน sshws.html
+sed -i "s|const SSH_API = '/sshws-api';|const SSH_API = '/api';|g" /opt/chaiya-panel/sshws.html 2>/dev/null || true
+sed -i "s|window.location.replace('chaiya-login.html');|window.location.replace('index.html');|g" /opt/chaiya-panel/sshws.html 2>/dev/null || true
 
 chmod -R 755 /opt/chaiya-panel
 
@@ -3574,6 +3543,7 @@ SSL_KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
 if [[ -f "$SSL_CERT" ]]; then
   ok "SSL Certificate พร้อม"
   USE_SSL=1
+
 else
   warn "SSL Certificate ไม่สำเร็จ — ใช้ HTTP แทนชั่วคราว (ต้องแก้ DNS ก่อน)"
   USE_SSL=0
@@ -3622,7 +3592,7 @@ server {
         proxy_connect_timeout 5s;
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
-        add_header Access-Control-Allow-Headers "Content-Type" always;
+        add_header Access-Control-Allow-Headers "Content-Type,Authorization" always;
     }
 
     # 3x-ui proxy (ไม่โชว์พอร์ต)
@@ -3633,6 +3603,7 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 60s;
         proxy_connect_timeout 10s;
     }
@@ -3655,16 +3626,19 @@ server {
         proxy_pass http://127.0.0.1:${SSH_API_PORT}/api/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 30s;
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
-        add_header Access-Control-Allow-Headers "Content-Type" always;
+        add_header Access-Control-Allow-Headers "Content-Type,Authorization" always;
     }
     location /xui-api/ {
         proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header Cookie \$http_cookie;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_read_timeout 60s;
     }
 }
@@ -3683,13 +3657,19 @@ info "ตั้งค่า Firewall..."
 ufw --force reset &>/dev/null
 ufw default deny incoming &>/dev/null
 ufw default allow outgoing &>/dev/null
-for port in 22 80 443 $DROPBEAR_PORT1 $DROPBEAR_PORT2 \
-            $SSH_API_PORT $REAL_XUI_PORT $BADVPN_PORT $OPENVPN_PORT 8080 8880; do
+
+# พอร์ตที่เปิดสาธารณะ
+for port in 22 80 443 $DROPBEAR_PORT1 $DROPBEAR_PORT2 $BADVPN_PORT $OPENVPN_PORT 8080 8880; do
   ufw allow $port/tcp &>/dev/null
 done
 ufw allow $BADVPN_PORT/udp &>/dev/null
+
+# SSH API และ x-ui port — เปิดเฉพาะ loopback (ไม่เปิดภายนอก)
+ufw deny $SSH_API_PORT/tcp &>/dev/null
+ufw deny $REAL_XUI_PORT/tcp &>/dev/null
+
 ufw --force enable &>/dev/null
-ok "Firewall พร้อม"
+ok "Firewall พร้อม — SSH API และ x-ui ถูก block จากภายนอก"
 
 # ── CACHE INFO ────────────────────────────────────────────────
 echo "$SERVER_IP" > /etc/chaiya/my_ip.conf
