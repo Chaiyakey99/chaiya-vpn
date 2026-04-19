@@ -126,16 +126,25 @@ ok "OpenSSH พร้อม"
 # ── DROPBEAR ─────────────────────────────────────────────────
 info "ตั้งค่า Dropbear..."
 mkdir -p /etc/dropbear
-[[ ! -f /etc/dropbear/dropbear_rsa_host_key ]] && \
-  dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key 2>/dev/null || true
-[[ ! -f /etc/dropbear/dropbear_ecdsa_host_key ]] && \
-  dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key 2>/dev/null || true
+
+# สร้าง host keys ทุกประเภท
+dropbearkey -t rsa   -f /etc/dropbear/dropbear_rsa_host_key   2>/dev/null || true
+dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key 2>/dev/null || true
+dropbearkey -t dss   -f /etc/dropbear/dropbear_dss_host_key   2>/dev/null || true
+chmod 600 /etc/dropbear/dropbear_*_host_key 2>/dev/null || true
+
+# kill process ที่ใช้ port อยู่ก่อน
+fuser -k ${DROPBEAR_PORT1}/tcp 2>/dev/null || true
+fuser -k ${DROPBEAR_PORT2}/tcp 2>/dev/null || true
+sleep 1
 
 mkdir -p /etc/systemd/system/dropbear.service.d
 cat > /etc/systemd/system/dropbear.service.d/override.conf << EOF
 [Service]
 ExecStart=
-ExecStart=/usr/sbin/dropbear -F -p $DROPBEAR_PORT1 -p $DROPBEAR_PORT2 -W 65536
+ExecStart=/usr/sbin/dropbear -F -p ${DROPBEAR_PORT1} -p ${DROPBEAR_PORT2} -W 65536
+Restart=always
+RestartSec=5
 EOF
 
 grep -q '/bin/false' /etc/shells 2>/dev/null || echo '/bin/false' >> /etc/shells
@@ -144,8 +153,8 @@ grep -q '/usr/sbin/nologin' /etc/shells 2>/dev/null || echo '/usr/sbin/nologin' 
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable dropbear 2>/dev/null || true
 systemctl restart dropbear 2>/dev/null || true
-sleep 2
-systemctl is-active --quiet dropbear && ok "Dropbear พร้อม (port $DROPBEAR_PORT1, $DROPBEAR_PORT2)" || \
+sleep 3
+systemctl is-active --quiet dropbear && ok "Dropbear พร้อม (port ${DROPBEAR_PORT1}, ${DROPBEAR_PORT2})" || \
   warn "Dropbear อาจไม่ทำงาน — ตรวจสอบด้วย: systemctl status dropbear"
 
 # ── BADVPN ───────────────────────────────────────────────────
@@ -182,8 +191,14 @@ systemctl daemon-reload 2>/dev/null || true
 systemctl enable chaiya-badvpn 2>/dev/null || true
 pkill -f badvpn 2>/dev/null || true
 sleep 1
-systemctl start chaiya-badvpn 2>/dev/null || true
-ok "BadVPN พร้อม (port $BADVPN_PORT)"
+if command -v badvpn-udpgw &>/dev/null; then
+  systemctl start chaiya-badvpn 2>/dev/null || true
+  sleep 2
+  systemctl is-active --quiet chaiya-badvpn && ok "BadVPN พร้อม (port ${BADVPN_PORT})" || \
+    warn "BadVPN ไม่ start — ลองรัน: systemctl start chaiya-badvpn"
+else
+  warn "badvpn-udpgw binary ไม่มี — ข้าม"
+fi
 
 # ── 3X-UI INSTALL ────────────────────────────────────────────
 info "ติดตั้ง 3x-ui..."
@@ -197,8 +212,17 @@ n
 XUIEOF
 fi
 
+# รอให้ x-ui start และสร้าง DB ก่อน
+systemctl start x-ui 2>/dev/null || true
+info "รอ x-ui สร้าง DB..."
+for _w in $(seq 1 30); do
+  sleep 2
+  [[ -f /etc/x-ui/x-ui.db ]] && break
+done
+[[ -f /etc/x-ui/x-ui.db ]] && ok "x-ui DB พร้อม" || warn "x-ui DB ไม่ถูกสร้าง"
+
 systemctl stop x-ui 2>/dev/null || true
-sleep 3
+sleep 2
 
 XUI_DB="/etc/x-ui/x-ui.db"
 REAL_XUI_PORT="$XUI_PORT"
@@ -1141,34 +1165,37 @@ cat > /opt/chaiya-panel/sshws.html << 'DASHV8EOF'
    ROOT & RESET
 ══════════════════════════════════════ */
 :root {
-  --bg:        #f0f4f8;
-  --surface:   #ffffff;
-  --border:    #e2e8f0;
-  --shadow:    0 2px 12px rgba(0,0,0,.08);
-  --shadow-lg: 0 4px 24px rgba(0,0,0,.12);
+  --bg:        #0b0f18;
+  --surface:   #111827;
+  --surface2:  #1a2235;
+  --border:    rgba(255,255,255,.08);
+  --border2:   rgba(255,255,255,.13);
+  --shadow:    0 2px 16px rgba(0,0,0,.4);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.5);
 
-  --ais:       #5a9e1c;
-  --ais2:      #3d7a0e;
-  --ais-light: #f0f9e8;
-  --ais-bdr:   #c5e89a;
+  --ais:       #72d124;
+  --ais2:      #5ab818;
+  --ais-light: rgba(114,209,36,.12);
+  --ais-bdr:   rgba(114,209,36,.3);
 
-  --true:      #e01020;
-  --true2:     #b8000e;
-  --true-light:#fff0f0;
-  --true-bdr:  #f8a0a8;
+  --true:      #f87171;
+  --true2:     #ef4444;
+  --true-light:rgba(248,113,113,.12);
+  --true-bdr:  rgba(248,113,113,.3);
 
-  --ssh:       #1a6fa8;
-  --ssh2:      #0d5487;
-  --ssh-light: #e8f4fc;
-  --ssh-bdr:   #90caf0;
+  --ssh:       #38bdf8;
+  --ssh2:      #0ea5e9;
+  --ssh-light: rgba(56,189,248,.12);
+  --ssh-bdr:   rgba(56,189,248,.3);
 
-  --text:      #1a2332;
-  --text2:     #4a6072;
-  --text3:     #8099ac;
-  --green:     #22c55e;
-  --orange:    #f97316;
-  --red:       #ef4444;
-  --purple:    #8b5cf6;
+  --text:      #e8f4ff;
+  --text2:     rgba(232,244,255,.65);
+  --text3:     rgba(232,244,255,.35);
+  --green:     #4ade80;
+  --orange:    #fb923c;
+  --red:       #f87171;
+  --purple:    #a78bfa;
+  --accent:    #7ee8fa;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -1176,8 +1203,11 @@ body{
   color:var(--text);
   font-family:'Kanit',sans-serif;
   font-weight:400;
+  font-size:15px;
+  line-height:1.5;
   min-height:100vh;
   overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
 }
 
 /* ══════════════════════════════════════
@@ -1298,22 +1328,27 @@ body{
 ══════════════════════════════════════ */
 .tab-nav{
   display:flex;
-  background:var(--surface);
-  border-bottom:1px solid var(--border);
-  overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
+  background:#0e1825;
+  border-bottom:1px solid rgba(255,255,255,.07);
+  overflow-x:auto;-webkit-overflow-scrolling:touch;
+  position:sticky;top:0;z-index:200;
 }
 .tab-nav::-webkit-scrollbar{display:none}
 .tab-btn{
-  flex:1;min-width:80px;
-  padding:.75rem .5rem;
+  flex:1;min-width:72px;
+  padding:.82rem .5rem;
   border:none;background:transparent;
-  font-family:'Kanit',sans-serif;font-size:.8rem;font-weight:600;
-  color:var(--text3);cursor:pointer;
+  font-family:'Kanit',sans-serif;font-size:.82rem;font-weight:600;
+  color:rgba(255,255,255,.35);cursor:pointer;
   border-bottom:2px solid transparent;
-  transition:all .2s;white-space:nowrap;
+  transition:all .22s;white-space:nowrap;letter-spacing:.01em;
 }
-.tab-btn.active{color:var(--ais);border-bottom-color:var(--ais)}
+.tab-btn:hover{color:rgba(255,255,255,.65);background:rgba(255,255,255,.03)}
+.tab-btn.active{
+  color:var(--accent);border-bottom-color:var(--accent);
+  background:rgba(126,232,250,.05);
+  text-shadow:0 0 12px rgba(126,232,250,.4);
+}
 
 /* ══════════════════════════════════════
    TAB PANELS
@@ -1336,38 +1371,45 @@ body{
 }
 .stat-card{
   background:var(--surface);
-  border-radius:16px;
-  padding:1rem 1.1rem;
-  border:1px solid var(--border);
+  border-radius:18px;
+  padding:1.1rem 1.2rem;
+  border:1px solid var(--border2);
   box-shadow:var(--shadow);
   position:relative;overflow:hidden;
+  backdrop-filter:blur(8px);
+}
+.stat-card::before{
+  content:'';position:absolute;inset:0;border-radius:18px;
+  background:linear-gradient(135deg,rgba(255,255,255,.04) 0%,transparent 60%);
+  pointer-events:none;
 }
 .stat-card.wide{grid-column:span 2}
 .stat-label{
   font-family:'Share Tech Mono',monospace;
-  font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--text3);margin-bottom:.4rem;
+  font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text3);margin-bottom:.5rem;
   display:flex;align-items:center;gap:.4rem;
 }
 .stat-value{
   font-family:'Rajdhani',sans-serif;
-  font-size:1.9rem;font-weight:700;line-height:1;
+  font-size:2.1rem;font-weight:700;line-height:1;
   color:var(--text);
+  text-shadow:0 0 20px rgba(126,232,250,.15);
 }
-.stat-unit{font-size:1rem;color:var(--text2);margin-left:.15rem}
-.stat-sub{font-size:.72rem;color:var(--text3);margin-top:.3rem}
+.stat-unit{font-size:1.1rem;color:var(--text2);margin-left:.15rem}
+.stat-sub{font-size:.75rem;color:var(--text3);margin-top:.35rem;font-family:'Share Tech Mono',monospace}
 
 /* Ring gauge */
 .ring-wrap{display:flex;align-items:center;gap:.9rem}
 .ring-svg{flex-shrink:0}
-.ring-track{fill:none;stroke:var(--border);stroke-width:6}
+.ring-track{fill:none;stroke:rgba(255,255,255,.1);stroke-width:6}
 .ring-fill{fill:none;stroke-width:6;stroke-linecap:round;
   transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)}
 .ring-info{flex:1}
 
 /* Bar gauge */
 .bar-gauge{
-  height:8px;background:var(--border);border-radius:4px;
+  height:8px;background:rgba(255,255,255,.08);border-radius:4px;
   margin-top:.6rem;overflow:hidden;
 }
 .bar-fill{
@@ -1378,31 +1420,31 @@ body{
 /* Online badge */
 .online-badge{
   display:inline-flex;align-items:center;gap:.35rem;
-  background:#f0fdf4;border:1px solid #86efac;
-  color:#166534;padding:.25rem .7rem;border-radius:20px;
-  font-size:.72rem;font-family:'Share Tech Mono',monospace;
+  background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);
+  color:#4ade80;padding:.25rem .8rem;border-radius:20px;
+  font-size:.73rem;font-family:'Share Tech Mono',monospace;
 }
 .online-dot{width:7px;height:7px;border-radius:50%;background:var(--green);
   animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 .refresh-btn{
-  border:1px solid var(--border);background:var(--surface);
-  border-radius:8px;padding:.3rem .7rem;
-  font-size:.75rem;color:var(--text2);cursor:pointer;
+  border:1px solid var(--border2);background:rgba(255,255,255,.05);
+  border-radius:8px;padding:.32rem .75rem;
+  font-size:.76rem;color:var(--text2);cursor:pointer;
   font-family:'Kanit',sans-serif;
   transition:all .2s;
 }
-.refresh-btn:hover{background:var(--bg);color:var(--text)}
+.refresh-btn:hover{background:rgba(126,232,250,.08);color:var(--accent);border-color:rgba(126,232,250,.3)}
 .refresh-btn.spin svg{animation:spinR .6s linear infinite}
 @keyframes spinR{to{transform:rotate(360deg)}}
 
 /* uptime chip */
 .chip{
   display:inline-block;
-  background:#f8fafc;border:1px solid var(--border);
+  background:rgba(255,255,255,.05);border:1px solid var(--border);
   border-radius:6px;padding:.15rem .5rem;
-  font-family:'Share Tech Mono',monospace;font-size:.72rem;color:var(--text2);
+  font-family:'Share Tech Mono',monospace;font-size:.72rem;color:var(--text3);
 }
 
 /* ══════════════════════════════════════
@@ -1411,8 +1453,13 @@ body{
 .section-label{
   display:flex;align-items:center;gap:.5rem;
   font-family:'Rajdhani',sans-serif;
-  font-size:.9rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--text2);padding:.2rem 0 .7rem;
+  font-size:.95rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--accent);padding:.2rem 0 .8rem;
+  text-shadow:0 0 16px rgba(126,232,250,.3);
+}
+.section-label::after{
+  content:'';flex:1;height:1px;
+  background:linear-gradient(90deg,rgba(126,232,250,.25),transparent);
 }
 
 /* ══════════════════════════════════════
@@ -1420,8 +1467,8 @@ body{
 ══════════════════════════════════════ */
 .card-group{
   background:var(--surface);border-radius:18px;
-  box-shadow:var(--shadow);overflow:hidden;
-  border:1px solid var(--border);
+  box-shadow:var(--shadow-lg);overflow:hidden;
+  border:1px solid var(--border2);
 }
 .card-group .carrier-btn+.carrier-btn{border-top:1px solid var(--border)}
 
@@ -1430,29 +1477,29 @@ body{
 ══════════════════════════════════════ */
 .carrier-btn{
   width:100%;border:none;background:var(--surface);
-  padding:1rem 1.2rem;cursor:pointer;
+  padding:1.1rem 1.3rem;cursor:pointer;
   display:flex;align-items:center;gap:1rem;text-align:left;
-  transition:background .15s;
+  transition:background .18s;
 }
-.carrier-btn:hover{background:#f8fbff}
-.carrier-btn:active{background:#f0f6ff}
+.carrier-btn:hover{background:var(--surface2)}
+.carrier-btn:active{background:rgba(126,232,250,.05)}
 
 .btn-logo{
   width:54px;height:54px;border-radius:13px;
   display:flex;align-items:center;justify-content:center;
   flex-shrink:0;overflow:hidden;
-  border:1px solid var(--border);background:#f4f4f4;
+  border:1px solid var(--border);background:rgba(255,255,255,.06);
 }
 .logo-ais{background:#fff;border-color:var(--ais-bdr)}
 .logo-true{background:#c8040d;border-color:#e0000a}
 .logo-ssh{background:#1565c0;border-color:#1976d2}
 
 .btn-info{flex:1;min-width:0}
-.btn-name{font-family:'Rajdhani',sans-serif;font-size:1.12rem;font-weight:700;letter-spacing:.04em;display:block;margin-bottom:.15rem}
+.btn-name{font-family:'Rajdhani',sans-serif;font-size:1.18rem;font-weight:700;letter-spacing:.05em;display:block;margin-bottom:.2rem}
 .btn-ais  .btn-name{color:var(--ais)}
 .btn-true .btn-name{color:var(--true)}
 .btn-ssh  .btn-name{color:var(--ssh)}
-.btn-desc{font-size:.74rem;font-weight:300;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.btn-desc{font-size:.76rem;font-weight:400;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;font-family:'Share Tech Mono',monospace}
 .btn-true .btn-desc{color:var(--true)}
 .btn-arrow{color:var(--text3);font-size:1.1rem;flex-shrink:0;transition:transform .18s}
 .carrier-btn:hover .btn-arrow{transform:translateX(3px);color:var(--text2)}
@@ -1462,7 +1509,7 @@ body{
 ══════════════════════════════════════ */
 .mgmt-panel{
   background:var(--surface);border-radius:18px;
-  border:1px solid var(--border);box-shadow:var(--shadow);
+  border:1px solid var(--border2);box-shadow:var(--shadow-lg);
   overflow:hidden;
 }
 .mgmt-header{
@@ -1480,12 +1527,13 @@ body{
   padding:.8rem 1.2rem;border-bottom:1px solid var(--border);
 }
 .search-bar input{
-  flex:1;background:#f8fafc;border:1.5px solid var(--border);
-  border-radius:10px;padding:.5rem .85rem;
-  font-family:'Kanit',sans-serif;font-size:.88rem;
-  outline:none;color:var(--text);transition:border-color .2s;
+  flex:1;background:rgba(255,255,255,.04);border:1.5px solid var(--border2);
+  border-radius:10px;padding:.55rem .9rem;
+  font-family:'Kanit',sans-serif;font-size:.9rem;
+  outline:none;color:var(--text);transition:border-color .2s,box-shadow .2s;
 }
-.search-bar input:focus{border-color:var(--ssh);background:#fff}
+.search-bar input::placeholder{color:var(--text3)}
+.search-bar input:focus{border-color:var(--ssh);background:rgba(56,189,248,.05);box-shadow:0 0 0 3px rgba(56,189,248,.1)}
 
 /* User row */
 .user-list{max-height:400px;overflow-y:auto}
@@ -1499,28 +1547,29 @@ body{
   transition:background .15s;cursor:pointer;
 }
 .user-row:last-child{border-bottom:none}
-.user-row:hover{background:#f8fafc}
+.user-row:hover{background:rgba(126,232,250,.04)}
 .user-avatar{
-  width:36px;height:36px;border-radius:10px;
+  width:38px;height:38px;border-radius:11px;
   display:flex;align-items:center;justify-content:center;
-  font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.9rem;
+  font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.95rem;
   flex-shrink:0;
 }
-.ua-ais{background:var(--ais-light);color:var(--ais2);border:1px solid var(--ais-bdr)}
-.ua-true{background:var(--true-light);color:var(--true2);border:1px solid var(--true-bdr)}
+.ua-ais{background:rgba(114,209,36,.15);color:var(--ais);border:1px solid var(--ais-bdr)}
+.ua-true{background:rgba(248,113,113,.15);color:var(--true);border:1px solid var(--true-bdr)}
+.ua-ssh{background:rgba(56,189,248,.15);color:var(--ssh);border:1px solid var(--ssh-bdr)}
 
 .user-info{flex:1;min-width:0}
-.user-name{font-weight:600;font-size:.88rem;color:var(--text);margin-bottom:.1rem}
-.user-meta{font-size:.72rem;color:var(--text3);font-family:'Share Tech Mono',monospace}
+.user-name{font-weight:600;font-size:.92rem;color:var(--text);margin-bottom:.12rem;letter-spacing:.01em}
+.user-meta{font-size:.73rem;color:var(--text3);font-family:'Share Tech Mono',monospace}
 
 .status-badge{
   font-size:.68rem;padding:.2rem .55rem;border-radius:20px;
   font-family:'Share Tech Mono',monospace;flex-shrink:0;
 }
-.status-ok{background:#f0fdf4;border:1px solid #86efac;color:#166534}
-.status-exp{background:#fff7ed;border:1px solid #fed7aa;color:#92400e}
-.status-dead{background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}
-.status-online{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
+.status-ok{background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);color:#4ade80}
+.status-exp{background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.3);color:#fb923c}
+.status-dead{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:#f87171}
+.status-online{background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3);color:#38bdf8}
 
 /* empty state */
 .empty-state{
@@ -1548,24 +1597,27 @@ body{
 
 .modal{
   width:100%;max-width:520px;
-  background:var(--surface);
+  background:#111827;
   border-radius:24px 24px 0 0;
+  border-top:1px solid rgba(255,255,255,.1);
   overflow:hidden;position:relative;
   animation:slideUp .28s cubic-bezier(.34,1.1,.64,1);
   max-height:92vh;display:flex;flex-direction:column;
+  box-shadow:0 -8px 40px rgba(0,0,0,.6);
 }
 @keyframes slideUp{from{transform:translateY(100%);opacity:.5}to{transform:translateY(0);opacity:1}}
 
 .modal::before{content:'';display:block;width:40px;height:4px;border-radius:2px;background:rgba(0,0,0,.15);margin:10px auto 0;flex-shrink:0}
 
 .modal-header{
-  padding:.85rem 1.4rem .95rem;
+  padding:.9rem 1.4rem 1rem;
   display:flex;align-items:center;justify-content:space-between;
-  border-bottom:1px solid var(--border);flex-shrink:0;
+  border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;
 }
 .modal-title{
-  font-family:'Rajdhani',sans-serif;font-size:1.05rem;font-weight:700;letter-spacing:.08em;
+  font-family:'Rajdhani',sans-serif;font-size:1.1rem;font-weight:700;letter-spacing:.08em;
   display:flex;align-items:center;gap:.6rem;
+  color:var(--text);
 }
 .modal-ais  .modal-title{color:var(--ais2)}
 .modal-true .modal-title{color:var(--true2)}
@@ -1574,10 +1626,10 @@ body{
 
 .modal-close{
   width:30px;height:30px;border-radius:50%;border:none;
-  background:#f0f4f8;display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.06);display:flex;align-items:center;justify-content:center;
   cursor:pointer;font-size:.85rem;color:var(--text2);transition:all .2s;
 }
-.modal-close:hover{background:#e2e8f0;color:var(--text)}
+.modal-close:hover{background:rgba(255,255,255,.12);color:var(--text)}
 
 .modal-body{padding:1rem 1.4rem 1.6rem;overflow-y:auto;flex:1}
 .modal-body::-webkit-scrollbar{width:4px}
@@ -1598,21 +1650,21 @@ body{
 .fgrid .span2{grid-column:span 2}
 .field{display:flex;flex-direction:column;gap:.3rem}
 
-label{font-size:.67rem;font-family:'Share Tech Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--text3)}
+label{font-size:.69rem;font-family:'Share Tech Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:rgba(232,244,255,.45)}
 input,select{
-  background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;
-  padding:.58rem .88rem;color:var(--text);
-  font-family:'Kanit',sans-serif;font-size:.88rem;outline:none;
+  background:rgba(255,255,255,.05);border:1.5px solid var(--border2);border-radius:10px;
+  padding:.6rem .9rem;color:var(--text);
+  font-family:'Kanit',sans-serif;font-size:.9rem;outline:none;
   transition:border-color .2s,box-shadow .2s;width:100%;
 }
-input:focus,select:focus{background:#fff}
-input.ais-focus:focus{border-color:var(--ais);box-shadow:0 0 0 3px rgba(90,158,28,.1)}
-input.true-focus:focus{border-color:var(--true);box-shadow:0 0 0 3px rgba(224,16,32,.09)}
-input.ssh-focus:focus{border-color:var(--ssh);box-shadow:0 0 0 3px rgba(26,111,168,.1)}
-input.mgmt-focus:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(139,92,246,.1)}
-select option{background:#fff}
+input:focus,select:focus{background:rgba(56,189,248,.05)}
+input.ais-focus:focus{border-color:var(--ais);box-shadow:0 0 0 3px rgba(114,209,36,.15)}
+input.true-focus:focus{border-color:var(--true);box-shadow:0 0 0 3px rgba(248,113,113,.15)}
+input.ssh-focus:focus{border-color:var(--ssh);box-shadow:0 0 0 3px rgba(56,189,248,.15)}
+input.mgmt-focus:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(167,139,250,.15)}
+select option{background:#1a2235;color:var(--text)}
 
-.divider{height:1px;background:var(--border);margin:.8rem 0}
+.divider{height:1px;background:rgba(255,255,255,.07);margin:.8rem 0}
 
 .submit-btn{
   width:100%;padding:.83rem;border:none;border-radius:12px;
@@ -1620,28 +1672,28 @@ select option{background:#fff}
   cursor:pointer;margin-top:.8rem;transition:all .2s;overflow:hidden;
 }
 .submit-btn:disabled{opacity:.5;cursor:not-allowed}
-.submit-btn.ais-btn{background:linear-gradient(135deg,#4d8a15,var(--ais));color:#fff;box-shadow:0 4px 14px rgba(90,158,28,.3)}
-.submit-btn.ais-btn:hover:not(:disabled){box-shadow:0 6px 22px rgba(90,158,28,.4);transform:translateY(-1px)}
-.submit-btn.true-btn{background:linear-gradient(135deg,#c0030f,var(--true));color:#fff;box-shadow:0 4px 14px rgba(224,16,32,.26)}
-.submit-btn.true-btn:hover:not(:disabled){box-shadow:0 6px 22px rgba(224,16,32,.36);transform:translateY(-1px)}
-.submit-btn.ssh-btn{background:linear-gradient(135deg,#135d94,var(--ssh));color:#fff;box-shadow:0 4px 14px rgba(26,111,168,.26)}
-.submit-btn.ssh-btn:hover:not(:disabled){box-shadow:0 6px 22px rgba(26,111,168,.36);transform:translateY(-1px)}
-.submit-btn.mgmt-btn{background:linear-gradient(135deg,#6d28d9,var(--purple));color:#fff;box-shadow:0 4px 14px rgba(139,92,246,.26)}
-.submit-btn.mgmt-btn:hover:not(:disabled){box-shadow:0 6px 22px rgba(139,92,246,.36);transform:translateY(-1px)}
-.submit-btn.danger-btn{background:linear-gradient(135deg,#b91c1c,var(--red));color:#fff;box-shadow:0 4px 14px rgba(239,68,68,.22)}
+.submit-btn.ais-btn{background:linear-gradient(135deg,#5ab818,var(--ais));color:#071a00;box-shadow:0 4px 20px rgba(114,209,36,.35)}
+.submit-btn.ais-btn:hover:not(:disabled){box-shadow:0 6px 28px rgba(114,209,36,.5);transform:translateY(-1px)}
+.submit-btn.true-btn{background:linear-gradient(135deg,#ef4444,var(--true));color:#fff;box-shadow:0 4px 20px rgba(248,113,113,.35)}
+.submit-btn.true-btn:hover:not(:disabled){box-shadow:0 6px 28px rgba(248,113,113,.5);transform:translateY(-1px)}
+.submit-btn.ssh-btn{background:linear-gradient(135deg,#0ea5e9,var(--ssh));color:#001a2e;box-shadow:0 4px 20px rgba(56,189,248,.35)}
+.submit-btn.ssh-btn:hover:not(:disabled){box-shadow:0 6px 28px rgba(56,189,248,.5);transform:translateY(-1px)}
+.submit-btn.mgmt-btn{background:linear-gradient(135deg,#7c3aed,var(--purple));color:#fff;box-shadow:0 4px 20px rgba(167,139,250,.35)}
+.submit-btn.mgmt-btn:hover:not(:disabled){box-shadow:0 6px 28px rgba(167,139,250,.5);transform:translateY(-1px)}
+.submit-btn.danger-btn{background:linear-gradient(135deg,#dc2626,var(--red));color:#fff;box-shadow:0 4px 20px rgba(248,113,113,.35)}
 
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.4rem}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 .alert{display:none;margin-top:.7rem;padding:.68rem .9rem;border-radius:10px;font-size:.8rem;line-height:1.6}
-.alert.ok{background:#f0fdf4;border:1px solid #86efac;color:#166534}
-.alert.err{background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}
-.alert.info{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
+.alert.ok{background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);color:#4ade80}
+.alert.err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:#f87171}
+.alert.info{background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.3);color:#38bdf8}
 
 /* ══════════════════════════════════════
    RESULT CARD
 ══════════════════════════════════════ */
-.result-card{display:none;margin-top:1rem;border-radius:14px;overflow:hidden;border:1.5px solid var(--border);box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.result-card{display:none;margin-top:1rem;border-radius:14px;overflow:hidden;border:1px solid var(--border2);box-shadow:0 4px 20px rgba(0,0,0,.4);background:rgba(255,255,255,.02)}
 .result-card.show{display:block}
 #ais-result.show{border-color:var(--ais-bdr)}
 #true-result.show{border-color:var(--true-bdr)}
@@ -1649,14 +1701,14 @@ select option{background:#fff}
 
 .result-header{padding:.65rem 1rem;font-family:'Share Tech Mono',monospace;font-size:.72rem;letter-spacing:.1em;display:flex;align-items:center;gap:.5rem;border-bottom:1px solid var(--border)}
 .result-header .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.result-header.ais-r{background:var(--ais-light);color:var(--ais2)}
+.result-header.ais-r{background:rgba(114,209,36,.12);color:var(--ais)}
 .result-header.ais-r .dot{background:var(--ais);box-shadow:0 0 5px var(--ais)}
-.result-header.true-r{background:var(--true-light);color:var(--true2)}
+.result-header.true-r{background:rgba(248,113,113,.12);color:var(--true)}
 .result-header.true-r .dot{background:var(--true)}
-.result-header.ssh-r{background:var(--ssh-light);color:var(--ssh2)}
+.result-header.ssh-r{background:rgba(56,189,248,.12);color:var(--ssh)}
 .result-header.ssh-r .dot{background:var(--ssh)}
 
-.result-body{padding:.85rem 1rem;background:#fafcfe}
+.result-body{padding:.85rem 1rem;background:rgba(255,255,255,.02)}
 .info-rows{margin-bottom:.8rem}
 .info-row{display:flex;justify-content:space-between;align-items:center;padding:.32rem 0;border-bottom:1px solid var(--border);font-size:.8rem}
 .info-row:last-child{border-bottom:none}
@@ -1665,52 +1717,52 @@ select option{background:#fff}
 .info-val.pass{font-family:'Share Tech Mono',monospace;color:var(--green);font-weight:600}
 .info-val.uuid{font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--ssh)}
 
-.link-box{background:#f0f4f8;border-radius:8px;padding:.6rem .8rem;font-family:'Share Tech Mono',monospace;font-size:.62rem;word-break:break-all;line-height:1.7;margin-bottom:.7rem;border:1px solid var(--border);color:var(--text2)}
-.link-box.vless-link{border-left:3px solid var(--ais);color:var(--ais2)}
-.link-box.npv-link{border-left:3px solid var(--ssh);color:var(--ssh2)}
-.link-box.dark-link{border-left:3px solid #9333ea;color:#7e22ce}
+.link-box{background:rgba(255,255,255,.04);border-radius:8px;padding:.7rem .9rem;font-family:'Share Tech Mono',monospace;font-size:.72rem;word-break:break-all;line-height:1.7;margin-bottom:.7rem;border:1px solid var(--border2);color:var(--text3)}
+.link-box.vless-link{border-left:3px solid var(--ais);color:var(--ais)}
+.link-box.npv-link{border-left:3px solid var(--ssh);color:var(--ssh)}
+.link-box.dark-link{border-left:3px solid var(--purple);color:var(--purple)}
 
 .qr-wrap{display:flex;justify-content:center;margin:.6rem 0 .8rem}
 .qr-inner{background:#fff;padding:10px;border-radius:10px;display:inline-block;border:1px solid var(--border)}
 
 .copy-row{display:flex;gap:.5rem;flex-wrap:wrap}
-.copy-btn{flex:1;min-width:120px;padding:.5rem .7rem;border-radius:9px;border:1.5px solid var(--border);background:#fff;font-family:'Rajdhani',sans-serif;font-size:.85rem;font-weight:700;letter-spacing:.06em;cursor:pointer;transition:all .2s;color:var(--text2)}
+.copy-btn{flex:1;min-width:120px;padding:.52rem .7rem;border-radius:9px;border:1.5px solid var(--border2);background:rgba(255,255,255,.04);font-family:'Rajdhani',sans-serif;font-size:.86rem;font-weight:700;letter-spacing:.06em;cursor:pointer;transition:all .2s;color:var(--text2)}
 .copy-btn.vless{border-color:var(--ais-bdr);color:var(--ais2)}
-.copy-btn.vless:hover{background:var(--ais-light)}
+.copy-btn.vless:hover{background:rgba(114,209,36,.1)}
 .copy-btn.npv{border-color:var(--ssh-bdr);color:var(--ssh2)}
-.copy-btn.npv:hover{background:var(--ssh-light)}
+.copy-btn.npv:hover{background:rgba(56,189,248,.1)}
 .copy-btn.ssh-copy{border-color:var(--ssh-bdr);color:var(--ssh2)}
-.copy-btn.ssh-copy:hover{background:var(--ssh-light)}
+.copy-btn.ssh-copy:hover{background:rgba(56,189,248,.1)}
 .copy-btn.copied{opacity:.6;pointer-events:none}
 
 /* ══════════════════════════════════════
    PORT / APP TABS
 ══════════════════════════════════════ */
 .port-tabs{display:flex;gap:.4rem;margin-bottom:.6rem}
-.port-tab{flex:1;padding:.48rem;border-radius:9px;font-size:.8rem;cursor:pointer;border:1.5px solid var(--border);background:#f8fafc;color:var(--text2);font-family:'Rajdhani',sans-serif;font-weight:600;transition:all .2s}
-.port-tab.active-ssh{border-color:var(--ssh);background:var(--ssh-light);color:var(--ssh2)}
+.port-tab{flex:1;padding:.52rem;border-radius:9px;font-size:.82rem;cursor:pointer;border:1.5px solid var(--border2);background:rgba(255,255,255,.03);color:var(--text2);font-family:'Rajdhani',sans-serif;font-weight:600;transition:all .2s}
+.port-tab.active-ssh{border-color:var(--ssh);background:rgba(56,189,248,.15);color:var(--ssh);box-shadow:0 0 10px rgba(56,189,248,.2)}
 .pro-tab{display:flex;align-items:center;justify-content:center;gap:.4rem;padding:.5rem .6rem}
-#ssh-pro-dtac.active-ssh{border-color:var(--ssh);background:var(--ssh-light);color:var(--ssh2)}
-#ssh-pro-true.active-ssh{border-color:var(--true);background:var(--true-light);color:var(--true2)}
+#ssh-pro-dtac.active-ssh{border-color:var(--ssh);background:rgba(56,189,248,.15);color:var(--ssh)}
+#ssh-pro-true.active-ssh{border-color:var(--true);background:rgba(248,113,113,.15);color:var(--true)}
 
 /* ══════════════════════════════════════
    MGMT MODAL — action rows
 ══════════════════════════════════════ */
 .action-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.8rem}
 .action-card{
-  background:#f8fafc;border:1.5px solid var(--border);border-radius:12px;
+  background:rgba(255,255,255,.03);border:1.5px solid var(--border2);border-radius:12px;
   padding:.85rem .9rem;cursor:pointer;transition:all .2s;text-align:center;
 }
-.action-card:hover{border-color:var(--ssh);background:var(--ssh-light)}
-.action-card.selected{border-color:var(--purple);background:#f5f3ff}
+.action-card:hover{border-color:var(--ssh);background:rgba(56,189,248,.08)}
+.action-card.selected{border-color:var(--ssh);background:rgba(56,189,248,.1);box-shadow:0 0 0 2px rgba(56,189,248,.15)}
 .action-icon{font-size:1.4rem;margin-bottom:.3rem}
 .action-name{font-family:'Rajdhani',sans-serif;font-size:.9rem;font-weight:700;color:var(--text)}
 .action-desc{font-size:.7rem;color:var(--text3);margin-top:.15rem}
 
 /* user detail panel */
 .udetail{
-  background:var(--bg);border-radius:12px;padding:.85rem 1rem;
-  border:1px solid var(--border);margin-bottom:.9rem;
+  background:rgba(255,255,255,.03);border-radius:12px;padding:.85rem 1rem;
+  border:1px solid var(--border2);margin-bottom:.9rem;
 }
 .udetail-row{display:flex;justify-content:space-between;padding:.28rem 0;border-bottom:1px solid var(--border);font-size:.8rem}
 .udetail-row:last-child{border-bottom:none}
@@ -1750,18 +1802,18 @@ select option{background:#fff}
 .svc-row{
   display:flex;align-items:center;gap:.65rem;
   border-radius:11px;padding:.52rem .85rem;
-  border:1px solid var(--border);background:#f9fbfc;
+  border:1px solid var(--border2);background:rgba(255,255,255,.02);
   transition:all .15s;
 }
-.svc-row.up  {border-color:#86efac;background:#f0fdf4}
-.svc-row.down{border-color:#fca5a5;background:#fef2f2}
-.svc-row.warn{border-color:#fed7aa;background:#fffbf5}
+.svc-row.up  {border-color:rgba(74,222,128,.3);background:rgba(74,222,128,.05)}
+.svc-row.down{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.05)}
+.svc-row.warn{border-color:rgba(251,146,60,.3);background:rgba(251,146,60,.05)}
 .svc-dot{
   width:8px;height:8px;border-radius:50%;flex-shrink:0;
 }
-.svc-dot.up  {background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.55);animation:pulse 2s infinite}
-.svc-dot.down{background:var(--red)}
-.svc-dot.warn{background:var(--orange);animation:pulse 2s infinite}
+.svc-dot.up  {background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,.6);animation:pulse 2s infinite}
+.svc-dot.down{background:#f87171;box-shadow:0 0 6px rgba(248,113,113,.4)}
+.svc-dot.warn{background:#fb923c;box-shadow:0 0 8px rgba(251,146,60,.5);animation:pulse 2s infinite}
 .svc-icon{font-size:.9rem;flex-shrink:0}
 .svc-name{font-family:"Share Tech Mono",monospace;font-size:.75rem;color:var(--text);flex:1;font-weight:600}
 .svc-ports{font-family:"Share Tech Mono",monospace;font-size:.63rem;color:var(--text3)}
@@ -1769,10 +1821,10 @@ select option{background:#fff}
   font-family:"Share Tech Mono",monospace;font-size:.63rem;
   padding:.13rem .5rem;border-radius:20px;flex-shrink:0;font-weight:700;
 }
-.svc-chip.up  {background:#dcfce7;color:#166534;border:1px solid #86efac}
-.svc-chip.down{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
-.svc-chip.warn{background:#fff7ed;color:#92400e;border:1px solid #fed7aa}
-.svc-chip.checking{background:#f1f5f9;color:var(--text3);border:1px solid var(--border)}
+.svc-chip.up  {background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.3)}
+.svc-chip.down{background:rgba(248,113,113,.12);color:#f87171;border:1px solid rgba(248,113,113,.3)}
+.svc-chip.warn{background:rgba(251,146,60,.12);color:#fb923c;border:1px solid rgba(251,146,60,.3)}
+.svc-chip.checking{background:rgba(255,255,255,.04);color:var(--text3);border:1px solid var(--border)}
 
 /* ══════════════════════════════════════
    HEADER UPGRADE
@@ -1865,7 +1917,7 @@ select option{background:#fff}
   font-family:"Kanit",sans-serif;
   transition:all .2s;display:inline-flex;align-items:center;gap:.3rem;
 }
-.refresh-btn:hover{background:#f0f4fa;color:var(--text);border-color:#b0bfd0}
+.refresh-btn:hover{background:rgba(126,232,250,.08);color:var(--accent);border-color:rgba(126,232,250,.3)}
 .refresh-btn.spin svg{animation:spinR .6s linear infinite}
 
 /* carrier button upgrade */
@@ -1875,7 +1927,7 @@ select option{background:#fff}
   display:flex;align-items:center;gap:1rem;text-align:left;
   transition:background .15s,transform .1s;
 }
-.carrier-btn:hover{background:#f6f9ff;transform:none}
+.carrier-btn:hover{background:rgba(126,232,250,.05);transform:none}
 .carrier-btn:active{transform:scale(.99)}
 
 /* section label upgrade */
@@ -1932,8 +1984,8 @@ select option{background:#fff}
 /* online badge upgrade */
 .online-badge{
   display:inline-flex;align-items:center;gap:.38rem;
-  background:#f0fdf4;border:1px solid #86efac;
-  color:#15803d;padding:.26rem .75rem;border-radius:20px;
+  background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);
+  color:#4ade80;padding:.26rem .75rem;border-radius:20px;
   font-size:.7rem;font-family:"Share Tech Mono",monospace;font-weight:600;
 }
 
@@ -1962,21 +2014,21 @@ select option{background:#fff}
   font-family:"Share Tech Mono",monospace;
   font-size:.68rem;padding:.25rem .75rem;border-radius:20px;margin-bottom:.95rem;
 }
-.sni-badge.ais{background:#edf7e3;border:1px solid #b5e08a;color:#316808}
-.sni-badge.true{background:#fff0f0;border:1px solid #f5909a;color:#a6000c}
-.sni-badge.ssh{background:#e6f3fc;border:1px solid #82c0ee;color:#0c4f84}
+.sni-badge.ais{background:rgba(114,209,36,.12);border:1px solid rgba(114,209,36,.3);color:var(--ais)}
+.sni-badge.true{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:var(--true)}
+.sni-badge.ssh{background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3);color:var(--ssh)}
 
 /* input upgrade */
 input,select{
-  background:#f6f9fc;border:1.5px solid #d8e2ee;border-radius:11px;
+  background:rgba(255,255,255,.04);border:1.5px solid var(--border2);border-radius:11px;
   padding:.6rem .9rem;color:var(--text);
   font-family:"Kanit",sans-serif;font-size:.88rem;outline:none;
   transition:border-color .2s,box-shadow .2s,background .2s;width:100%;
 }
-input:focus,select:focus{background:#fff}
+input:focus,select:focus{background:rgba(56,189,248,.05)}
 input.ais-focus:focus{border-color:#4d9a0e;box-shadow:0 0 0 3px rgba(77,154,14,.1)}
 input.true-focus:focus{border-color:#d80e1c;box-shadow:0 0 0 3px rgba(216,14,28,.09)}
-input.ssh-focus:focus{border-color:#1568a6;box-shadow:0 0 0 3px rgba(21,104,166,.1)}
+input.ssh-focus:focus{border-color:var(--ssh);box-shadow:0 0 0 3px rgba(56,189,248,.15)}
 input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,.1)}
 
 /* link-box upgrade */
@@ -2266,19 +2318,6 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
     </div>
 
 
-    <!-- Service Monitor -->
-    <div class="stat-card wide">
-      <div class="stat-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem">
-        <span>🛠 SERVICE MONITOR</span>
-        <button class="refresh-btn" id="svc-refresh-btn" onclick="loadServiceStatus()">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          เช็คสถานะ
-        </button>
-      </div>
-      <div id="svc-list">
-        <div class="loading-row"><span class="spinner" style="border-color:rgba(0,0,0,.1);border-top-color:var(--ssh)"></span>กำลังตรวจสอบ...</div>
-      </div>
-    </div>
 
   </div><!-- /stats-grid -->
 
@@ -2501,17 +2540,17 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
         <div class="field"><label>🔑 Password</label><input type="text" id="ssh-pass" placeholder="pass1234" class="ssh-focus"></div>
         <div class="field"><label>📅 วันใช้งาน</label><input type="number" id="ssh-days" value="30" min="1" class="ssh-focus"></div>
         <div class="field"><label>📱 IP Limit</label><input type="number" id="ssh-iplimit" value="2" min="1" class="ssh-focus"></div>
-        <div class="field span2" style="display:none" id="ssh-sni-field"><label>🌐 SNI / Host</label><input type="text" id="ssh-sni" placeholder="your-domain.com" class="ssh-focus"></div>
+
       </div>
       <div class="divider"></div>
-      <div style="margin-bottom:.6rem">
+      <div style="margin-bottom:.6rem" id="ssh-app-row">
         <label style="margin-bottom:.4rem;display:block">📱 แอพ Import Link</label>
         <div class="port-tabs">
           <button class="port-tab active-ssh" id="ssh-app-npv" onclick="sshSelApp('npv')">NpvTunnel</button>
           <button class="port-tab" id="ssh-app-dark" onclick="sshSelApp('dark')">DarkTunnel</button>
         </div>
       </div>
-      <div style="margin-bottom:.8rem">
+      <div style="margin-bottom:.8rem" id="ssh-pro-row">
         <label style="margin-bottom:.4rem;display:block">🌐 Operator / Payload</label>
         <div class="port-tabs">
           <button class="port-tab active-ssh pro-tab" id="ssh-pro-dtac" onclick="sshSelPro('dtac')">DTAC GAMING</button>
@@ -2617,7 +2656,7 @@ input.mgmt-focus:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237
         </div>
         <!-- Reset Traffic -->
         <div id="form-resettraffic" style="display:none">
-          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:.75rem .9rem;font-size:.82rem;color:#92400e;margin-bottom:.8rem">
+          <div style="background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);border-radius:10px;padding:.75rem .9rem;font-size:.82rem;color:#fb923c;margin-bottom:.8rem">
             ⚠️ การรีเซต Traffic จะเคลียร์ยอดใช้งาน Up/Down ของยูสนี้ให้กลับเป็น 0
           </div>
           <button class="submit-btn mgmt-btn" onclick="doAction('resettraffic')">🔃 รีเซต Traffic</button>
@@ -2943,7 +2982,9 @@ function renderUserList(users){
   const now=Date.now();
   list.innerHTML=users.map(u=>{
     const isAis=u.inboundPort===8080;
-    const avatarClass=isAis?'ua-ais':'ua-true';
+    const isSsh=u.protocol==='ssh'||u.inboundPort===80||u.inboundPort===443;
+    const avatarClass=isAis?'ua-ais':isSsh?'ua-ssh':'ua-true';
+    const displayName=(u.email||'?')+(isSsh?'-ssh':'-vless');
     const initial=(u.email||'?')[0].toUpperCase();
     let statusHtml='', expStr='';
     if(u.expiryTime===0){expStr='ไม่จำกัด';statusHtml='<span class="status-badge status-ok">✓ Active</span>'}
@@ -2957,7 +2998,7 @@ function renderUserList(users){
     return `<button type="button" class="user-row" data-email="${u.email}" style="width:100%;text-align:left;border:none;background:none;cursor:pointer;">
       <div class="user-avatar ${avatarClass}">${initial}</div>
       <div class="user-info">
-        <div class="user-name">${u.email}</div>
+        <div class="user-name">${displayName}</div>
         <div class="user-meta">Port ${u.inboundPort} · ${expStr}</div>
       </div>
       ${statusHtml}
@@ -3078,7 +3119,7 @@ function openMgmtModal(email){
     expStr=new Date(u.expiryTime).toLocaleDateString('th-TH');
     expClass=diff<0?'dead':diff<259200000?'exp':'ok';
   }
-  const dataStr=u.totalGB>0?u.totalGB+' GB':'ไม่จำกัด';
+  const dataStr=u.totalGB>0?(u.totalGB/1073741824).toFixed(1)+' GB':'ไม่จำกัด';
   document.getElementById('mgmt-user-detail').innerHTML=`
     <div class="udetail-row"><span class="dk">👤 Username</span><span class="dv">${u.email}</span></div>
     <div class="udetail-row"><span class="dk">🔌 Port</span><span class="dv">${u.inboundPort}</span></div>
@@ -3154,16 +3195,28 @@ async function doAction(action){
       return;
     } else if(action==='delete'){
       const res=await xuiPost(`/panel/api/inbounds/${u.inboundId}/delClient/${u.uuid}`,{});
-      if(!res.success)throw new Error(res.msg||'ลบไม่สำเร็จ');
+      if(!res||!res.success){
+        throw new Error(res&&res.msg?res.msg:'ลบไม่สำเร็จ');
+      }
       setAlert('mgmt','✅ ลบยูสสำเร็จ','ok');
       setTimeout(()=>{closeModal('mgmt');loadUserList();},1500);
       return;
     }
 
-    // update client
-    const payload={id:u.inboundId, settings:JSON.stringify({...settings,clients:clients.map((c,i)=>i===clientIdx?client:c)})};
-    const res=await xuiPost(`/panel/api/inbounds/updateClient/${u.uuid}`,payload);
-    if(!res.success)throw new Error(res.msg||'อัพเดทไม่สำเร็จ');
+    // update client — x-ui API format
+    const updatedClients = clients.map((c,i)=>i===clientIdx?client:c);
+    const updatedSettings = {...settings, clients: updatedClients};
+    // ลอง updateClient ก่อน ถ้าไม่สำเร็จ fallback ไป update inbound ทั้งหมด
+    let res = await xuiPost(`/panel/api/inbounds/updateClient/${u.uuid}`,{
+      id: u.inboundId,
+      settings: JSON.stringify({clients:[client]})
+    });
+    if(!res||!res.success){
+      // fallback: update inbound ทั้งหมด
+      const ibFull = {...ib, settings: JSON.stringify(updatedSettings)};
+      res = await xuiPost(`/panel/api/inbounds/update/${u.inboundId}`, ibFull);
+    }
+    if(!res||!res.success)throw new Error(res&&res.msg?res.msg:'อัพเดทไม่สำเร็จ');
 
     setAlert('mgmt','✅ ดำเนินการสำเร็จ!','ok');
     await loadUserList();
@@ -3244,7 +3297,16 @@ function copyNpvDirect(carrier){
 function sshSelPort(port){
   _sshPort=port;
   ['80','443'].forEach(p=>{document.getElementById('ssh-tab-'+p).className='port-tab'+(String(port)===p?' active-ssh':'')});
-  document.getElementById('ssh-sni-field').style.display=port===443?'':'none';
+  const is443=port===443;
+  // port 443 ซ่อน app/pro selectors
+  const appRow=document.getElementById('ssh-app-row');
+  const proRow=document.getElementById('ssh-pro-row');
+  const linkBox=document.getElementById('ssh-import-link');
+  const copyImport=document.getElementById('ssh-copy-import');
+  if(appRow)appRow.style.display=is443?'none':'';
+  if(proRow)proRow.style.display=is443?'none':'';
+  if(linkBox)linkBox.style.display=is443?'none':'';
+  if(copyImport)copyImport.style.display=is443?'none':'';
 }
 function sshSelApp(app){
   _sshApp=app;
@@ -3272,8 +3334,11 @@ async function createSSH(){
     const d=await r.json();
     if(!d.ok&&!d.success)throw new Error(d.error||d.msg||'สร้างไม่สำเร็จ');
     const pro=PROS[_sshPro];
-    const link=_sshApp==='npv'?buildNpvLink(user,pass,pro,_sshPort):buildDarkLink(user,pass,pro,_sshPort);
     const expDate=new Date(Date.now()+days*86400000).toLocaleDateString('th-TH');
+    let link='';
+    if(_sshPort!==443){
+      link=_sshApp==='npv'?buildNpvLink(user,pass,pro,_sshPort):buildDarkLink(user,pass,pro,_sshPort);
+    }
     _sshSaved={user,pass,days,ipLimit,port:_sshPort,expDate,link};
     showSSHResult(_sshSaved);
     setAlert('ssh',`✅ สร้าง SSH user "${user}" สำเร็จ!`,'ok');
@@ -3282,17 +3347,24 @@ async function createSSH(){
 }
 function showSSHResult(d){
   const isNpv=_sshApp==='npv';
+  const is443=d.port===443;
   document.getElementById('ssh-info').innerHTML=`
     <div class="info-row"><span class="info-key">👤 Username</span><span class="info-val">${d.user}</span></div>
     <div class="info-row"><span class="info-key">🔑 Password</span><span class="info-val pass">${d.pass}</span></div>
     <div class="info-row"><span class="info-key">🌐 Host</span><span class="info-val">${HOST}</span></div>
-    <div class="info-row"><span class="info-key">🔌 WS Port</span><span class="info-val">${d.port}</span></div>
+    <div class="info-row"><span class="info-key">🔌 WS Port</span><span class="info-val">${d.port}${is443?' (WSS-SSL 🔒':' (HTTP-WS)'}</span></div>
     <div class="info-row"><span class="info-key">🐻 Dropbear</span><span class="info-val">143, 109</span></div>
     <div class="info-row"><span class="info-key">📅 หมดอายุ</span><span class="info-val">${d.expDate}</span></div>
     <div class="info-row"><span class="info-key">📱 IP Limit</span><span class="info-val">${d.ipLimit} IP</span></div>
-    <div class="info-row"><span class="info-key">📲 App</span><span class="info-val">${isNpv?'NpvTunnel':'DarkTunnel'}</span></div>`;
+    ${!is443?`<div class="info-row"><span class="info-key">📲 App</span><span class="info-val">${isNpv?'NpvTunnel':'DarkTunnel'}</span></div>`:''}
+    ${is443?`<div class="info-row"><span class="info-key">📂 WS Path</span><span class="info-val">/ssh/</span></div>`:''}`;
   const lb=document.getElementById('ssh-import-link');
-  lb.textContent=d.link; lb.className='link-box '+(isNpv?'npv-link':'dark-link');
+  if(lb){
+    lb.style.display=is443?'none':'';
+    if(!is443){lb.textContent=d.link; lb.className='link-box '+(isNpv?'npv-link':'dark-link');}
+  }
+  const copyImport=document.getElementById('ssh-copy-import');
+  if(copyImport)copyImport.style.display=is443?'none':'';
   document.getElementById('ssh-result').classList.add('show');
   setTimeout(()=>document.getElementById('ssh-result').scrollIntoView({behavior:'smooth',block:'nearest'}),100);
 }
@@ -3335,9 +3407,10 @@ function renderQR(elId,text){
 const SERVICES=[
   {name:'x-ui Panel',     icon:'📡', ports:[54321], type:'xui'},
   {name:'Python SSH API', icon:'🐍', ports:[2095],  path:SSH_API+'/status', type:'http'},
-  {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'port'},
+  {name:'Dropbear SSH',   icon:'🐻', ports:[143,109], type:'api', key:'dropbear'},
   {name:'nginx / WS',     icon:'🌐', ports:[80],    path:'/', type:'http'},
-  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'port'},
+  {name:'SSH-WS-SSL',     icon:'🔒', ports:[443],   path:'https://'+HOST+'/', type:'http'},
+  {name:'badvpn UDP-GW',  icon:'🎮', ports:[7300],  type:'api', key:'badvpn'},
 ];
 
 async function loadServiceStatus(){
@@ -3504,6 +3577,8 @@ DASHV8EOF
 sed -i "s|const SSH_API = '/sshws-api';|const SSH_API = '/api';|g" /opt/chaiya-panel/sshws.html 2>/dev/null || true
 sed -i "s|window.location.replace('chaiya-login.html');|window.location.replace('index.html');|g" /opt/chaiya-panel/sshws.html 2>/dev/null || true
 
+# ลบไฟล์ที่ไม่ใช่ web files ออกจาก panel dir
+find /opt/chaiya-panel -maxdepth 1 -type f ! -name "*.html" ! -name "*.js" ! -name "*.css" ! -name "*.png" ! -name "*.ico" -delete 2>/dev/null || true
 chmod -R 755 /opt/chaiya-panel
 
 
@@ -3517,25 +3592,17 @@ for f in /etc/nginx/sites-enabled/*; do
 done
 
 # HTTP → HTTPS redirect
-cat > /etc/nginx/sites-available/chaiya-http << EOF
-server {
-    listen 80;
-    server_name $DOMAIN;
-    location /.well-known/acme-challenge/ { root /var/www/html; }
-    location / { return 301 https://\$host\$request_uri; }
-}
-EOF
-ln -sf /etc/nginx/sites-available/chaiya-http /etc/nginx/sites-enabled/
-nginx -t &>/dev/null && systemctl restart nginx
 
 # ── ขอ SSL Certificate ─────────────────────────────────────────
 info "ขอ SSL Certificate สำหรับ $DOMAIN ..."
-certbot certonly --nginx --non-interactive --agree-tos \
+systemctl stop nginx 2>/dev/null || true
+certbot certonly --standalone --non-interactive --agree-tos \
   --register-unsafely-without-email \
   -d "$DOMAIN" 2>&1 | tail -5 || \
 certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos \
   --register-unsafely-without-email \
   -d "$DOMAIN" 2>&1 | tail -5
+systemctl start nginx 2>/dev/null || true
 
 SSL_CERT="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
@@ -3646,8 +3713,9 @@ EOF
 fi
 
 rm -f /etc/nginx/sites-enabled/chaiya-http 2>/dev/null || true
-ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/
-nginx -t &>/dev/null && systemctl restart nginx && ok "Nginx พร้อม" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
+rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya
+nginx -t && systemctl restart nginx && ok "Nginx พร้อม" || { nginx -t; warn "Nginx มีปัญหา"; }
 
 # ── CERTBOT AUTO-RENEW ─────────────────────────────────────────
 [[ $USE_SSL -eq 1 ]] && (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && systemctl reload nginx") | sort -u | crontab -
