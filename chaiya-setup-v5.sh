@@ -109,6 +109,7 @@ pkill -f ws-stunnel      2>/dev/null || true
 pkill -f badvpn-udpgw    2>/dev/null || true
 pkill -f chaiya-ssh-api  2>/dev/null || true
 pkill -f 'app.py'        2>/dev/null || true
+pkill -9 -x nginx        2>/dev/null || true
 sleep 2
 
 # ล้าง nginx config เก่า
@@ -702,9 +703,6 @@ for _try in 1 2 3; do
   [[ -f "$SSL_CERT" ]] && { USE_SSL=1; break; }
   sleep 5
 done
-
-# start nginx คืนก่อน (ws-stunnel จะ start หลัง nginx config เสร็จ)
-systemctl start nginx 2>/dev/null || true
 
 [[ $USE_SSL -eq 1 ]] && ok "SSL Certificate พร้อม" || warn "ไม่มี SSL — ใช้ HTTP แทน"
 
