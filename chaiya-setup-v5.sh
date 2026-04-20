@@ -95,6 +95,59 @@ echo ""
 read -rp "เริ่มติดตั้ง? [y/N]: " CONFIRM
 [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]] && exit 0
 
+# ── CLEANUP (ล้างข้อมูลเก่าทุกครั้งก่อนติดตั้งใหม่) ──────────
+info "ล้างข้อมูลเก่า..."
+
+# หยุด services ทั้งหมดที่เกี่ยวข้อง
+for _svc in chaiya-sshws chaiya-ssh-api chaiya-badvpn nginx x-ui dropbear; do
+  systemctl stop "$_svc"    2>/dev/null || true
+  systemctl disable "$_svc" 2>/dev/null || true
+done
+
+# kill โดยตรงกรณี systemctl ไม่จับ
+pkill -f ws-stunnel      2>/dev/null || true
+pkill -f badvpn-udpgw    2>/dev/null || true
+pkill -f chaiya-ssh-api  2>/dev/null || true
+pkill -f 'app.py'        2>/dev/null || true
+sleep 2
+
+# ล้าง nginx config เก่า
+rm -f /etc/nginx/sites-enabled/*
+rm -f /etc/nginx/sites-available/chaiya
+rm -f /etc/nginx/sites-available/chaiya-tmp
+# คืน default เผื่อ nginx ต้องการ (จะถูก override ทีหลัง)
+[[ -f /etc/nginx/sites-available/default ]] && \
+  ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+
+# ล้าง systemd unit เก่า
+rm -f /etc/systemd/system/chaiya-sshws.service
+rm -f /etc/systemd/system/chaiya-ssh-api.service
+rm -f /etc/systemd/system/chaiya-badvpn.service
+rm -f /etc/systemd/system/dropbear.service.d/override.conf
+systemctl daemon-reload
+
+# ล้าง chaiya config/data
+rm -rf /etc/chaiya
+rm -rf /opt/chaiya-panel
+rm -rf /opt/chaiya-ssh-api
+rm -f  /usr/local/bin/ws-stunnel
+rm -f  /usr/local/bin/menu
+
+# ล้าง x-ui inbounds เก่า (เก็บ binary ไว้ — ไม่ uninstall)
+if [[ -f /etc/x-ui/x-ui.db ]]; then
+  sqlite3 /etc/x-ui/x-ui.db "DELETE FROM inbounds;" 2>/dev/null || true
+  sqlite3 /etc/x-ui/x-ui.db "DELETE FROM settings;" 2>/dev/null || true
+fi
+
+# ล้าง port binding ที่อาจค้างอยู่
+for _port in 80 81 443 6789 7300; do
+  _pid=$(lsof -ti tcp:$_port 2>/dev/null || fuser $_port/tcp 2>/dev/null | awk '{print $1}')
+  [[ -n "$_pid" ]] && kill -9 $_pid 2>/dev/null || true
+done
+sleep 1
+
+ok "ล้างข้อมูลเก่าเสร็จแล้ว"
+
 # ── MKDIR ────────────────────────────────────────────────────
 mkdir -p /etc/chaiya /etc/chaiya/exp /var/www/chaiya /opt/chaiya-panel
 
@@ -638,28 +691,20 @@ SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 USE_SSL=0
 
-# เปิด nginx HTTP ชั่วคราวเพื่อ certbot
-cat > /etc/nginx/sites-available/chaiya-tmp << EOF
-server {
-    listen 80;
-    server_name ${DOMAIN};
-    location /.well-known/acme-challenge/ { root /var/www/html; }
-    location / { return 200 'ok'; }
-}
-EOF
-rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-ln -sf /etc/nginx/sites-available/chaiya-tmp /etc/nginx/sites-enabled/chaiya-tmp
-nginx -t 2>/dev/null && systemctl restart nginx 2>/dev/null || true
+# certbot standalone ต้องการ port 80 ว่าง — หยุด ws-stunnel + nginx ชั่วคราว
+systemctl stop chaiya-sshws 2>/dev/null || true
+systemctl stop nginx       2>/dev/null || true
+sleep 2
 
 for _try in 1 2 3; do
-  certbot certonly --nginx --non-interactive --agree-tos \
+  certbot certonly --standalone --non-interactive --agree-tos \
     --register-unsafely-without-email -d "$DOMAIN" 2>&1 | tail -3
   [[ -f "$SSL_CERT" ]] && { USE_SSL=1; break; }
   sleep 5
 done
 
-rm -f /etc/nginx/sites-enabled/chaiya-tmp
-rm -f /etc/nginx/sites-available/chaiya-tmp
+# start nginx คืนก่อน (ws-stunnel จะ start หลัง nginx config เสร็จ)
+systemctl start nginx 2>/dev/null || true
 
 [[ $USE_SSL -eq 1 ]] && ok "SSL Certificate พร้อม" || warn "ไม่มี SSL — ใช้ HTTP แทน"
 
@@ -722,9 +767,10 @@ server {
 }
 EOF
 else
+# ไม่มี SSL — ใช้ HTTP port 81 แทน (port 80 ถูก ws-stunnel ใช้อยู่)
 cat > /etc/nginx/sites-available/chaiya << EOF
 server {
-    listen 443;
+    listen 81;
     server_name ${DOMAIN} _;
     root /opt/chaiya-panel;
     index index.html;
@@ -755,13 +801,15 @@ fi
 
 ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya
 nginx -t && systemctl restart nginx && ok "Nginx พร้อม" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
+# start ws-stunnel คืนหลัง nginx config เสร็จ
+systemctl start chaiya-sshws 2>/dev/null || true
 
 # ── FIREWALL ─────────────────────────────────────────────────
 info "ตั้งค่า Firewall..."
 ufw --force reset &>/dev/null
 ufw default deny incoming &>/dev/null
 ufw default allow outgoing &>/dev/null
-for port in 22 80 109 143 443 8080 8880 "${REAL_XUI_PORT}"; do
+for port in 22 80 81 109 143 443 8080 8880 "${REAL_XUI_PORT}"; do
   ufw allow "$port"/tcp &>/dev/null
 done
 ufw deny 6789/tcp &>/dev/null
@@ -2097,7 +2145,7 @@ ok "Dashboard พร้อม"
 
 # ── CERTBOT AUTO-RENEW ────────────────────────────────────────
 [[ $USE_SSL -eq 1 ]] && \
-  (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && systemctl reload nginx") | sort -u | crontab -
+  (crontab -l 2>/dev/null; echo "0 3 * * * systemctl stop chaiya-sshws && certbot renew --quiet --standalone && systemctl reload nginx; systemctl start chaiya-sshws") | sort -u | crontab -
 
 # ── MENU COMMAND ─────────────────────────────────────────────
 cat > /usr/local/bin/menu << 'MENUEOF'
@@ -2160,8 +2208,8 @@ if [[ $USE_SSL -eq 1 ]]; then
   echo -e "  🌐 Panel URL   : ${CYAN}${BOLD}https://${DOMAIN}${NC}"
   echo -e "  🔒 SSL         : ${GREEN}✅ HTTPS พร้อม${NC}"
 else
-  echo -e "  🌐 Panel URL   : ${YELLOW}http://${DOMAIN}:443 (ยังไม่มี SSL)${NC}"
-  echo -e "  🔒 SSL         : ${YELLOW}⚠️  ยังไม่มี — รัน: certbot --nginx -d ${DOMAIN}${NC}"
+  echo -e "  🌐 Panel URL   : ${YELLOW}http://${DOMAIN}:81 (ยังไม่มี SSL)${NC}"
+  echo -e "  🔒 SSL         : ${YELLOW}⚠️  ยังไม่มี — รัน: certbot certonly --standalone -d ${DOMAIN}${NC}"
 fi
 echo -e "  👤 3x-ui User  : ${YELLOW}${XUI_USER}${NC}"
 echo -e "  🔒 3x-ui Pass  : ${YELLOW}${XUI_PASS}${NC}"
