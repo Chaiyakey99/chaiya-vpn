@@ -71,8 +71,8 @@ WS_TUNNEL_PORT=80
 # ── INSTALL DEPS ─────────────────────────────────────────────
 info "อัปเดต packages..."
 apt-get update -qq 2>/dev/null
-apt-get install -y -qq curl wget python3 python3-pip nginx certbot \
-  python3-certbot-nginx dropbear openssh-server ufw \
+apt-get install -y -qq curl wget python3 python3-pip certbot \
+  dropbear openssh-server ufw \
   net-tools jq bc cron unzip sqlite3 iptables-persistent 2>/dev/null || true
 ok "ติดตั้ง packages สำเร็จ"
 
@@ -723,41 +723,38 @@ done
 
 [[ $USE_SSL -eq 1 ]] && ok "SSL Certificate พร้อม" || warn "ไม่มี SSL — ใช้ HTTP แทน"
 
-# ── NGINX CONFIG ─────────────────────────────────────────────
-info "ตั้งค่า Nginx..."
-rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
+# ── NGINX INSTALL + CONFIG (port 81) ─────────────────────────
+info "ติดตั้ง Nginx ใหม่..."
+systemctl stop nginx 2>/dev/null || true
+pkill -9 -x nginx 2>/dev/null || true
+apt-get purge -y nginx nginx-common nginx-full nginx-core nginx-extras 2>/dev/null || true
+rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
+apt-get install -y nginx
+ok "ติดตั้ง Nginx ใหม่สำเร็จ"
+
+info "ตั้งค่า Nginx port 81..."
+rm -f /etc/nginx/sites-enabled/*
+
+# เปิด port 81 ถ้ายังไม่เปิด
+ufw allow 81/tcp &>/dev/null || true
 
 if [[ $USE_SSL -eq 1 ]]; then
 cat > /etc/nginx/sites-available/chaiya << EOF
-# HTTP → HTTPS redirect
 server {
-    listen 80;
+    listen 81 ssl http2;
     server_name ${DOMAIN};
-    location /.well-known/acme-challenge/ { root /var/www/html; }
-    location / { return 301 https://\$host\$request_uri; }
-}
-
-# HTTPS Panel หลัก
-server {
-    listen 443 ssl http2;
-    server_name ${DOMAIN};
-
     ssl_certificate     ${SSL_CERT};
     ssl_certificate_key ${SSL_KEY};
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 10m;
-
     root /opt/chaiya-panel;
     index index.html;
-
     location / {
         try_files \$uri \$uri/ =404;
         add_header Cache-Control "no-store";
     }
-
-    # SSH API proxy
     location /api/ {
         proxy_pass http://127.0.0.1:6789/api/;
         proxy_http_version 1.1;
@@ -768,8 +765,6 @@ server {
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Content-Type" always;
     }
-
-    # 3x-ui proxy
     location /xui-api/ {
         proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
         proxy_http_version 1.1;
@@ -782,14 +777,12 @@ server {
 }
 EOF
 else
-# ไม่มี SSL — ใช้ HTTP port 81 แทน (port 80 ถูก ws-stunnel ใช้อยู่)
 cat > /etc/nginx/sites-available/chaiya << EOF
 server {
     listen 81;
     server_name ${DOMAIN} _;
     root /opt/chaiya-panel;
     index index.html;
-
     location / {
         try_files \$uri \$uri/ =404;
         add_header Cache-Control "no-store";
@@ -814,8 +807,9 @@ server {
 EOF
 fi
 
+rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya
-nginx -t && systemctl restart nginx && ok "Nginx พร้อม" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
+nginx -t && systemctl restart nginx && ok "Nginx พร้อม (port 81)" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
 # start ws-stunnel คืนหลัง nginx config เสร็จ
 systemctl start chaiya-sshws 2>/dev/null || true
 
