@@ -9,6 +9,23 @@
 #   - บันทึก xui credentials ลง config.js ให้ถูกต้อง
 # ============================================================
 
+# ── SELF-DOWNLOAD GUARD ──────────────────────────────────────
+# ป้องกัน heredoc truncation เมื่อรันผ่าน bash <(curl ...)
+# ถ้ารันจาก process substitution (fd แทนที่จะเป็นไฟล์จริง) ให้ดาวน์โหลดก่อน
+if [[ "$0" == /dev/fd/* ]] || [[ "$0" == /proc/self/fd/* ]] || [[ "$0" == "bash" ]]; then
+  _SELF=$(mktemp /tmp/chaiya-setup-XXXXX.sh)
+  # หา URL จาก cmdline หรือใช้ GitHub ตรง
+  _URL="https://raw.githubusercontent.com/Chaiyakey99/chaiya-vpn/main/chaiya-setup-v5.sh"
+  echo "[INFO] ดาวน์โหลด script ลงไฟล์ชั่วคราวก่อนรัน..."
+  if curl -fsSL --max-time 60 "$_URL" -o "$_SELF" 2>/dev/null && [[ -s "$_SELF" ]]; then
+    chmod +x "$_SELF"
+    exec bash "$_SELF" "$@"
+  else
+    echo "[WARN] ดาวน์โหลดไม่สำเร็จ — รันต่อจาก stream (อาจมีปัญหา heredoc)"
+    rm -f "$_SELF"
+  fi
+fi
+
 set -o pipefail
 export DEBIAN_FRONTEND=noninteractive
 
@@ -687,7 +704,7 @@ curl -s --max-time 3 http://127.0.0.1:6789/api/status | grep -q '"ok"' && \
   ok "SSH API พร้อม (port 6789)" || warn "SSH API อาจยังไม่พร้อม"
 
 # ── SSL CERTIFICATE ───────────────────────────────────────────
-info "ขอ SSL Certificate สำหรับ $DOMAIN..."
+info "ขอ SSL Certificate สำหรับ ${DOMAIN}..."
 SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 USE_SSL=0
