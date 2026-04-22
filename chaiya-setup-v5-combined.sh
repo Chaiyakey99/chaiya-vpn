@@ -9,21 +9,24 @@
 #   - บันทึก xui credentials ลง config.js ให้ถูกต้อง
 # ============================================================
 
-# ── SELF-DOWNLOAD GUARD ──────────────────────────────────────
-# ป้องกัน heredoc truncation เมื่อรันผ่าน bash <(curl ...)
-# ถ้ารันจาก process substitution (fd แทนที่จะเป็นไฟล์จริง) ให้ดาวน์โหลดก่อน
-if [[ "$0" == /dev/fd/* ]] || [[ "$0" == /proc/self/fd/* ]] || [[ "$0" == "bash" ]]; then
+# ── SELF-SAVE GUARD ──────────────────────────────────────────
+# ป้องกัน heredoc truncation เมื่อรันผ่าน bash <(curl ...) / curl | bash / wget -O- | bash
+# อ่าน script จาก fd ทั้งหมดลงไฟล์จริงก่อน แล้ว exec ใหม่
+if [[ "$0" == /dev/fd/* ]] || [[ "$0" == /proc/self/fd/* ]] || [[ "$0" == "bash" ]] || [[ "$0" == "-bash" ]] || [[ ! -f "$0" ]]; then
   _SELF=$(mktemp /tmp/chaiya-setup-XXXXX.sh)
-  # หา URL จาก cmdline หรือใช้ GitHub ตรง
-  _URL="https://raw.githubusercontent.com/Chaiyakey99/chaiya-vpn/main/chaiya-setup-v5.sh"
-  echo "[INFO] ดาวน์โหลด script ลงไฟล์ชั่วคราวก่อนรัน..."
-  if curl -fsSL --max-time 60 "$_URL" -o "$_SELF" 2>/dev/null && [[ -s "$_SELF" ]]; then
+  echo "[INFO] บันทึก script ลงไฟล์: $_SELF"
+  if [[ -r "$0" ]] && cat "$0" > "$_SELF" 2>/dev/null && [[ $(wc -c < "$_SELF") -gt 10000 ]]; then
     chmod +x "$_SELF"
     exec bash "$_SELF" "$@"
-  else
-    echo "[WARN] ดาวน์โหลดไม่สำเร็จ — รันต่อจาก stream (อาจมีปัญหา heredoc)"
-    rm -f "$_SELF"
   fi
+  # fallback: ถ้าอ่านจาก fd ไม่ได้ ให้อ่านจาก stdin
+  if [[ ! -t 0 ]] && cat > "$_SELF" 2>/dev/null && [[ $(wc -c < "$_SELF") -gt 10000 ]]; then
+    chmod +x "$_SELF"
+    exec bash "$_SELF" "$@"
+  fi
+  echo "[ERR] ไม่สามารถบันทึก script ลงไฟล์ได้ — กรุณาดาวน์โหลดไฟล์แล้วรันตรงๆ"
+  rm -f "$_SELF"
+  exit 1
 fi
 
 set -o pipefail
