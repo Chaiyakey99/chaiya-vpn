@@ -76,7 +76,7 @@ dpkg --configure -a 2>/dev/null || true
 apt-get update -y -qq
 apt-get install -y -qq curl wget python3 bc qrencode ufw nginx \
   certbot python3-certbot-nginx python3-pip fail2ban sqlite3 \
-  jq openssl net-tools screen iptables-persistent netfilter-persistent expect 2>/dev/null || true
+  jq openssl net-tools screen iptables-persistent netfilter-persistent 2>/dev/null || true
 
 pip3 install bcrypt --break-system-packages -q 2>/dev/null || true
 
@@ -110,7 +110,7 @@ MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null \
 #  81   → nginx dashboard + proxy → API:6789 (internal)
 #  109  → Dropbear SSH port 2
 #  143  → Dropbear SSH port 1
-#  443  → nginx SSL (SSH-WS-SSL self-signed + Dashboard HTTPS)
+#  443  → nginx SSL (ถ้ามี cert)
 #  2053 → 3x-ui panel
 #  6789 → chaiya-sshws-api (127.0.0.1 เท่านั้น — ห้าม expose)
 #  7300 → badvpn-udpgw (127.0.0.1 เท่านั้น)
@@ -126,7 +126,7 @@ MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null \
 #    81   → Dashboard web UI
 #    109  → Dropbear SSH port 2
 #    143  → Dropbear SSH port 1
-#    443  → SSH-WS-SSL (self-signed) + Dashboard HTTPS
+#    443  → HTTPS / SSL
 #    2053 → xui alt port
 #    2082 → xui alt port
 #    8080 → xui VMess
@@ -204,21 +204,6 @@ chmod 600 /etc/chaiya/xui-user.conf /etc/chaiya/xui-pass.conf 2>/dev/null || tru
 # ══════════════════════════════════════════════════════════════
 #  nginx config
 # ══════════════════════════════════════════════════════════════
-# ── สร้าง Self-Signed SSL Certificate สำหรับ port 443 ──────────
-echo -e "${YE}⏳ สร้าง SSL certificate (self-signed)...${RS}"
-mkdir -p /etc/chaiya/ssl
-if [[ ! -f /etc/chaiya/ssl/chaiya.crt ]] || [[ ! -f /etc/chaiya/ssl/chaiya.key ]]; then
-  openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-    -keyout /etc/chaiya/ssl/chaiya.key \
-    -out    /etc/chaiya/ssl/chaiya.crt \
-    -subj "/C=TH/ST=Bangkok/L=Bangkok/O=ChaiyaVPN/CN=chaiya-vpn" \
-    2>/dev/null
-  chmod 600 /etc/chaiya/ssl/chaiya.key
-  echo -e "  ${GR}✅ สร้าง SSL certificate สำเร็จ (10 ปี)${RS}"
-else
-  echo -e "  ${GR}✅ SSL certificate มีอยู่แล้ว${RS}"
-fi
-
 cat > /etc/nginx/sites-available/chaiya << 'NGINXEOF'
 # ── Port 81: Web Panel (Dashboard + config download)
 server {
@@ -243,15 +228,9 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Token $http_x_token;
-        proxy_set_header X-Auth-Token $http_x_auth_token;
-        proxy_set_header Authorization $http_authorization;
         proxy_read_timeout 60s;
-        proxy_connect_timeout 10s;
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
-        add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
     }
+    # xui-traffic: proxy ไปยัง 3x-ui local API (realtime traffic)
     location /xui-traffic/ {
         proxy_pass http://127.0.0.1:2053/;
         proxy_http_version 1.1;
@@ -260,101 +239,18 @@ server {
         proxy_set_header Cookie $http_cookie;
         proxy_read_timeout 30s;
     }
-}
-
-# ── Port 443: SSH-WS-SSL (Self-Signed) + Dashboard HTTPS ────────
-server {
-    listen 443 ssl;
-    server_name _;
-
-    ssl_certificate     /etc/chaiya/ssl/chaiya.crt;
-    ssl_certificate_key /etc/chaiya/ssl/chaiya.key;
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         HIGH:!aNULL:!MD5;
-    ssl_session_cache   shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    # ── SSH WebSocket SSL — path /ssh/ → Dropbear:143 ────────────
-    location /ssh/ {
-        proxy_pass          http://127.0.0.1:143;
-        proxy_http_version  1.1;
-        proxy_set_header    Upgrade    $http_upgrade;
-        proxy_set_header    Connection "upgrade";
-        proxy_set_header    Host       $host;
-        proxy_set_header    X-Real-IP  $remote_addr;
-        proxy_read_timeout  3600s;
-        proxy_send_timeout  3600s;
-        proxy_buffering     off;
-        tcp_nodelay         on;
-    }
-
-    # ── Dashboard + API (HTTPS) ───────────────────────────────────
-    location /config/ {
-        alias /var/www/chaiya/config/;
-        try_files $uri =404;
-        default_type text/html;
-        add_header Content-Type "text/html; charset=UTF-8";
-        add_header Cache-Control "no-cache";
-    }
-    location /sshws/ {
-        alias /var/www/chaiya/;
-        index sshws.html;
-        try_files $uri $uri/ =404;
-    }
-    location /sshws-api/ {
-        proxy_pass http://127.0.0.1:6789/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Token $http_x_token;
-        proxy_set_header X-Auth-Token $http_x_auth_token;
-        proxy_set_header Authorization $http_authorization;
-        proxy_read_timeout 60s;
-        proxy_connect_timeout 10s;
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
-        add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
-    }
-    location /xui-traffic/ {
-        proxy_pass http://127.0.0.1:2053/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header Cookie $http_cookie;
-        proxy_read_timeout 30s;
-    }
-    location / { return 200 'Chaiya VPN OK'; add_header Content-Type text/plain; }
 }
 # หมายเหตุ: port 80 ถูกจัดการโดย ws-stunnel (HTTP CONNECT tunnel)
+# ไม่ใช้ nginx จัดการ port 80 เพราะจะชนกับ tunnel
 NGINXEOF
 
 ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya
 rm -f /etc/nginx/sites-enabled/default
-
-# ── ล้าง port 80 ออกจาก nginx config ทุก path (Ubuntu 20/22/24) ──
-# 1. nginx.conf หลัก
-sed -i '/listen 80/d' /etc/nginx/nginx.conf 2>/dev/null || true
-# 2. conf.d
+# ป้องกัน nginx default config ชน port 80
+# nginx.conf ต้องไม่มี default server บน port 80
+sed -i '/listen 80 default_server/d' /etc/nginx/nginx.conf 2>/dev/null || true
+# ลบ conf.d default ถ้ามี
 rm -f /etc/nginx/conf.d/default.conf 2>/dev/null || true
-for _f in /etc/nginx/conf.d/*.conf; do
-  [[ -f "$_f" ]] && sed -i '/listen 80/d' "$_f" 2>/dev/null || true
-done
-# 3. sites-available อื่นที่อาจมี listen 80 (ยกเว้น chaiya ของเรา)
-for _f in /etc/nginx/sites-enabled/*; do
-  [[ "$_f" == *"chaiya"* ]] && continue
-  [[ -f "$_f" ]] && grep -q "listen 80" "$_f" 2>/dev/null && {
-    echo "  ⚠ ลบ nginx config ที่ชน port 80: $_f"
-    rm -f "$_f"
-  } || true
-done
-# 4. ตรวจ port 80 ยังถูกใช้ไหม (นอกจาก ws-stunnel)
-_p80_proc=$(ss -tlnp 2>/dev/null | grep ":80 " | grep -v "ws-stunnel\|python" | grep -oP '(?<=users:\(\(")[^"]+' | head -1)
-[[ -n "$_p80_proc" ]] && {
-  echo "  ⚠ kill process แย่ง port 80: $_p80_proc"
-  fuser -k 80/tcp 2>/dev/null || true
-  sleep 1
-} || true
 
 # ── auto-install nginx ถ้าหายไป ──────────────────────────────
 _ensure_nginx() {
@@ -367,25 +263,7 @@ _ensure_nginx() {
 }
 
 _ensure_nginx
-# ── Start nginx พร้อม fallback ───────────────────────────────
-systemctl enable nginx 2>/dev/null || true
-if nginx -t 2>/dev/null; then
-  systemctl restart nginx 2>/dev/null || true
-  sleep 1
-  if systemctl is-active --quiet nginx; then
-    echo "✅ nginx เริ่มทำงานแล้ว"
-  else
-    echo "⚠ nginx start ไม่ได้ — ลอง force start..."
-    pkill -f nginx 2>/dev/null || true
-    sleep 1
-    nginx 2>/dev/null || true
-    sleep 1
-    systemctl is-active --quiet nginx && echo "✅ nginx OK" || echo "❌ nginx ยังไม่ทำงาน — ตรวจสอบ: journalctl -u nginx -n 20"
-  fi
-else
-  echo "❌ nginx config error:"
-  nginx -t
-fi
+nginx -t && systemctl enable nginx && systemctl restart nginx
 
 # ── [FIX] badvpn ใช้ systemd service แทน rc.local ────────────
 # rc.local ไม่ reliable บน Ubuntu 20.04+ หลายเครื่อง
@@ -457,35 +335,23 @@ if ! systemctl is-active --quiet dropbear 2>/dev/null; then
 fi
 
 # ── badvpn-udpgw — ดาวน์โหลดพร้อม fallback หลาย source ──────
-# ตรวจสอบ binary ด้วยการรัน --help จริง (ไม่ hardcode SHA256 เพราะ binary อัพเดทได้)
-_verify_badvpn() {
-  [[ -f /usr/bin/badvpn-udpgw ]] || return 1
-  # ทดสอบว่ารันได้จริง (เป็น ELF binary ที่ valid)
-  if ! /usr/bin/badvpn-udpgw --help 2>&1 | grep -qi "udpgw\|listen\|client\|usage" ; then
-    echo "❌ badvpn-udpgw binary ไม่ valid — ลบทิ้ง"
-    rm -f /usr/bin/badvpn-udpgw
-    return 1
-  fi
-  return 0
-}
-
-if [[ ! -f /usr/bin/badvpn-udpgw ]] || [[ ! -x /usr/bin/badvpn-udpgw ]] || ! _verify_badvpn; then
+if [[ ! -f /usr/bin/badvpn-udpgw ]] || [[ ! -x /usr/bin/badvpn-udpgw ]]; then
   echo "⏳ ดาวน์โหลด badvpn-udpgw..."
   _badvpn_ok=0
   # source หลัก
   wget -q --timeout=15 -O /usr/bin/badvpn-udpgw \
     "https://raw.githubusercontent.com/NevermoreSSH/Blueblue/main/newudpgw" 2>/dev/null \
-    && chmod +x /usr/bin/badvpn-udpgw && _verify_badvpn && _badvpn_ok=1 || { rm -f /usr/bin/badvpn-udpgw; true; }
+    && chmod +x /usr/bin/badvpn-udpgw && _badvpn_ok=1 || true
   # fallback source 1
   if [[ $_badvpn_ok -eq 0 ]]; then
     wget -q --timeout=15 -O /usr/bin/badvpn-udpgw \
       "https://raw.githubusercontent.com/bagaswastu/badvpn/master/udpgw/badvpn-udpgw" 2>/dev/null \
-      && chmod +x /usr/bin/badvpn-udpgw && _verify_badvpn && _badvpn_ok=1 || { rm -f /usr/bin/badvpn-udpgw; true; }
+      && chmod +x /usr/bin/badvpn-udpgw && _badvpn_ok=1 || true
   fi
-  # fallback source 2 — apt package (ปลอดภัยที่สุด)
+  # fallback source 2 — apt package
   if [[ $_badvpn_ok -eq 0 ]]; then
     apt-get install -y -qq badvpn 2>/dev/null && _badvpn_ok=1 || true
-    [[ $_badvpn_ok -eq 1 ]] && ln -sf "$(command -v badvpn-udpgw 2>/dev/null)" /usr/bin/badvpn-udpgw 2>/dev/null || true
+    [[ $_badvpn_ok -eq 1 ]] && ln -sf "$(command -v badvpn-udpgw)" /usr/bin/badvpn-udpgw 2>/dev/null || true
   fi
   if [[ $_badvpn_ok -eq 1 ]]; then
     echo "✅ badvpn-udpgw ติดตั้งสำเร็จ"
@@ -522,7 +388,7 @@ echo "✅ badvpn-udpgw เริ่มทำงานแล้ว (port 7300)"
 # ── ws-stunnel Python3 (รับ HTTP payload → Dropbear) ─────────
 cat > /usr/local/bin/ws-stunnel << 'WSPYEOF'
 #!/usr/bin/python3
-import socket, threading, select, sys, time, collections
+import socket, threading, select, sys, time
 
 LISTENING_ADDR = '0.0.0.0'
 LISTENING_PORT = 80
@@ -531,12 +397,6 @@ BUFLEN = 4096 * 4
 TIMEOUT = 60
 DEFAULT_HOST = '127.0.0.1:143'
 RESPONSE = b'HTTP/1.1 101 Switching Protocols\r\nContent-Length: 104857600000\r\n\r\n'
-
-# ── Rate limit / connection cap ─────────────────────────────
-MAX_CONN_PER_IP = 20    # สูงสุดต่อ IP เดียวกัน
-MAX_CONN_TOTAL  = 500   # สูงสุดทั้งระบบ
-_ip_counts      = collections.defaultdict(int)   # IP → จำนวน conn ปัจจุบัน
-_ip_lock        = threading.Lock()
 
 class Server(threading.Thread):
     def __init__(self, host, port):
@@ -562,17 +422,6 @@ class Server(threading.Thread):
                     c.setblocking(1)
                 except socket.timeout:
                     continue
-                ip = addr[0]
-                with _ip_lock:
-                    total = sum(_ip_counts.values())
-                    if total >= MAX_CONN_TOTAL or _ip_counts[ip] >= MAX_CONN_PER_IP:
-                        try:
-                            c.send(b'HTTP/1.1 429 Too Many Requests\r\n\r\n')
-                            c.close()
-                        except Exception:
-                            pass
-                        continue
-                    _ip_counts[ip] += 1
                 conn = ConnectionHandler(c, self, addr)
                 conn.start()
                 self.addConn(conn)
@@ -619,7 +468,6 @@ class ConnectionHandler(threading.Thread):
         self.client_buffer = b''
         self.server = server
         self.log = 'Connection: ' + str(addr)
-        self.client_ip = addr[0]   # เก็บ IP เพื่อลด counter เมื่อปิด
 
     def close(self):
         try:
@@ -638,12 +486,6 @@ class ConnectionHandler(threading.Thread):
             pass
         finally:
             self.targetClosed = True
-        # ลด counter IP เมื่อ connection ปิด
-        with _ip_lock:
-            if _ip_counts[self.client_ip] > 0:
-                _ip_counts[self.client_ip] -= 1
-            if _ip_counts[self.client_ip] == 0:
-                del _ip_counts[self.client_ip]
 
     def run(self):
         try:
@@ -661,17 +503,7 @@ class ConnectionHandler(threading.Thread):
                 elif len(PASS) != 0 and passwd != PASS:
                     self.client.send(b'HTTP/1.1 400 WrongPass!\r\n\r\n')
                 elif hostPort.startswith('127.0.0.1') or hostPort.startswith('localhost'):
-                    # [FIX] security: อนุญาตเฉพาะ port 143, 109 (Dropbear) เท่านั้น
-                    # ป้องกัน client ส่ง X-Real-Host: 127.0.0.1:22 หรือ 127.0.0.1:6789
-                    ALLOWED_LOCAL_PORTS = {143, 109}
-                    try:
-                        _hp_port = int(hostPort.split(':')[1]) if ':' in hostPort else 143
-                    except (ValueError, IndexError):
-                        _hp_port = -1
-                    if _hp_port in ALLOWED_LOCAL_PORTS:
-                        self.method_CONNECT(hostPort)
-                    else:
-                        self.client.send(b'HTTP/1.1 403 Forbidden!\r\n\r\n')
+                    self.method_CONNECT(hostPort)
                 else:
                     self.client.send(b'HTTP/1.1 403 Forbidden!\r\n\r\n')
             else:
@@ -793,32 +625,9 @@ CONFEOF
 systemctl daemon-reload
 systemctl enable chaiya-sshws
 systemctl restart chaiya-sshws
-# รอให้ ws-stunnel ขึ้น port 80 จริง (สูงสุด 15 วิ)
-for _wsi in $(seq 1 8); do
-  ss -tlnp 2>/dev/null | grep -q ":80 " && break || true
-  sleep 2
-done
-if ss -tlnp 2>/dev/null | grep -q ":80 "; then
-  echo "✅ ws-stunnel ขึ้น port 80 แล้ว"
-else
-  echo "⚠ ws-stunnel ยังไม่ขึ้น port 80 — ลอง fallback..."
-  pkill -f ws-stunnel 2>/dev/null || true
-  sleep 1
-  nohup python3 /usr/local/bin/ws-stunnel >> /var/log/chaiya-sshws.log 2>&1 &
-  sleep 3
-fi
 
 # ── ติดตั้ง HTML Dashboard อัตโนมัติ ─────────────────────────
 mkdir -p /var/www/chaiya
-
-# [FIX] สร้าง token ก่อนเขียน HTML — ป้องกัน %%BAKED_TOKEN%% ค้างใน HTML
-SSHWS_TOKEN=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
-if [[ -z "$SSHWS_TOKEN" ]]; then
-  SSHWS_TOKEN=$(python3 -c "import hashlib,os; print(hashlib.sha256(os.urandom(32)).hexdigest()[:32])")
-  echo "$SSHWS_TOKEN" > /etc/chaiya/sshws-token.conf
-  chmod 600 /etc/chaiya/sshws-token.conf
-fi
-
 cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!DOCTYPE html>
 <html lang="th">
@@ -834,16 +643,16 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
     --green:#4dffa0;--cyan:#80ffdd;--purple:#b8a0ff;
     --yellow:#ffe680;--red:#ff6b8a;--orange:#ffb347;
     --text:#c8ddd0;--muted:#7a9aaa;
-    --rgb1:#a78bfa;--rgb2:#818cf8;--rgb3:#67e8f9;
-    --rgb4:#6ee7b7;--rgb5:#93c5fd;--rgb6:#c4b5fd;
+    --rgb1:#ff006e;--rgb2:#ff8c00;--rgb3:#ffe000;
+    --rgb4:#00ff50;--rgb5:#00dcff;--rgb6:#b400ff;
   }
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'Exo 2',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
   body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(77,255,160,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(77,255,160,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
   body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.05) 2px,rgba(0,0,0,.05) 4px);pointer-events:none;z-index:0;}
 
-  .rgb-text{background:linear-gradient(90deg,var(--rgb1),var(--rgb2),var(--rgb3),var(--rgb4),var(--rgb5),var(--rgb6),var(--rgb1));background-size:300%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:rgbshift 8s ease-in-out infinite;}
-  @keyframes rgbshift{0%{background-position:0%}50%{background-position:150%}100%{background-position:300%}}
+  .rgb-text{background:linear-gradient(90deg,var(--rgb1),var(--rgb2),var(--rgb3),var(--rgb4),var(--rgb5),var(--rgb6),var(--rgb1));background-size:200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:rgbshift 4s linear infinite;}
+  @keyframes rgbshift{0%{background-position:0%}100%{background-position:200%}}
 
   .wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 14px 48px;}
 
@@ -888,8 +697,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   /* ─ Card ─ */
   .card{background:var(--panel);border:1px solid var(--border);border-radius:11px;margin-bottom:14px;overflow:hidden;}
   .card-head{display:flex;align-items:center;justify-content:space-between;padding:11px 15px;border-bottom:1px solid var(--border);background:var(--bg3);}
-  .card-title{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.85rem;letter-spacing:2px;text-transform:uppercase;display:flex;align-items:center;gap:7px;color:var(--cyan);}
-  .rgb-label{background:linear-gradient(90deg,var(--rgb1),var(--rgb2),var(--rgb3),var(--rgb4),var(--rgb5),var(--rgb6),var(--rgb1));background-size:300%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:rgbshift 8s ease-in-out infinite;}
+  .card-title{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.85rem;letter-spacing:2px;text-transform:uppercase;color:var(--cyan);display:flex;align-items:center;gap:7px;}
   .card-body{padding:14px;}
 
   /* ─ Service rows ─ */
@@ -968,8 +776,8 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   .modal{background:var(--panel);border:1px solid var(--border2);border-radius:13px;width:100%;max-width:460px;animation:mIn .22s ease;}
   @keyframes mIn{from{opacity:0;transform:scale(.92) translateY(18px)}to{opacity:1;transform:none}}
   .modal-head{display:flex;justify-content:space-between;align-items:center;padding:13px 15px;border-bottom:1px solid var(--border);font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.9rem;letter-spacing:2px;color:var(--cyan);}
-  .modal-x{background:none;border:none;color:var(--muted);-webkit-text-fill-color:var(--muted);font-size:1rem;cursor:pointer;padding:2px 6px;border-radius:4px;}
-  .modal-x:hover{color:var(--red);-webkit-text-fill-color:var(--red);}
+  .modal-x{background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;padding:2px 6px;border-radius:4px;}
+  .modal-x:hover{color:var(--red);}
   .modal-body{padding:14px;}
 
   /* ─ Toast ─ */
@@ -1016,57 +824,14 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   .copy-link-btn.dark{background:rgba(153,51,255,.08);border-color:rgba(153,51,255,.28);color:#cc66ff;}
   .copy-link-btn:hover{opacity:.78;}
 
-  /* ─ Traf chart (bar style) ─ */
+  /* ─ Traf chart ─ */
+  #traf-chart{width:100%;display:block;border-radius:.4rem;height:140px;}
   .traf-total{font-size:1rem;font-weight:900;color:#00e8ff;font-family:monospace;text-shadow:0 0 10px #00e8ff88}
-  .traf-summary{display:flex;justify-content:space-between;margin-bottom:.65rem}
-  .traf-summary-item .ts-lbl{font-size:.58rem;color:var(--muted);font-family:monospace;letter-spacing:1px;text-transform:uppercase}
-  .traf-summary-item .ts-val{font-size:1rem;font-weight:700}
-  .traf-summary-item.up .ts-val{color:#00e8ff;text-shadow:0 0 12px rgba(0,232,255,.4)}
-  .traf-summary-item.dn .ts-val{color:var(--teal);text-shadow:0 0 12px rgba(79,209,197,.4);text-align:right}
-  .chart-wrap{width:100%;height:90px;position:relative;overflow:hidden}
-  .chart-wrap canvas{width:100%!important;height:100%!important;display:block}
-  .chart-time{display:flex;justify-content:space-between;font-size:.5rem;color:rgba(0,180,220,.45);font-family:monospace;margin-top:3px;padding:0 2px}
 
   @media(max-width:500px){.stats{grid-template-columns:1fr 1fr}}
-
-  /* RGB Ambient Orbs */
-  .rgb-orb{position:fixed;border-radius:50%;filter:blur(90px);opacity:.11;pointer-events:none;z-index:0;}
-  .rgb-orb.o1{width:360px;height:360px;background:radial-gradient(circle,#ff006e,transparent 70%);top:-100px;left:-80px;animation:orb1 14s ease-in-out infinite;}
-  .rgb-orb.o2{width:320px;height:320px;background:radial-gradient(circle,#00dcff,transparent 70%);top:35%;right:-90px;animation:orb2 18s ease-in-out infinite;}
-  .rgb-orb.o3{width:280px;height:280px;background:radial-gradient(circle,#b400ff,transparent 70%);bottom:8%;left:5%;animation:orb3 16s ease-in-out infinite;}
-  .rgb-orb.o4{width:240px;height:240px;background:radial-gradient(circle,#00ff88,transparent 70%);bottom:22%;right:3%;animation:orb4 20s ease-in-out infinite;}
-  @keyframes orb1{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(40px,-30px) scale(1.1);}}
-  @keyframes orb2{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-35px,25px) scale(1.07);}}
-  @keyframes orb3{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(25px,-40px) scale(.93);}}
-  @keyframes orb4{0%,100%{transform:translate(0,0) scale(1);}50%{transform:translate(-20px,30px) scale(1.06);}}
-
-  /* Shooting Stars Canvas */
-  #stars-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;}
-
-  /* Bandwidth Level Badge */
-  .bw-level{display:inline-flex;align-items:center;gap:4px;font-family:'Share Tech Mono',monospace;font-size:.6rem;padding:2px 9px;border-radius:12px;margin-left:6px;font-weight:700;letter-spacing:1px;transition:all .5s;vertical-align:middle;}
-  .bw-level.lv-normal{background:rgba(77,255,160,.12);color:#4dffa0;border:1px solid rgba(77,255,160,.3);}
-  .bw-level.lv-medium{background:rgba(255,230,128,.12);color:#ffe680;border:1px solid rgba(255,230,128,.35);}
-  .bw-level.lv-high{background:rgba(255,107,138,.15);color:#ff6b8a;border:1px solid rgba(255,107,138,.4);animation:bw-pulse .85s ease-in-out infinite;}
-  @keyframes bw-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,107,138,0);}50%{box-shadow:0 0 10px 2px rgba(255,107,138,.35);}}
-
-  /* RGB card border shimmer */
-  .card{position:relative;}
-  .card::after{content:'';position:absolute;inset:-1px;border-radius:12px;background:linear-gradient(135deg,rgba(128,255,221,.07),rgba(184,160,255,.07),rgba(77,255,160,.07));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;z-index:2;transition:opacity .3s;}
-  .card:hover::after{opacity:2.5;}
-
-  /* Header RGB scan line */
-  header{position:relative;}
-  header::after{content:'';position:absolute;left:0;right:0;height:2px;bottom:-1px;background:linear-gradient(90deg,transparent 0%,#80ffdd 30%,#b8a0ff 60%,#4dffa0 85%,transparent 100%);background-size:300% 100%;animation:hdr-scan 3.5s linear infinite;opacity:.55;border-radius:2px;}
-  @keyframes hdr-scan{0%{background-position:0% 0}100%{background-position:300% 0}}
 </style>
 </head>
 <body>
-<canvas id="stars-canvas"></canvas>
-<div class="rgb-orb o1"></div>
-<div class="rgb-orb o2"></div>
-<div class="rgb-orb o3"></div>
-<div class="rgb-orb o4"></div>
 <div class="wrap">
 
 <!-- Header -->
@@ -1106,7 +871,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <div id="page-dashboard" class="page active">
   <div class="card">
     <div class="card-head">
-      <div class="card-title">📊 <span class="rgb-label">สถานะ Services</span></div>
+      <div class="card-title">📊 สถานะ Services</div>
       <button class="btn btn-c btn-sm" onclick="loadDashboard()">🔄 Refresh</button>
     </div>
     <div class="card-body">
@@ -1116,7 +881,6 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
         <div class="svc-row"><span class="svc-ico">🌐</span><div class="svc-info"><div class="svc-name">nginx</div><div class="svc-desc">Web Server · Port 81 / 443</div></div><div id="svc-nginx" class="svc-badge off"><span class="bd"></span>...</div></div>
         <div class="svc-row"><span class="svc-ico">🎮</span><div class="svc-info"><div class="svc-name">badvpn-udpgw</div><div class="svc-desc">UDP Gateway · 127.0.0.1:7300</div></div><div id="svc-badvpn" class="svc-badge off"><span class="bd"></span>...</div></div>
         <div class="svc-row"><span class="svc-ico">🔌</span><div class="svc-info"><div class="svc-name">Port 80 Tunnel</div><div class="svc-desc">HTTP-CONNECT ws-stunnel</div></div><div id="svc-tunnel" class="svc-badge off"><span class="bd"></span>...</div></div>
-        <div class="svc-row"><span class="svc-ico">🔒</span><div class="svc-info"><div class="svc-name">Port 443 SSH-WS-SSL</div><div class="svc-desc">WebSocket SSL · Self-Signed</div></div><div id="svc-ssl443" class="svc-badge off"><span class="bd"></span>...</div></div>
       </div>
       <div class="btn-row">
         <button class="btn btn-g" onclick="svcAction('restart')">🔄 Restart All</button>
@@ -1128,19 +892,12 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
   </div>
 
   <div class="card">
-    <div class="card-head"><div class="card-title">🌍 <span class="rgb-label">Server Info</span></div></div>
-    <div class="card-body cfg-box" id="conn-info">
-      <div class="cfg-row"><span class="cfg-k">🌍 Host</span><span class="cfg-v" id="server-ip-info">กำลังโหลด...</span></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-head"><div class="card-title">🔗 <span class="rgb-label">Connections per Port</span></div></div>
+    <div class="card-head"><div class="card-title">🔗 Connections per Port</div></div>
     <div class="card-body" id="conn-bars-wrap">
-      <div class="bar-wrap"><div class="bar-lbl"><span>Port 80 (WS Tunnel)</span><span style="display:flex;align-items:center;gap:4px"><span id="b80">0</span><span id="bl80" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf80" style="width:0%"></div></div></div>
-      <div class="bar-wrap"><div class="bar-lbl"><span>Port 143 (Dropbear #1)</span><span style="display:flex;align-items:center;gap:4px"><span id="b143">0</span><span id="bl143" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf143" style="width:0%"></div></div></div>
-      <div class="bar-wrap"><div class="bar-lbl"><span>Port 109 (Dropbear #2)</span><span style="display:flex;align-items:center;gap:4px"><span id="b109">0</span><span id="bl109" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf109" style="width:0%"></div></div></div>
-      <div class="bar-wrap"><div class="bar-lbl"><span>Port 22 (OpenSSH)</span><span style="display:flex;align-items:center;gap:4px"><span id="b22">0</span><span id="bl22" class="bw-level lv-normal">NORMAL</span></span></div><div class="bar"><div class="bar-fill" id="bf22" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 80 (WS Tunnel)</span><span id="b80">0</span></div><div class="bar"><div class="bar-fill" id="bf80" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 143 (Dropbear #1)</span><span id="b143">0</span></div><div class="bar"><div class="bar-fill" id="bf143" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 109 (Dropbear #2)</span><span id="b109">0</span></div><div class="bar"><div class="bar-fill" id="bf109" style="width:0%"></div></div></div>
+      <div class="bar-wrap"><div class="bar-lbl"><span>Port 22 (OpenSSH)</span><span id="b22">0</span></div><div class="bar"><div class="bar-fill" id="bf22" style="width:0%"></div></div></div>
     </div>
   </div>
 
@@ -1149,7 +906,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!-- ═══ USERS ═══ -->
 <div id="page-users" class="page">
   <div class="card">
-    <div class="card-head"><div class="card-title">➕ <span class="rgb-label">เพิ่ม SSH User</span></div></div>
+    <div class="card-head"><div class="card-title">➕ เพิ่ม SSH User</div></div>
     <div class="card-body">
       <div id="alert-create" class="alert"></div>
       <div class="form-grid">
@@ -1157,19 +914,6 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
         <div class="form-g"><label>รหัสผ่าน</label><input type="password" id="new-pass" placeholder="password" oninput="clearCreateLink()"></div>
         <div class="form-g"><label>จำนวนวัน</label><input type="number" id="new-exp" value="30" min="1"></div>
         <div class="form-g"><label>ลิมิตไอพี</label><input type="number" id="new-iplimit" value="2" min="1"></div>
-      </div>
-      <div class="sel-lbl">🔌 เลือก Port</div>
-      <div class="pick-grid" style="margin-bottom:.6rem">
-        <div id="cu-port-80" class="pick-opt a-port80" onclick="cuSelPort('80')" style="border:1.5px solid #00ccff44;background:#0d2a3a">
-          <div class="pi" style="font-size:1.2rem">🌐</div>
-          <div class="pn" style="color:#00ccff">Port 80</div>
-          <div class="ps">WS · HTTP</div>
-        </div>
-        <div id="cu-port-443" class="pick-opt" onclick="cuSelPort('443')" style="border:1.5px solid #444;background:#111">
-          <div class="pi" style="font-size:1.2rem">🔒</div>
-          <div class="pn" style="color:#00ff80">Port 443</div>
-          <div class="ps">WSS · SSL</div>
-        </div>
       </div>
       <div class="sel-lbl">🌐 เลือก ISP / Operator</div>
       <div class="pick-grid">
@@ -1183,13 +927,14 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
       </div>
       <div class="btn-row" style="margin-top:.6rem">
         <button class="btn btn-g" onclick="createUserAndLink()">➕ สร้าง User</button>
+        <button class="btn btn-p" onclick="openModal('modal-trial')">🎁 Trial</button>
       </div>
       <div class="imp-result" id="cu-link-result"></div>
     </div>
   </div>
   <div class="card">
     <div class="card-head">
-      <div class="card-title">📋 <span class="rgb-label">รายชื่อ Users</span></div>
+      <div class="card-title">📋 รายชื่อ Users</div>
       <div class="inp-row" style="max-width:180px">
         <input type="text" id="search-u" placeholder="ค้นหา..." oninput="filterUsers()" style="padding:4px 9px;font-size:.72rem">
       </div>
@@ -1209,29 +954,18 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <div id="page-online" class="page">
   <div class="card">
     <div class="card-head">
-      <div class="card-title">👤 <span class="rgb-label">Online Users</span></div>
+      <div class="card-title">👤 Online Users</div>
       <button class="btn btn-c btn-sm" onclick="loadOnline()">🔄 Refresh</button>
     </div>
     <div class="card-body" id="online-list"><div style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</div></div>
   </div>
   <div class="card">
     <div class="card-head">
-      <div class="card-title">📶 <span class="rgb-label">Bandwidth</span></div>
+      <div class="card-title">📶 Bandwidth</div>
       <span class="traf-total" id="traf-total">— MB</span>
     </div>
     <div class="card-body">
-      <div class="traf-summary">
-        <div class="traf-summary-item up">
-          <div class="ts-lbl">UPLOAD</div>
-          <div class="ts-val" id="traf-up">—</div>
-        </div>
-        <div class="traf-summary-item dn">
-          <div class="ts-lbl">DOWNLOAD</div>
-          <div class="ts-val" id="traf-dn">—</div>
-        </div>
-      </div>
-      <div class="chart-wrap"><canvas id="traf-canvas"></canvas></div>
-      <div class="chart-time" id="traf-time-labels"></div>
+      <canvas id="traf-chart"></canvas>
       <div id="traf-upd" style="text-align:right;font-size:.62rem;color:rgba(0,180,220,.3);margin-top:.3rem;font-family:monospace"></div>
     </div>
   </div>
@@ -1241,7 +975,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <div id="page-banned" class="page">
   <div class="card">
     <div class="card-head">
-      <div class="card-title">🔒 <span class="rgb-label">Banned IPs / Users</span></div>
+      <div class="card-title">🔒 Banned IPs / Users</div>
       <button class="btn btn-c btn-sm" onclick="loadBanned()">🔄 Refresh</button>
     </div>
     <div class="card-body" id="banned-list"><div style="text-align:center;color:var(--muted);padding:2rem">กำลังโหลด...</div></div>
@@ -1251,14 +985,14 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!-- ═══ BACKUP ═══ -->
 <div id="page-backup" class="page">
   <div class="card">
-    <div class="card-head"><div class="card-title">💾 <span class="rgb-label">Backup Users</span></div></div>
+    <div class="card-head"><div class="card-title">💾 Backup Users</div></div>
     <div class="card-body">
       <p style="font-size:.82rem;color:var(--muted);margin-bottom:.8rem">Export ข้อมูล users เป็น JSON</p>
       <button class="btn btn-g" onclick="backupUsers()">⬇️ Download Backup</button>
     </div>
   </div>
   <div class="card">
-    <div class="card-head"><div class="card-title">📥 <span class="rgb-label">Import Users</span></div></div>
+    <div class="card-head"><div class="card-title">📥 Import Users</div></div>
     <div class="card-body">
       <div id="alert-import" class="alert"></div>
       <div class="form-g" style="margin-bottom:.8rem"><label>เลือกไฟล์ JSON</label><input type="file" id="import-file" accept=".json" style="color:var(--text)"></div>
@@ -1271,7 +1005,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!-- ═══ SERVICES ═══ -->
 <div id="page-services" class="page">
   <div class="card">
-    <div class="card-head"><div class="card-title">⚙️ <span class="rgb-label">Service Control</span></div></div>
+    <div class="card-head"><div class="card-title">⚙️ Service Control</div></div>
     <div class="card-body">
       <div class="svc-list">
         <div class="svc-row svc-ctrl"><div style="display:flex;gap:.6rem;align-items:center"><span class="svc-ico">🚇</span><div><div class="svc-desc">chaiya-sshws</div><div id="s2-sshws" class="svc-name" style="font-size:.82rem">-</div></div></div><div class="btn-row" style="margin:0"><button class="btn btn-g btn-sm" onclick="svc1('chaiya-sshws','start')">▶</button><button class="btn btn-r btn-sm" onclick="svc1('chaiya-sshws','stop')">⏹</button><button class="btn btn-c btn-sm" onclick="svc1('chaiya-sshws','restart')">🔄</button></div></div>
@@ -1293,7 +1027,7 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 <!-- Modals -->
 <div id="modal-renew" class="modal-bg">
   <div class="modal">
-    <div class="modal-head"><span class="rgb-label">🔄 ต่ออายุ User</span> <button class="modal-x" onclick="closeModal('modal-renew')">✕</button></div>
+    <div class="modal-head">🔄 ต่ออายุ User <button class="modal-x" onclick="closeModal('modal-renew')">✕</button></div>
     <div class="modal-body">
       <input type="hidden" id="renew-username">
       <div class="form-grid">
@@ -1309,12 +1043,27 @@ cat > /var/www/chaiya/sshws.html << 'HTMLEOF'
 </div>
 <div id="modal-del" class="modal-bg">
   <div class="modal">
-    <div class="modal-head"><span class="rgb-label">🗑️ ยืนยันลบ</span> <button class="modal-x" onclick="closeModal('modal-del')">✕</button></div>
+    <div class="modal-head" style="color:var(--red)">🗑️ ยืนยันลบ <button class="modal-x" onclick="closeModal('modal-del')">✕</button></div>
     <div class="modal-body">
       <p style="margin:.5rem 0 1rem;color:var(--muted)">ต้องการลบ <strong id="del-username" style="color:var(--red)"></strong>?</p>
       <div class="btn-row">
         <button class="btn btn-r" onclick="doDelete()">🗑️ ลบเลย</button>
         <button class="btn btn-c" onclick="closeModal('modal-del')">ยกเลิก</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="modal-trial" class="modal-bg">
+  <div class="modal">
+    <div class="modal-head">🎁 Trial User <button class="modal-x" onclick="closeModal('modal-trial')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-g"><label>Username</label><input type="text" id="trial-user" placeholder="trial_xxx"></div>
+        <div class="form-g"><label>ชั่วโมง</label><input type="number" id="trial-hours" value="3" min="1"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-g" onclick="doTrial()">✅ สร้าง Trial</button>
+        <button class="btn btn-r" onclick="closeModal('modal-trial')">ยกเลิก</button>
       </div>
     </div>
   </div>
@@ -1343,10 +1092,27 @@ let TOKEN = _cleanToken(
 let _tokenPromise = null;
 async function ensureToken() {
   if (TOKEN) return TOKEN;
-  // TOKEN ควรได้จาก _baked หรือ ?token= URL เท่านั้น
-  // ไม่ auto-fetch /api/token เพราะต้องใช้ master password
-  console.warn('No token found — use ?token=<token> in URL or re-open from dashboard link');
-  return null;
+  // ป้องกัน race condition — fetch ครั้งเดียว
+  if (!_tokenPromise) {
+    _tokenPromise = (async () => {
+      try {
+        const r = await fetch('/sshws-api/api/token', {
+          method: 'GET',
+          headers: {'Accept': 'application/json'}
+        });
+        if (r.ok) {
+          const d = await r.json();
+          if (d && d.token) {
+            TOKEN = d.token;
+            try { document.cookie = 'token='+TOKEN+';path=/;max-age=86400'; } catch(e) {}
+          }
+        }
+      } catch(e) { console.warn('Token fetch failed:', e.message); }
+      _tokenPromise = null;
+      return TOKEN;
+    })();
+  }
+  return _tokenPromise;
 }
 
 // sanitize token — เก็บเฉพาะ printable ASCII (hex token จาก openssl rand -hex 16)
@@ -1368,7 +1134,7 @@ async function api(method, path, body=null) {
     headers['X-Auth-Token'] = tok;
     // Authorization header: ต้องเป็น ISO-8859-1 เท่านั้น
     // ตรวจสอบก่อนใส่ — ถ้ามี non-ASCII ข้าม
-    const isAsciiOnly = /^[\x20-\x7E]*$/.test('Bearer ' + tok);
+    const isAsciiOnly = /^[ -]*$/.test('Bearer ' + tok);
     if (isAsciiOnly) {
       headers['Authorization'] = 'Bearer ' + tok;
     }
@@ -1432,7 +1198,6 @@ function showAlert(id, msg, ok=true) {
 // UI helpers
 // ══════════════════════════════════════════════
 function showTab(name, btn) {
-  if (name !== 'online' && _trafAnimReq) { cancelAnimationFrame(_trafAnimReq); _trafAnimReq = null; }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
@@ -1467,7 +1232,7 @@ async function loadDashboard() {
   const s = await api('GET', '/api/status');
   if (!s.error) {
     const sv = s.services || {};
-    ['sshws','dropbear','nginx','badvpn','tunnel','ssl443'].forEach(k => {
+    ['sshws','dropbear','nginx','badvpn','tunnel'].forEach(k => {
       setSvcBadge('svc-'+k, sv[k]);
     });
     // รองรับ field name หลายรูปแบบที่ API อาจส่งมา
@@ -1478,7 +1243,6 @@ async function loadDashboard() {
     setText('stat-conns',  conns);
     setText('stat-online', online);
     setText('stat-users',  users);
-    setText('stat-vless',  s.vless_count ?? '-');
     // conn bars
     const ports = {
       '80':  s.conn_80  ?? s.connections_80  ?? 0,
@@ -1487,19 +1251,11 @@ async function loadDashboard() {
       '22':  s.conn_22  ?? s.connections_22  ?? 0
     };
     const max = Math.max(...Object.values(ports), 1);
-    const _bwLevel = (v, mx) => {
-      const pct = v / mx;
-      if (pct >= 0.7)  return ['lv-high',   '🔴 HIGH'];
-      if (pct >= 0.35) return ['lv-medium', '🟡 MED'];
-      return ['lv-normal', '🟢 NORMAL'];
-    };
     Object.entries(ports).forEach(([p, v]) => {
       const bn = document.getElementById('b'+p);
       const bf = document.getElementById('bf'+p);
-      const bl = document.getElementById('bl'+p);
       if (bn) bn.textContent = v;
       if (bf) bf.style.width = Math.round(v/max*100)+'%';
-      if (bl) { const [cls,lbl] = _bwLevel(v, max); bl.className='bw-level '+cls; bl.textContent=lbl; }
     });
   } else {
     console.warn('Dashboard status error:', s.error);
@@ -1526,7 +1282,7 @@ async function loadDashboard() {
     // Fallback: ดึง host จาก URL
     _serverHost = location.hostname;
     const si = document.getElementById('server-ip');
-    if (si) si.textContent = _serverHost;
+    if (si && si.textContent === 'กำลังโหลด...') si.textContent = _serverHost;
   }
 }
 
@@ -1553,17 +1309,8 @@ async function restartUdpgw() {
 
 async function genToken() {
   const r = await api('POST', '/api/token/regenerate', {});
-  if (r.ok && r.token) {
-    TOKEN = r.token;
-    toast('\u2705 Token \u0e43\u0e2b\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08 \u0e01\u0e33\u0e25\u0e31\u0e07 reload...');
-    setTimeout(() => {
-      const u = new URL(location.href);
-      u.searchParams.set('token', r.token);
-      location.replace(u.toString());
-    }, 1200);
-  } else {
-    toast('\u274c \u0e2a\u0e23\u0e49\u0e32\u0e07 Token \u0e25\u0e49\u0e21\u0e40\u0e2b\u0e25\u0e27: ' + (r.error || 'unknown'), false);
-  }
+  if (r.token) { TOKEN = r.token; toast('Token ใหม่: ' + r.token.slice(0,8)+'...'); }
+  else toast('สร้าง Token ล้มเหลว', false);
 }
 
 // ══════════════════════════════════════════════
@@ -1572,64 +1319,34 @@ async function genToken() {
 const PROS = {
   dtac: {name:'DTAC GAMING', proxy:'104.18.63.124:80',
     payload:'CONNECT /  HTTP/1.1 [crlf]Host: dl.dir.freefiremobile.com [crlf][crlf]PATCH / HTTP/1.1[crlf]Host:[host][crlf]Upgrade:User-Agent: [ua][crlf][crlf]',
-    darkProxy:'104.18.63.124', darkProxyPort:80},
+    darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80},
   true: {name:'TRUE TWITTER', proxy:'104.18.39.24:80',
-    payload:'POST / HTTP/1.1[crlf]Host: help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]',
-    darkProxy:'104.18.39.24', darkProxyPort:80}
+    payload:'POST / HTTP/1.1[crlf]Host:help.x.com[crlf]User-Agent: [ua][crlf][crlf][split][cr]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection:Upgrade[crlf][crlf]',
+    darkProxy:'truevipanline.godvpn.shop', darkProxyPort:80}
 };
-const NPV_HOST=location.hostname, NPV_PORT=80;
+const NPV_HOST='www.project.godvpn.shop', NPV_PORT=80;
 let _curPro='dtac', _curApp='npv';
 
 function selPro(p) {
   _curPro = p;
-  document.getElementById('cu-pro-dtac').className='pick-opt'+(p==='dtac'?' a-dtac':'');
-  document.getElementById('cu-pro-true').className='pick-opt'+(p==='true'?' a-true':'');
+  document.getElementById('pro-dtac').className='pick-opt'+(p==='dtac'?' a-dtac':'');
+  document.getElementById('pro-true').className='pick-opt'+(p==='true'?' a-true':'');
 }
 function selApp(a) {
   _curApp = a;
-  document.getElementById('cu-app-npv').className='pick-opt'+(a==='npv'?' a-npv':'');
-  document.getElementById('cu-app-dark').className='pick-opt'+(a==='dark'?' a-dark':'');
+  document.getElementById('app-npv').className ='pick-opt'+(a==='npv' ?' a-npv' :'');
+  document.getElementById('app-dark').className='pick-opt'+(a==='dark'?' a-dark':'');
 }
 
 function buildNpvLink(name, pass, pro) {
-  const j={sshConfigType:'SSH-Proxy-Payload',remarks:pro.name+'-'+name,sshHost:NPV_HOST,sshPort:NPV_PORT,sshUsername:name,sshPassword:pass,sni:'',tlsVersion:'DEFAULT',httpProxy:pro.proxy,authenticateProxy:false,proxyUsername:'',proxyPassword:'',payload:pro.payload,dnsTTMode:'UDP',dnsServer:'',nameserver:'',publicKey:'',udpgwPort:7300,udpgwTransparentDNS:true};
+  const j={sshConfigType:'SSH-Proxy-Payload',remarks:pro.name+'-'+name,sshHost:NPV_HOST,sshPort:NPV_PORT,sshUsername:name,sshPassword:pass,sni:'',tlsVersion:'DEFAULT',httpProxy:pro.proxy,authenticateProxy:false,proxyUsername:'',proxyPassword:'',payload:pro.payload,dnsMode:'UDP',dnsServer:'',nameserver:'',publicKey:'',udpgwPort:7300,udpgwTransparentDNS:true};
   return 'npvt-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
 function buildDarkLink(name, pass, pro) {
-  const j = {
-    type: 'SSH',
-    name: pro.name + '-' + name,
-    sshTunnelConfig: {
-      sshConfig: {
-        host: NPV_HOST,
-        port: NPV_PORT,
-        username: name,
-        password: pass
-      },
-      injectConfig: {
-        mode: 'PROXY',
-        proxyHost: pro.darkProxy || '',
-        proxyPort: pro.darkProxyPort || 80,
-        payload: pro.payload || ''
-      }
-    }
-  };
-  return 'darktunnel://' + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
-}
-function copyToClipboard(text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => toast('📋 คัดลอกแล้ว!')).catch(() => { _copyFallback(text); });
-  } else { _copyFallback(text); }
-}
-function _copyFallback(text) {
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
-  document.body.appendChild(ta);
-  ta.focus(); ta.select();
-  try { document.execCommand('copy'); toast('📋 คัดลอกแล้ว!'); }
-  catch(e) { toast('❌ คัดลอกไม่ได้', false); }
-  document.body.removeChild(ta);
+  const host=_serverHost||location.hostname;
+  const pp=(pro.proxy||'').split(':'); const dh=pp[0]||pro.darkProxy;
+  const j={configType:'SSH-PROXY',remarks:pro.name+'-'+name,sshHost:host,sshPort:143,sshUser:name,sshPass:pass,payload:'GET / HTTP/1.1\r\nHost: '+host+'\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n',proxyHost:dh,proxyPort:80,udpgwAddr:'127.0.0.1',udpgwPort:7300,tlsEnabled:false};
+  return 'darktunnel-ssh://'+btoa(unescape(encodeURIComponent(JSON.stringify(j))));
 }
 
 async function genImportLink() {
@@ -1639,15 +1356,14 @@ async function genImportLink() {
   const pro = PROS[_curPro] || PROS.dtac;
   const link = _curApp==='npv' ? buildNpvLink(u.user, u.pass||'', pro) : buildDarkLink(u.user, u.pass||'', pro);
   const isNpv = _curApp==='npv';
-  window._impLink = link;
-  document.getElementById('cu-link-result').className='imp-result show';
-  document.getElementById('cu-link-result').innerHTML=`
+  document.getElementById('imp-result').className='imp-result show';
+  document.getElementById('imp-result').innerHTML=`
     <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
       <span class="imp-badge ${_curApp}">${isNpv?'Npv Tunnel':'DarkTunnel'}</span>
       <span style="font-size:.65rem;color:var(--muted)">${pro.name} · ${u.user}</span>
     </div>
     <div class="link-preview ${isNpv?'':'dark-lp'}">${link}</div>
-    <button class="copy-link-btn ${_curApp}" onclick="copyToClipboard(window._impLink)">📋 คัดลอก Link</button>`;
+    <button class="copy-link-btn ${_curApp}" onclick="navigator.clipboard.writeText('${link.replace(/'/g,"\\'")}').then(()=>toast('คัดลอกแล้ว!'))">📋 คัดลอก Link</button>`;
 }
 
 // ══════════════════════════════════════════════
@@ -1673,19 +1389,11 @@ function renderUserTable(users) {
     const badge = u.active && !expired ? '<span class="bdg bdg-g">ACTIVE</span>'
       : expired ? '<span class="bdg bdg-r">EXPIRED</span>'
       : '<span class="bdg bdg-y">INACTIVE</span>';
-    let _daysLeft = '∞', _dColor = 'var(--green)', _dTitle = 'ไม่จำกัด';
-    if (u.exp) {
-      const _diff = Math.ceil((new Date(u.exp) - new Date(today)) / 86400000);
-      if (_diff > 3) { _daysLeft = _diff+'d'; _dColor = 'var(--green)'; _dTitle = 'คงเหลือ '+_diff+' วัน'; }
-      else if (_diff > 0) { _daysLeft = _diff+'d'; _dColor = 'var(--yellow,#f5c518)'; _dTitle = 'คงเหลือ '+_diff+' วัน (ใกล้หมด!)'; }
-      else if (_diff === 0) { _daysLeft = 'วันนี้'; _dColor = 'var(--orange,#ff8c00)'; _dTitle = 'หมดอายุวันนี้!'; }
-      else { _daysLeft = 'หมด'; _dColor = 'var(--red)'; _dTitle = 'หมดอายุแล้ว '+Math.abs(_diff)+' วัน'; }
-    }
     return `<tr><td>${i+1}</td><td><b>${u.user}</b></td><td style="color:${expired?'var(--red)':'var(--green)'}">${u.exp||'N/A'}</td><td>${badge}</td>
       <td><div style="display:flex;gap:4px">
         <button class="btn btn-c btn-sm" onclick="openRenew('${u.user}')">🔄</button>
         <button class="btn btn-r btn-sm" onclick="confirmDel('${u.user}')">🗑️</button>
-        <button class="btn btn-y btn-sm" title="${_dTitle}" onclick="showDaysLeft('${u.user}',${JSON.stringify(u.exp||'')},${JSON.stringify(_dTitle)})" style="font-size:.7rem;font-weight:700;min-width:44px;padding:2px 4px;color:${_dColor};border-color:${_dColor}">${_daysLeft}</button>
+        <button class="btn btn-y btn-sm" onclick="kickUser('${u.user}')">⚡</button>
       </div></td></tr>`;
   }).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">ยังไม่มี Users</td></tr>`;
 }
@@ -1712,22 +1420,6 @@ function clearCreateLink() {
   const el=document.getElementById('cu-link-result');
   if(el){el.className='imp-result';el.innerHTML='';}
 }
-let _cuPort = '80';
-function cuSelPort(p) {
-  _cuPort = p;
-  ['80','443'].forEach(x => {
-    const el = document.getElementById('cu-port-'+x);
-    if(!el) return;
-    if(x===p) {
-      el.style.borderColor = p==='443' ? '#00ff80' : '#00ccff';
-      el.style.background  = p==='443' ? '#001a00' : '#0d2a3a';
-    } else {
-      el.style.borderColor = '#444';
-      el.style.background  = '#111';
-    }
-  });
-}
-
 async function createUserAndLink() {
   const user=document.getElementById('new-user').value.trim();
   const pass=document.getElementById('new-pass').value.trim();
@@ -1735,52 +1427,34 @@ async function createUserAndLink() {
   const ipl=parseInt(document.getElementById('new-iplimit').value||2);
   if(!user||!pass) return showAlert('alert-create','กรอก username/password ด้วย',false);
   showAlert('alert-create','⏳ กำลังสร้าง...', true);
-  const r=await api('POST','/api/create',{user,pass,exp_days:exp,ip_limit:ipl,port:_cuPort});
+  const r=await api('POST','/api/create',{user,pass,exp_days:exp,ip_limit:ipl});
   if(!r.ok){showAlert('alert-create',r.error||'ล้มเหลว',false);return;}
   showAlert('alert-create',`✅ สร้าง ${user} สำเร็จ`, true);
   loadUsers();
+  const pro=PROS[_cuPro]||PROS.dtac;
+  const link=_cuApp==='npv'?buildNpvLink(user,pass,pro):buildDarkLink(user,pass,pro);
+  const isNpv=_cuApp==='npv';
+  const safeLink=link.replace(/`/g,'\\`');
   const el=document.getElementById('cu-link-result');
   el.className='imp-result show';
-  if(_cuPort==='443'){
-    const htmlUrl = r.html_url || '';
-    el.innerHTML=`
-      <div style='margin:.7rem 0 .5rem;display:flex;align-items:center;gap:.5rem'>
-        <span style='background:#00ff8022;border:1px solid #00ff8066;color:#00ff80;font-size:.72rem;padding:3px 10px;border-radius:99px'>🔒 SSH-WS-SSL · Port 443</span>
-      </div>
-      <div style='background:#001a0a;border:1px solid #00ff4044;border-radius:10px;padding:10px 14px;font-size:.75rem;color:#c0d0e0;line-height:2'>
-        <div>🌐 <b style='color:#00ff80'>Host</b> : ${r.host||'-'}</div>
-        <div>🔌 <b style='color:#00ff80'>Port</b> : 443</div>
-        <div>👤 <b style='color:#00ff80'>User</b> : ${user}</div>
-        <div>🔑 <b style='color:#00ff80'>Pass</b> : <span style='font-family:monospace'>${pass}</span></div>
-        <div>📅 <b style='color:#00ff80'>Expire</b> : ${r.exp||'-'}</div>
-        <div>📱 <b style='color:#00ff80'>IP Limit</b> : ${ipl}</div>
-        <div>📂 <b style='color:#00ff80'>Path</b> : /ssh/</div>
-      </div>
-      <div style='display:flex;gap:.5rem;margin-top:.6rem'>
-        <button class='btn btn-g' style='flex:1' onclick='copyAll443("${r.host||""}","${user}","${pass}","${r.exp||""}","${ipl}")'>📋 Copy ทั้งหมด</button>
-        ${htmlUrl?`<button class='btn btn-c' style='flex:1' onclick='window.open("${htmlUrl}","_blank")'>🌐 ดูหน้า HTML</button>`:''}
-      </div>
-    `;
-  } else {
-    const pro=PROS[_cuPro]||PROS.dtac;
-    const link=_cuApp==='npv'?buildNpvLink(user,pass,pro):buildDarkLink(user,pass,pro);
-    const isNpv=_cuApp==='npv';
-    window._cuLink = link;
-    el.innerHTML=`
-      <div style='display:flex;align-items:center;gap:.4rem;margin:.7rem 0 .3rem'>
-        <span class='imp-badge ${_cuApp}'>${isNpv?'Npv Tunnel':'DarkTunnel'}</span>
-        <span style='font-size:.65rem;color:var(--muted)'>${pro.name} · ${user}</span>
-      </div>
-      <div class='link-preview ${isNpv?'':'dark-lp'}'>${link}</div>
-      <button class='copy-link-btn ${_cuApp}' onclick='copyToClipboard(window._cuLink)'>📋 คัดลอกลิงค์ใส่แอพ</button>
-    `;
-  }
+  el.innerHTML=`
+    <div style='display:flex;align-items:center;gap:.4rem;margin:.7rem 0 .3rem'>
+      <span class='imp-badge ${_cuApp}'>${isNpv?'Npv Tunnel':'DarkTunnel'}</span>
+      <span style='font-size:.65rem;color:var(--muted)'>${pro.name} · ${user}</span>
+    </div>
+    <div class='link-preview ${isNpv?'':'dark-lp'}'>${link}</div>
+    <button class='copy-link-btn ${_cuApp}' onclick='navigator.clipboard.writeText(`${safeLink}`).then(()=>toast("📋 คัดลอกแล้ว!"))'>📋 คัดลอกลิงค์ใส่แอพ</button>
+  `;
 }
-
-function copyAll443(host,user,pass,exp,ipl){
-  const txt = `Host/IP   : ${host}\nPort      : 443\nUsername  : ${user}\nPassword  : ${pass}\nExpire    : ${exp}\nIP Limit  : ${ipl}\nPath      : /ssh/\nProtocol  : SSH-WS-SSL (TLS)`;
-  if(navigator.clipboard){ navigator.clipboard.writeText(txt).then(()=>toast('✔ Copied!',true)).catch(()=>{}); }
-  else { const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);toast('✔ Copied!',true); }
+async function createUser() {
+  const user=document.getElementById('new-user').value.trim();
+  const pass=document.getElementById('new-pass').value.trim();
+  const exp =parseInt(document.getElementById('new-exp').value||30);
+  const ipl =parseInt(document.getElementById('new-iplimit').value||2);
+  if (!user||!pass) return showAlert('alert-create','กรอก username/password ด้วย',false);
+  const r = await api('POST','/api/create',{user,pass,exp_days:exp,ip_limit:ipl});
+  showAlert('alert-create', r.ok ? `สร้าง ${user} สำเร็จ` : (r.error||'ล้มเหลว'), r.ok);
+  if (r.ok) { document.getElementById('new-user').value=''; document.getElementById('new-pass').value=''; loadUsers(); }
 }
 
 function openRenew(u) {
@@ -1813,16 +1487,18 @@ async function kickUser(u) {
   toast(r.ok?`Kick ${u} แล้ว`:(r.error||'ล้มเหลว'), r.ok);
 }
 
-function showDaysLeft(username, expDate, msg) {
-  const _icon = msg.includes('หมดอายุแล้ว') ? '🔴'
-    : msg.includes('ใกล้หมด') || msg.includes('วันนี้') ? '🟡' : '🟢';
-  toast(`${_icon} ${username}: ${msg}`, !msg.includes('หมดอายุแล้ว'));
+async function doTrial() {
+  const user=(document.getElementById('trial-user').value.trim())||('trial_'+Math.random().toString(36).slice(2,6));
+  const hrs=parseInt(document.getElementById('trial-hours').value||3);
+  const r=await api('POST','/api/create',{user,pass:Math.random().toString(36).slice(2,10),exp_days:Math.ceil(hrs/24)||1,ip_limit:1});
+  toast(r.ok?`Trial "${user}" ${hrs}h สร้างแล้ว`:(r.error||'ล้มเหลว'), r.ok);
+  closeModal('modal-trial'); if(r.ok) loadUsers();
 }
-
 
 // ══════════════════════════════════════════════
 // Online
 // ══════════════════════════════════════════════
+let _trafRaf=null;
 const _traf={labels:[],total:[],prev:[],next:null,lerpT0:null,maxPts:30};
 const LERP_MS=600;
 const _lerp=(a,b,t)=>a+(b-a)*t;
@@ -1838,129 +1514,58 @@ async function loadOnline() {
   if(!ur.error&&ur.users) ur.users.forEach(u=>{uMap[u.user]=u;});
   el.innerHTML=`<div style="font-size:.68rem;color:var(--muted);text-align:right;margin-bottom:.4rem">🟢 ${r.connections.length} คน · ${now}</div>`+
     `<div style="display:flex;flex-direction:column;gap:.35rem">`+
-    r.connections.map((c)=>{
-      const un=c.user||''; const u=uMap[un]||{}; const _un=un||'—';
+    r.connections.map((c,i)=>{
+      const un=c.user||c.username||Object.keys(uMap)[i]||'—'; const u=uMap[un]||{};
       const exp=u.exp&&u.exp<new Date().toISOString().split('T')[0];
       return `<div style="display:flex;align-items:center;gap:.65rem;background:var(--bg2);border-radius:.55rem;padding:.5rem .75rem;border:1px solid rgba(77,255,160,.08)">
         <span style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);flex-shrink:0;animation:blink 1.4s infinite"></span>
-        <span style="font-weight:700;font-size:.85rem;flex:1">${_un}</span>
-        <span style="font-size:.65rem;color:var(--muted);font-family:monospace">${c.remote||''}</span>
+        <span style="font-weight:700;font-size:.85rem;flex:1">${un}</span>
         ${u.exp?`<span style="font-size:.68rem;color:${exp?'var(--red)':'rgba(0,220,100,.5)'}">${exp?'หมดอายุ':u.exp}</span>`:''}
-        <span class="bdg bdg-g" style="font-size:.62rem">:${c.port||'—'}</span>
+        <span class="bdg bdg-g" style="font-size:.62rem">${c.state||'ESTABLISHED'}</span>
       </div>`;
     }).join('')+`</div>`;
-  if(!_trafAnimReq) _trafLoop(); _updateTraf();
+  if(!_trafRaf) _trafLoop(); _updateTraf();
 }
 
 function _trafLoop() {
-  // div-based bar chart — no animation frame loop needed
-  // rendering happens directly in _drawTraf on data update
+  if(_traf.next&&_traf.lerpT0!==null){
+    const e=1-Math.pow(1-Math.min(1,(performance.now()-_traf.lerpT0)/LERP_MS),3);
+    _drawTraf(_traf.prev.map((v,i)=>_lerp(v,_traf.next[i],e)));
+    if(e>=1){_traf.total=[..._traf.next];_traf.next=null;_traf.lerpT0=null;}
+  } else if(_traf.total.length>=2) _drawTraf(_traf.total);
+  _trafRaf=requestAnimationFrame(_trafLoop);
 }
-
-// ── canvas bar chart renderer ──────────────────────────
-let _trafAnimReq = null;
-let _trafCurrent = [];   // ค่าที่กำลังแสดงอยู่ (lerp target)
-let _trafDisplayed = []; // ค่าที่ animate ไปแล้ว
-const _LERP_SPEED = 0.12; // 0-1 ยิ่งต่ำยิ่ง smooth
 
 function _drawTraf(pts) {
-  if (!pts || pts.length < 1) return;
-  const MAX = 20; // จำนวนแท่งสูงสุด
-  _trafCurrent = pts.slice(-MAX);
-  // init displayed ถ้ายังไม่มี
-  if (_trafDisplayed.length !== _trafCurrent.length) {
-    _trafDisplayed = _trafCurrent.map(() => 0);
-  }
-  // เริ่ม animation loop ถ้ายังไม่รัน
-  if (!_trafAnimReq) _trafAnimFrame();
-  // อัพเดท time labels
-  const lblEl = document.getElementById('traf-time-labels');
-  if (lblEl && _traf.labels.length) {
-    const sl = _traf.labels.slice(-MAX);
-    const step = Math.max(1, Math.floor(sl.length / 4));
-    const idxs = [];
-    for (let i = 0; i < sl.length; i += step) idxs.push(i);
-    if (idxs[idxs.length-1] !== sl.length-1) idxs.push(sl.length-1);
-    lblEl.innerHTML = idxs.map(i => `<span>${sl[i]||''}</span>`).join('');
-  }
-}
-
-function _trafAnimFrame() {
-  const cv = document.getElementById('traf-canvas');
-  if (!cv) { _trafAnimReq = null; return; }
-
-  // lerp displayed → current
-  let allDone = true;
-  for (let i = 0; i < _trafCurrent.length; i++) {
-    const target = _trafCurrent[i] || 0;
-    const cur = _trafDisplayed[i] || 0;
-    const next = _lerp(cur, target, _LERP_SPEED);
-    _trafDisplayed[i] = next;
-    if (Math.abs(next - target) > target * 0.002 + 1) allDone = false;
-  }
-
-  // วาด
-  const dpr = window.devicePixelRatio || 1;
-  const W = cv.parentElement.offsetWidth || 300;
-  const H = cv.parentElement.offsetHeight || 90;
-  cv.width = W * dpr; cv.height = H * dpr;
-  cv.style.width = W + 'px'; cv.style.height = H + 'px';
-  const ctx = cv.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, W, H);
-
-  const pts = _trafDisplayed;
-  const n = pts.length;
-  if (n < 1) { _trafAnimReq = allDone ? null : requestAnimationFrame(_trafAnimFrame); return; }
-
-  // scale — ใช้ค่า current จริง (ไม่ใช่ displayed) เพื่อกัน bar เกิน
-  const mx = Math.max(..._trafCurrent) || 1;
-  const PAD_T = 6, PAD_B = 2, PAD_LR = 2;
-  const gW = W - PAD_LR * 2;
-  const gH = H - PAD_T - PAD_B;
-  const barW = Math.max(3, Math.floor((gW - (n-1)*5) / n / 2));
-  const gap = n > 1 ? (gW - barW * n) / (n - 1) : 0;
-
-  pts.forEach((v, i) => {
-    const ratio = Math.min(1, (v || 0) / mx);
-    const bH = Math.max(2, ratio * gH);
-    const x = PAD_LR + i * (barW + gap);
-    const y = PAD_T + gH - bH;
-
-    // gradient fill
-    const grad = ctx.createLinearGradient(0, y, 0, y + bH);
-    grad.addColorStop(0, 'rgba(0,232,255,0.9)');
-    grad.addColorStop(1, 'rgba(0,180,220,0.15)');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.roundRect(x, y, barW, bH, [3, 3, 0, 0]);
-    ctx.fill();
-
-    // glow top edge
-    ctx.save();
-    ctx.shadowColor = '#00e8ff';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = 'rgba(0,232,255,0.95)';
-    ctx.fillRect(x, y, barW, 2);
-    ctx.restore();
-  });
-
-  _trafAnimReq = allDone ? null : requestAnimationFrame(_trafAnimFrame);
+  const cv=document.getElementById('traf-chart'); if(!cv)return;
+  const ctx=cv.getContext('2d'); const W=cv.offsetWidth||300, H=140;
+  cv.width=W; cv.height=H;
+  const n=pts.length; if(n<2)return;
+  const mn=Math.min(...pts), mx=Math.max(...pts)||1;
+  const P={l:8,r:8,t:10,b:14}; const gW=W-P.l-P.r, gH=H-P.t-P.b;
+  const X=i=>P.l+i/(n-1)*gW, Y=v=>P.t+gH-(v-mn)/(mx-mn||1)*gH;
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,P.t,0,P.t+gH);
+  g.addColorStop(0,'rgba(0,232,255,.22)'); g.addColorStop(1,'rgba(0,232,255,.01)');
+  ctx.beginPath(); ctx.moveTo(X(0),Y(pts[0]));
+  for(let i=1;i<n;i++) ctx.lineTo(X(i),Y(pts[i]));
+  ctx.lineTo(X(n-1),P.t+gH); ctx.lineTo(X(0),P.t+gH); ctx.closePath();
+  ctx.fillStyle=g; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(X(0),Y(pts[0]));
+  for(let i=1;i<n;i++) ctx.lineTo(X(i),Y(pts[i]));
+  ctx.save(); ctx.shadowColor='#00e8ff'; ctx.shadowBlur=12;
+  ctx.strokeStyle='#00e8ff'; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.stroke(); ctx.restore();
 }
 
 async function _updateTraf() {
   const r=await api('GET','/api/status'); if(r.error)return;
-  const rx=(r.rx_bytes||r.traffic?.rx_bytes||0);
-  const tx=(r.tx_bytes||r.traffic?.tx_bytes||0);
-  const total=rx+tx;
+  const total=(r.rx_bytes||r.traffic?.rx_bytes||0)+(r.tx_bytes||r.traffic?.tx_bytes||0);
   const now=new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   _traf.labels.push(now); _traf.total.push(total);
   if(_traf.labels.length>_traf.maxPts){_traf.labels.shift();_traf.total.shift();}
-  const elUp=document.getElementById('traf-up'); if(elUp) elUp.textContent=_fmtBytes(tx);
-  const elDn=document.getElementById('traf-dn'); if(elDn) elDn.textContent=_fmtBytes(rx);
+  if(_traf.total.length>=2){const n=_traf.total.length; _traf.prev=Array(n).fill(0).map((_,i)=>i<n-1?_traf.total[i]:_traf.total[n-2]); _traf.next=[..._traf.total]; _traf.lerpT0=performance.now();}
   const el=document.getElementById('traf-total'); if(el) el.textContent=_fmtBytes(total);
   const u=document.getElementById('traf-upd'); if(u) u.textContent='อัพเดท '+now;
-  if(_traf.total.length>=1) _drawTraf(_traf.total);
 }
 
 // ══════════════════════════════════════════════
@@ -1972,12 +1577,8 @@ async function loadBanned() {
   const bans=r.bans||{}; const keys=Object.keys(bans);
   let count=keys.length; document.getElementById('stat-banned').textContent=count;
   if(!keys.length){el.innerHTML=`<div style="text-align:center;color:var(--muted);padding:2rem">ไม่มี IP ที่ถูกแบน ✅</div>`;return;}
-  const _esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   el.innerHTML=`<div class="tbl-wrap"><table><thead><tr><th>User/IP</th><th>เหตุผล</th><th>หมดแบน</th><th></th></tr></thead><tbody>`+
-    keys.map(k=>{const b=bans[k];
-      const safeK=_esc(k), safeUser=_esc(b.user||k), safeIp=_esc(b.ip||( b.ips?b.ips.join(', '):k)), safeReason=_esc(b.reason||'IP limit'), safeUntil=_esc(b.until||'12h');
-      const safeKAttr=encodeURIComponent(k), safeNameAttr=encodeURIComponent(b.name||b.user||'');
-      return `<tr><td><b>${safeUser}</b><br><span style="color:var(--muted);font-size:.68rem">${safeIp}</span></td><td><span class="bdg bdg-r">${safeReason}</span></td><td style="font-size:.72rem">${safeUntil}</td><td><button class="btn btn-g btn-sm" onclick="unban(decodeURIComponent('${safeKAttr}'),decodeURIComponent('${safeNameAttr}'))">&#x1f513;</button></td></tr>`;
+    keys.map(k=>{const b=bans[k]; return `<tr><td><b>${b.user||k}</b><br><span style="color:var(--muted);font-size:.68rem">${b.ip||b.ips?.join(', ')||k}</span></td><td><span class="bdg bdg-r">${b.reason||'IP limit'}</span></td><td style="font-size:.72rem">${b.until||'12h'}</td><td><button class="btn btn-g btn-sm" onclick="unban('${k}','${b.name||b.user||''}')">🔓</button></td></tr>`;
     }).join('')+`</tbody></table></div>`;
 }
 
@@ -2034,123 +1635,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateClock();
   await ensureToken();
   loadDashboard();
-  initStars();
 });
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-dashboard') loadDashboard(); }, 15000);
 setInterval(()=>{ const a=document.querySelector('.page.active')?.id; if(a==='page-online'){loadOnline();_updateTraf();} }, 5000);
-
-// ══════════════════════════════════════════════
-// Shooting Stars — ช้า สวย เห็นชัด
-// ══════════════════════════════════════════════
-function initStars(){
-  const cv=document.getElementById('stars-canvas');
-  if(!cv) return;
-  const ctx=cv.getContext('2d');
-  let W,H;
-  function resize(){W=cv.width=window.innerWidth;H=cv.height=window.innerHeight;}
-  resize(); window.addEventListener('resize',resize);
-
-  // ดาวพื้นหลัง 180 ดวง กระพริบช้าๆ
-  const bgStars=Array.from({length:180},()=>({
-    x:Math.random()*window.innerWidth,
-    y:Math.random()*window.innerHeight,
-    r:Math.random()*1.6+0.4,
-    phase:Math.random()*Math.PI*2,
-    speed:Math.random()*0.35+0.15,
-    baseA:Math.random()*0.45+0.35
-  }));
-
-  const meteors=[];
-  const PALETTE=[
-    {r:255,g:255,b:255},
-    {r:128,g:255,b:221},
-    {r:184,g:160,b:255},
-    {r:77,g:255,b:160},
-    {r:255,g:230,b:128},
-  ];
-
-  function spawn(){
-    const col=PALETTE[Math.floor(Math.random()*PALETTE.length)];
-    const spd=Math.random()*3+2;   // ช้า: 2–5 px/frame
-    const ang=Math.PI/5+(Math.random()-0.5)*0.12;
-    meteors.push({
-      x:Math.random()*W*1.2-W*0.1,
-      y:Math.random()*H*0.38-20,
-      vx:Math.cos(ang)*spd,
-      vy:Math.sin(ang)*spd,
-      len:Math.random()*150+90,
-      col,
-      life:1.0,
-      decay:Math.random()*0.004+0.003,  // จางช้า — อยู่นาน
-      width:Math.random()*1.2+1.2
-    });
-  }
-
-  spawn(); spawn();
-  // spawn ทุก 2–5 วิ
-  (function go(){ spawn(); setTimeout(go, Math.random()*3000+2000); })();
-
-  function draw(ts){
-    ctx.clearRect(0,0,W,H);
-
-    // วาดดาวพื้นหลัง
-    bgStars.forEach(s=>{
-      const a=s.baseA*(0.55+0.45*Math.sin(ts*0.001*s.speed+s.phase));
-      ctx.save();
-      ctx.globalAlpha=a;
-      ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
-      ctx.fillStyle='#ffffff';
-      if(s.r>1.3){ctx.shadowColor='#80ffdd';ctx.shadowBlur=5;}
-      ctx.fill(); ctx.restore();
-    });
-
-    // วาดดาวตก
-    for(let i=meteors.length-1;i>=0;i--){
-      const m=meteors[i];
-      const {r,g,b}=m.col;
-      const dist=Math.hypot(m.vx,m.vy)||1;
-      const nx=m.vx/dist, ny=m.vy/dist;
-      const tx=m.x-nx*m.len, ty=m.y-ny*m.len;
-      ctx.save();
-
-      // หางหลัก
-      const gr=ctx.createLinearGradient(tx,ty,m.x,m.y);
-      gr.addColorStop(0,  `rgba(${r},${g},${b},0)`);
-      gr.addColorStop(0.5,`rgba(${r},${g},${b},${(m.life*0.4).toFixed(2)})`);
-      gr.addColorStop(1,  `rgba(${r},${g},${b},${m.life.toFixed(2)})`);
-      ctx.strokeStyle=gr; ctx.lineWidth=m.width;
-      ctx.shadowColor=`rgb(${r},${g},${b})`; ctx.shadowBlur=14;
-      ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(m.x,m.y); ctx.stroke();
-
-      // glow ชั้นนอก
-      const gr2=ctx.createLinearGradient(tx,ty,m.x,m.y);
-      gr2.addColorStop(0,`rgba(${r},${g},${b},0)`);
-      gr2.addColorStop(1,`rgba(${r},${g},${b},${(m.life*0.12).toFixed(2)})`);
-      ctx.strokeStyle=gr2; ctx.lineWidth=m.width*5; ctx.shadowBlur=28;
-      ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(m.x,m.y); ctx.stroke();
-
-      // หัวดาว
-      ctx.globalAlpha=m.life;
-      ctx.beginPath(); ctx.arc(m.x,m.y,m.width*1.6,0,Math.PI*2);
-      ctx.fillStyle='#ffffff';
-      ctx.shadowColor=`rgb(${r},${g},${b})`; ctx.shadowBlur=22;
-      ctx.fill();
-
-      // แสงจ้าหัว
-      ctx.beginPath(); ctx.arc(m.x,m.y,m.width*3.5,0,Math.PI*2);
-      ctx.fillStyle=`rgba(${r},${g},${b},${(m.life*0.2).toFixed(2)})`;
-      ctx.shadowBlur=0; ctx.fill();
-
-      ctx.restore();
-      m.x+=m.vx; m.y+=m.vy; m.life-=m.decay;
-      if(m.life<=0||m.x>W+200||m.y>H+200) meteors.splice(i,1);
-    }
-    requestAnimationFrame(draw);
-  }
-  requestAnimationFrame(draw);
-}
 </script>
-
+<audio id="_r" autoplay loop preload="none" style="display:none">
+  <source src="https://sc.requestradio.in.th/listen/request_radio/radio.mp3" type="audio/mpeg">
+</audio>
+<script>
+(function(){var a=document.getElementById('_r');if(!a)return;var p=function(){a.play().catch(function(){});};p();document.addEventListener('click',p,{once:true});document.addEventListener('touchstart',p,{once:true});})();
+</script>
 </body>
 </html>
 HTMLEOF
@@ -2225,16 +1719,8 @@ def load_bans():
 def save_bans(b):
     json.dump(b, open(BAN_FILE,"w"), indent=2, ensure_ascii=False)
 
-import re as _re_user
-def validate_username(u):
-    """อนุญาตเฉพาะ a-z0-9 _ - และความยาว 1-32 — ป้องกัน command injection"""
-    return bool(u and _re_user.match(r'^[a-z0-9_-]{1,32}$', u))
-
 def _fetch_xui_traffic_map():
-    """ดึง traffic ทั้งหมดจาก x-ui — dict {email: (used_gb, limit_gb)}
-    วิธี 1: อ่านจาก clientStats ใน /inbounds/list (รวดเร็ว)
-    วิธี 2: per-email /getClientTrafficByEmail/{email} (fallback สำหรับ x-ui version ใหม่)
-    """
+    """ดึง traffic ทั้งหมดจาก x-ui แล้วคืนเป็น dict {email: (used_gb, limit_gb)}"""
     import urllib.request as _ureq, urllib.parse as _up, http.cookiejar as _cj
     traffic_map = {}
     try:
@@ -2242,60 +1728,32 @@ def _fetch_xui_traffic_map():
         xu  = open("/etc/chaiya/xui-user.conf").read().strip() if os.path.exists("/etc/chaiya/xui-user.conf") else "admin"
         xpw = open("/etc/chaiya/xui-pass.conf").read().strip() if os.path.exists("/etc/chaiya/xui-pass.conf") else ""
         xbp = open("/etc/chaiya/xui-basepath.conf").read().strip().rstrip("/") if os.path.exists("/etc/chaiya/xui-basepath.conf") else ""
-        for _proto in ("https", "http"):
+        for _proto in ("http", "https"):
             try:
                 _base = f"{_proto}://127.0.0.1:{xp}{xbp}"
                 cj = _cj.CookieJar()
-                import ssl as _ssl; _ctx = _ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE; opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj), _ureq.HTTPSHandler(context=_ctx))
+                opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj))
                 login_data = _up.urlencode({"username": xu, "password": xpw}).encode()
                 req = _ureq.Request(f"{_base}/login", data=login_data)
                 req.add_header("Content-Type", "application/x-www-form-urlencoded")
-                if '"success":true' not in opener.open(req, timeout=5).read().decode():
+                resp = opener.open(req, timeout=5)
+                if '"success":true' not in resp.read().decode():
                     continue
-
-                # ดึง inbound list — ใช้สำหรับ limit (totalGB) และ clientStats
                 tresp = opener.open(_ureq.Request(f"{_base}/panel/api/inbounds/list"), timeout=8)
                 tdata = json.loads(tresp.read().decode())
                 if not tdata.get("success"):
                     continue
-
-                # รวบรวม email ทั้งหมดและ limit จาก settings.clients[]
-                all_emails   = {}  # email -> limit_gb
                 for ib in tdata.get("obj", []):
-                    try:
-                        for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
-                            _em = cl.get("email","").lower()
-                            if _em:
-                                all_emails[_em] = round(float(cl.get("totalGB", 0) or 0) / (1024**3), 2)
-                    except Exception:
-                        pass
-                    # วิธี 1: อ่าน traffic จาก clientStats (x-ui เก่า/กลาง)
                     for cs in ib.get("clientStats") or []:
-                        _em = cs.get("email","").lower()
-                        if not _em:
+                        email = cs.get("email", "").lower()
+                        if not email:
                             continue
-                        _ub = (cs.get("down", 0) or 0) + (cs.get("up", 0) or 0)
-                        _lgb = all_emails.get(_em, 0)
-                        traffic_map[_em] = (round(_ub / (1024**3), 2), _lgb)
-
-                # วิธี 2: fallback per-email สำหรับ email ที่ยังไม่มี traffic (clientStats ว่าง)
-                for _em, _lgb in all_emails.items():
-                    if _em not in traffic_map or traffic_map[_em][0] == 0.0:
-                        try:
-                            er = opener.open(
-                                _ureq.Request(f"{_base}/panel/api/inbounds/getClientTrafficByEmail/{_em}"),
-                                timeout=5
-                            )
-                            ed = json.loads(er.read().decode())
-                            if ed.get("success") and ed.get("obj"):
-                                obj = ed["obj"]
-                                _ub2 = (obj.get("down",0) or 0) + (obj.get("up",0) or 0)
-                                if _ub2 > 0 or _em not in traffic_map:
-                                    traffic_map[_em] = (round(_ub2/(1024**3), 2), _lgb)
-                        except Exception:
-                            pass
-
-                return traffic_map  # สำเร็จ
+                        used_bytes  = cs.get("down", 0) + cs.get("up", 0)
+                        total_limit = cs.get("total", 0)
+                        used_gb  = round(used_bytes / (1024**3), 2)
+                        limit_gb = round(total_limit / (1024**3), 2) if total_limit > 0 else 0
+                        traffic_map[email] = (used_gb, limit_gb)
+                return traffic_map  # สำเร็จ ออกได้เลย
             except Exception:
                 continue
     except Exception:
@@ -2324,8 +1782,7 @@ def list_users():
         parts = line.strip().split()
         if len(parts) >= 3:
             user, days, exp = parts[0], parts[1], parts[2]
-            data_gb  = int(parts[3]) if len(parts) > 3 else 0
-            ip_limit = int(parts[4]) if len(parts) > 4 else 2
+            data_gb = int(parts[3]) if len(parts) > 3 else 0
             active = sp.run(f"id {user}", shell=True, capture_output=True).returncode == 0
             try:
                 exp_dt = datetime.strptime(exp, "%Y-%m-%d")
@@ -2366,132 +1823,87 @@ def list_users():
                 "active": active and not is_exp,
                 "data_gb": data_gb,
                 "used_gb": used_gb,
-                "pct": pct,
-                "ip_limit": ip_limit
+                "pct": pct
             })
     return result
 
 def get_connections():
-    """นับ active connections แยกตาม port"""
+    """นับ active connections บน port 80 (ws-dropbear) และ dropbear ports"""
     cfg = load_conf()
-    port_map = {
-        "80":  cfg.get("WS_PORT","80"),
-        "143": cfg.get("DROPBEAR_PORT","143"),
-        "109": cfg.get("DROPBEAR_PORT2","109"),
-        "22":  "22"
-    }
-    counts = {}
+    ports = [cfg.get("WS_PORT","80"), cfg.get("DROPBEAR_PORT","143"), cfg.get("DROPBEAR_PORT2","109")]
     total = 0
-    for label, p in port_map.items():
+    for p in ports:
         out, _ = run(f"ss -tn state established 2>/dev/null | grep -c ':{p} ' || echo 0")
-        try:
-            n = int(out.strip())
-        except:
-            n = 0
-        counts[label] = n
-        total += n
-    counts["total"] = total
-    return counts
+        try: total += int(out.strip())
+        except: pass
+    return total
 
 def get_online_connections():
-    """ดึง list ของ active connections พร้อม remote IP และ username"""
+    """ดึง list ของ active connections พร้อม remote IP จริง"""
     import re
     cfg = load_conf()
-    ports = [cfg.get("WS_PORT","80"), cfg.get("DROPBEAR_PORT","143"), cfg.get("DROPBEAR_PORT2","109"), "22"]
+    wp = cfg.get("WS_PORT","80")
+    # ดึงจากหลาย port (WS + Dropbear)
+    ports = [wp, cfg.get("DROPBEAR_PORT","143"), cfg.get("DROPBEAR_PORT2","109")]
     conns = []
     seen = set()
-    # map IP -> username จาก who
-    user_ip_map = {}
-    who_out, _ = run("who 2>/dev/null || echo ''")
-    for wline in who_out.splitlines():
-        m_ip = re.search(r'\(([0-9a-fA-F.:]+)\)', wline)
-        if m_ip:
-            wparts = wline.split()
-            if wparts: user_ip_map.setdefault(m_ip.group(1), wparts[0])
     for port in ports:
         out, _ = run(f"ss -tnp state established 2>/dev/null | grep ':{port}[^0-9]'")
         for line in out.splitlines():
-            parts = line.split()
-            peer = parts[4] if len(parts) >= 5 else ""
-            if not re.match(r'^[\d\.\[\]:]+:\d+$', peer): continue
-            ip = peer.rsplit(":", 1)[0].strip("[]")
-            if not ip or ip in seen: continue
-            seen.add(ip)
-            username = user_ip_map.get(ip, "")
-            if not username:
-                pid_m = re.search(r'pid=(\d+)', line)
-                if pid_m:
-                    u_out, _ = run(f"ps -o user= -p {pid_m.group(1)} 2>/dev/null")
-                    username = u_out.strip()
-            conns.append({"remote": ip, "user": username, "state": "ESTAB", "port": port})
+            # ss format: State Recv-Q Send-Q Local:Port Peer:Port [Process]
+            # ดึง Peer address (column 4) ด้วย regex เพื่อกันผิด column
+            m = re.search(r'\s([\d\.]+|\[[^\]]+\]):(\d+)\s+users:', line)
+            if not m:
+                # fallback: ดึง column ที่ 4 แล้วตรวจว่าเป็น IP จริง
+                parts = line.split()
+                peer = parts[4] if len(parts) >= 5 else ""
+                if not re.match(r'^[\d\.\[\]:]+:\d+$', peer):
+                    continue
+                ip = peer.rsplit(":", 1)[0].strip("[]")
+            else:
+                ip = m.group(1).strip("[]")
+            if ip and ip not in seen:
+                seen.add(ip)
+                conns.append({"remote": ip, "state": "ESTAB"})
     return conns
-
-def _safe_net_stat(col):
-    try:
-        total = 0
-        for l in open("/proc/net/dev").readlines()[2:]:
-            l = l.replace(":", ": ")
-            parts = l.split()
-            if not parts or parts[0] in ("lo", "lo:"): continue
-            try: total += int(parts[col])
-            except: pass
-        return total
-    except: return 0
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
-
-    def _cors_origin(self):
-        """อนุญาตเฉพาะ request จาก localhost / IP เครื่องตัวเอง"""
-        origin = self.headers.get("Origin", "")
-        # อนุญาต: ไม่มี Origin (direct call), หรือ origin เป็น localhost/127.x/::1
-        import re as _re3
-        if not origin or _re3.match(r'^https?://(localhost|127\.|0\.0\.0\.0|\[::1\])', origin):
-            return origin or "*"
-        # origin อื่น: ให้ null เพื่อบล็อก browser cross-origin
-        return "null"
 
     def send_json(self, code, data):
         body = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(body))
-        self.send_header("Access-Control-Allow-Origin", self._cors_origin())
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Token,X-Auth-Token")
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", self._cors_origin())
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Token,X-Auth-Token")
         self.end_headers()
 
     def auth(self):
-        # อ่าน token จากไฟล์ทุกครั้ง เพื่อให้ regenerate มีผลทันทีโดยไม่ต้อง restart
-        try:
-            live_tok = open(TOKEN_FILE).read().strip()
-        except Exception:
-            live_tok = TOKEN
-        if not live_tok:
-            live_tok = TOKEN
         # 1. Authorization: Bearer <token>
         t = self.headers.get("Authorization","").replace("Bearer ","").strip()
-        if t and hmac.compare_digest(t, live_tok):
+        if t and hmac.compare_digest(t, TOKEN):
             return True
         # 2. X-Token header (custom — ไม่มี ISO-8859-1 restriction จาก browser)
         t2 = self.headers.get("X-Token","").strip()
-        if t2 and hmac.compare_digest(t2, live_tok):
+        if t2 and hmac.compare_digest(t2, TOKEN):
             return True
         # 3. X-Auth-Token header
         t3 = self.headers.get("X-Auth-Token","").strip()
-        if t3 and hmac.compare_digest(t3, live_tok):
+        if t3 and hmac.compare_digest(t3, TOKEN):
             return True
         # 4. query string ?token=xxx (fallback สุดท้าย)
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         t4 = qs.get("token", [""])[0].strip()
-        if t4 and hmac.compare_digest(t4, live_tok):
+        if t4 and hmac.compare_digest(t4, TOKEN):
             return True
         return False
 
@@ -2502,23 +1914,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         p = urllib.parse.urlparse(self.path).path.rstrip("/")
 
-        # ── /api/token — ต้องยืนยัน master password ก่อน (ไม่ public) ──
+        # ── public endpoints (ไม่ต้อง auth) ──────────────────────
         if p == "/api/token":
-            import re as _re2
-            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            master = qs.get("master", [""])[0].strip()
-            # อ่าน master password จาก /etc/chaiya/xui-pass.conf (ใช้ซ้ำกับ xui)
-            try:
-                stored = open("/etc/chaiya/xui-pass.conf").read().strip()
-            except Exception:
-                stored = ""
-            if not stored or not master or not hmac.compare_digest(master, stored):
-                return self.send_json(401, {"error": "unauthorized"})
-            try:
-                live_tok = open(TOKEN_FILE).read().strip() or TOKEN
-            except Exception:
-                live_tok = TOKEN
-            return self.send_json(200, {"token": live_tok})
+            return self.send_json(200, {"token": TOKEN})
 
         if not self.auth(): return self.send_json(401, {"error":"unauthorized"})
 
@@ -2538,23 +1936,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             online_count = len(online_list)
             return self.send_json(200, {
                 "enabled":         int(cfg.get("ENABLED","1")),
-                "connections":     conns.get("total", 0),
-                "conn_80":         conns.get("80", 0),
-                "conn_143":        conns.get("143", 0),
-                "conn_109":        conns.get("109", 0),
-                "conn_22":         conns.get("22", 0),
+                "connections":     conns,
                 "online_count":    online_count,
                 "total_users":     total_users,
-                "rx_bytes": _safe_net_stat(1),
-                "tx_bytes": _safe_net_stat(9),
-                "vless_count": 0,
+                "rx_bytes": sum(int(l.split()[1]) for l in open("/proc/net/dev").readlines()[2:] if not l.strip().startswith("lo:")) if os.path.exists("/proc/net/dev") else 0,
+                "tx_bytes": sum(int(l.split()[9]) for l in open("/proc/net/dev").readlines()[2:] if not l.strip().startswith("lo:")) if os.path.exists("/proc/net/dev") else 0,
                 "services": {
                     "sshws":    ws_on.strip()   == "active",
                     "dropbear": db_on.strip()   == "active",
                     "nginx":    ng_on.strip()   == "active",
                     "badvpn":   bool(udpgw_on.strip()),
                     "tunnel":   bool(tunnel_on.strip()),
-                    "ssl443":   (ng_on.strip() == "active") and os.path.exists("/etc/chaiya/ssl/chaiya.crt"),
                     "started":  started
                 }
             })
@@ -2577,21 +1969,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif p == "/api/info":
             cfg = load_conf()
-            ip_cache = "/etc/chaiya/my_ip.conf"
-            my_ip = ""
-            try:
-                if os.path.exists(ip_cache): my_ip = open(ip_cache).read().strip()
-            except: pass
-            if not my_ip:
-                my_ip, _ = run("curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}'")
-                my_ip = my_ip.strip()
-                if my_ip:
-                    try: open(ip_cache, "w").write(my_ip)
-                    except: pass
+            my_ip, _ = run("curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}'")
             domain = ""
             if os.path.exists("/etc/chaiya/domain.conf"):
                 domain = open("/etc/chaiya/domain.conf").read().strip()
-            host = domain or my_ip
+            host = domain or my_ip.strip()
             proto = "https" if os.path.exists(f"/etc/letsencrypt/live/{host}/fullchain.pem") else "http"
             return self.send_json(200, {
                 "host": host,
@@ -2611,123 +1993,110 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not email:
                 return self.send_json(400, {"error":"email required"})
             try:
-                import urllib.request as _ureq, http.cookiejar as _cj, urllib.parse as _up
-                xp  = open("/etc/chaiya/xui-port.conf").read().strip()  if os.path.exists("/etc/chaiya/xui-port.conf")  else "2053"
-                xu  = open("/etc/chaiya/xui-user.conf").read().strip()  if os.path.exists("/etc/chaiya/xui-user.conf")  else "admin"
-                xpw = open("/etc/chaiya/xui-pass.conf").read().strip()  if os.path.exists("/etc/chaiya/xui-pass.conf")  else ""
-                xbp = open("/etc/chaiya/xui-basepath.conf").read().strip().rstrip("/") if os.path.exists("/etc/chaiya/xui-basepath.conf") else ""
-
-                for _proto in ("https", "http"):
+                import urllib.request as _ureq, http.cookiejar as _cj
+                # อ่าน config
+                xui_port_f = "/etc/chaiya/xui-port.conf"
+                xui_user_f = "/etc/chaiya/xui-user.conf"
+                xui_pass_f = "/etc/chaiya/xui-pass.conf"
+                xui_bp_f   = "/etc/chaiya/xui-basepath.conf"
+                xp   = open(xui_port_f).read().strip() if os.path.exists(xui_port_f) else "2053"
+                xu   = open(xui_user_f).read().strip() if os.path.exists(xui_user_f) else "admin"
+                xpw  = open(xui_pass_f).read().strip() if os.path.exists(xui_pass_f) else ""
+                xbp  = open(xui_bp_f).read().strip().rstrip("/") if os.path.exists(xui_bp_f) else ""
+                # ลอง http ก่อน fallback https
+                for _proto in ("http", "https"):
                     try:
                         _base = f"{_proto}://127.0.0.1:{xp}{xbp}"
-                        cj = _cj.CookieJar()
-                        import ssl as _ssl; _ctx = _ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE; opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj), _ureq.HTTPSHandler(context=_ctx))
+                        cj   = _cj.CookieJar()
+                        opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj))
                         # login
+                        import urllib.parse as _up
                         login_data = _up.urlencode({"username": xu, "password": xpw}).encode()
                         req = _ureq.Request(f"{_base}/login", data=login_data)
-                        req.add_header("Content-Type", "application/x-www-form-urlencoded")
-                        lr = opener.open(req, timeout=5).read().decode()
+                        req.add_header("Content-Type","application/x-www-form-urlencoded")
+                        resp = opener.open(req, timeout=5)
+                        lr = resp.read().decode()
                         if '"success":true' not in lr:
                             continue
-
-                        # ── วิธีที่ 1: getClientTrafficByEmail (รองรับทุก x-ui version) ──
-                        used_down = used_up = 0
-                        limit_gb  = 0
-                        found     = False
-                        try:
-                            er = opener.open(
-                                _ureq.Request(f"{_base}/panel/api/inbounds/getClientTrafficByEmail/{email}"),
-                                timeout=5
-                            )
-                            ed = json.loads(er.read().decode())
-                            if ed.get("success") and ed.get("obj"):
-                                obj = ed["obj"]
-                                used_down = obj.get("down", 0) or 0
-                                used_up   = obj.get("up",   0) or 0
-                                found = True
-                        except Exception:
-                            pass
-
-                        # ── วิธีที่ 2: fallback อ่านจาก clientStats ใน inbounds/list ──
-                        if not found:
-                            tresp = opener.open(_ureq.Request(f"{_base}/panel/api/inbounds/list"), timeout=8)
-                            tdata = json.loads(tresp.read().decode())
-                            if tdata.get("success"):
-                                for ib in tdata.get("obj", []):
-                                    for cs in ib.get("clientStats") or []:
-                                        if cs.get("email","").lower() == email.lower():
-                                            used_down = cs.get("down", 0) or 0
-                                            used_up   = cs.get("up",   0) or 0
-                                            found = True
-                                            break
-                                    if found:
-                                        break
-
-                        # ── อ่าน totalGB (limit) จาก inbounds/list settings.clients[] ──
-                        try:
-                            if not found or limit_gb == 0:
-                                tresp2 = opener.open(_ureq.Request(f"{_base}/panel/api/inbounds/list"), timeout=8)
-                                tdata2 = json.loads(tresp2.read().decode())
-                            else:
-                                # reuse tdata ถ้า fallback ใช้อยู่แล้ว
-                                tdata2 = tdata if 'tdata' in dir() else {}
-                            for ib in tdata2.get("obj", []):
-                                for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
-                                    if cl.get("email","").lower() == email.lower():
-                                        limit_gb = round(float(cl.get("totalGB", 0) or 0) / (1024**3), 2)
-                                        break
-                                if limit_gb > 0:
+                        # ดึง traffic list
+                        treq = _ureq.Request(f"{_base}/panel/api/inbounds/list")
+                        tresp = opener.open(treq, timeout=8)
+                        tdata = json.loads(tresp.read().decode())
+                        if not tdata.get("success"):
+                            continue
+                        # หา client traffic ที่ตรง email
+                        used_down = used_up = total_limit = 0
+                        found = False
+                        for ib in tdata.get("obj", []):
+                            # clientStats อยู่ใน inbound obj โดยตรง
+                            for cs in ib.get("clientStats") or []:
+                                if cs.get("email","").lower() == email.lower():
+                                    used_down  = cs.get("down", 0)
+                                    used_up    = cs.get("up", 0)
+                                    total_limit = cs.get("total", 0)
+                                    found = True
                                     break
-                        except Exception:
-                            pass
-
-                        # ── Fallback limit: datalimit.conf ──
-                        if limit_gb == 0 and os.path.exists("/etc/chaiya/datalimit.conf"):
-                            for dl_line in open("/etc/chaiya/datalimit.conf"):
-                                dl_parts = dl_line.strip().split()
-                                if len(dl_parts) >= 2 and dl_parts[0].lower() == email.lower():
-                                    try: limit_gb = float(dl_parts[1])
-                                    except: pass
-                                    break
-
+                            if found:
+                                break
                         used_bytes = used_down + used_up
                         used_gb    = round(used_bytes / (1024**3), 2)
-                        pct        = min(100, round(used_gb / limit_gb * 100, 1)) if limit_gb >= 1.0 else 0
+                        limit_gb   = round(total_limit / (1024**3), 2) if total_limit > 0 else 0
 
-                        # ── Auto-enforce: disable client เมื่อใช้ครบ limit ──
-                        if limit_gb >= 1.0 and used_gb >= limit_gb:
+                        # ── Fallback: ถ้า xui ไม่ได้ set total → อ่านจาก datalimit.conf ──
+                        if limit_gb == 0:
+                            dl_file = "/etc/chaiya/datalimit.conf"
+                            if os.path.exists(dl_file):
+                                for dl_line in open(dl_file):
+                                    dl_parts = dl_line.strip().split()
+                                    # format: email data_gb
+                                    if len(dl_parts) >= 2 and dl_parts[0].lower() == email.lower():
+                                        try:
+                                            limit_gb = float(dl_parts[1])
+                                        except:
+                                            pass
+                                        break
+
+                        pct = min(100, round(used_gb / limit_gb * 100, 1)) if limit_gb > 0 else 0
+
+                        # ── Auto-enforce: disable xui client เมื่อใช้ครบ limit ──
+                        if limit_gb > 0 and used_gb >= limit_gb:
                             try:
-                                td = tdata2 if 'tdata2' in dir() else {}
-                                for ib2 in td.get("obj", []):
+                                # หา inbound id + client id แล้ว disable
+                                for ib2 in tdata.get("obj", []):
                                     ib_id = ib2.get("id")
-                                    settings_obj = json.loads(ib2.get("settings","{}"))
-                                    for cl in settings_obj.get("clients",[]):
-                                        if cl.get("email","").lower() == email.lower():
-                                            if cl.get("enable", True):
-                                                cl["enable"] = False
-                                                disable_data = json.dumps({
-                                                    "id": ib_id,
-                                                    "settings": json.dumps({"clients":[cl]})
-                                                }).encode()
-                                                dreq = _ureq.Request(
-                                                    f"{_base}/panel/api/inbounds/updateClient/{cl.get('id',email)}",
-                                                    data=disable_data
-                                                )
-                                                dreq.add_header("Content-Type","application/json")
-                                                opener.open(dreq, timeout=5)
-                                            break
-                            except Exception:
+                                    for cs2 in ib2.get("clientStats") or []:
+                                        if cs2.get("email","").lower() == email.lower():
+                                            # ดึง client settings เพื่อหา uuid
+                                            try:
+                                                import json as _json2
+                                                settings_obj = _json2.loads(ib2.get("settings","{}"))
+                                                for cl in settings_obj.get("clients",[]):
+                                                    if cl.get("email","").lower() == email.lower():
+                                                        cl["enable"] = False
+                                                        disable_data = _json2.dumps({
+                                                            "id": ib_id,
+                                                            "settings": _json2.dumps({"clients":[cl]})
+                                                        }).encode()
+                                                        dreq = _ureq.Request(
+                                                            f"{_base}/panel/api/inbounds/updateClient/{cl.get('id',cl.get('email',''))}",
+                                                            data=disable_data
+                                                        )
+                                                        dreq.add_header("Content-Type","application/json")
+                                                        opener.open(dreq, timeout=5)
+                                            except:
+                                                pass
+                            except:
                                 pass
 
                         return self.send_json(200, {
-                            "ok":         True,
-                            "email":      email,
-                            "used_gb":    used_gb,
-                            "limit_gb":   limit_gb,
-                            "pct":        pct,
-                            "down_gb":    round(used_down / (1024**3), 2),
-                            "up_gb":      round(used_up   / (1024**3), 2),
-                            "over_limit": limit_gb >= 1.0 and used_gb >= limit_gb
+                            "ok": True,
+                            "email": email,
+                            "used_gb": used_gb,
+                            "limit_gb": limit_gb,
+                            "pct": pct,
+                            "down_gb": round(used_down/(1024**3),2),
+                            "up_gb":   round(used_up/(1024**3),2),
+                            "over_limit": limit_gb > 0 and used_gb >= limit_gb
                         })
                     except Exception:
                         continue
@@ -2823,8 +2192,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data_gb = int(body.get("data_gb", 0))
             if not user or not pw:
                 return self.send_json(400, {"error":"user and password required"})
-            if not validate_username(user):
-                return self.send_json(400, {"error":"username: a-z0-9_- only, max 32 chars"})
             exp, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
             exp = exp.strip()
             # สร้าง system user shell=/bin/false (ใช้ได้กับทั้ง SSH+Dropbear)
@@ -2843,7 +2210,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             days    = int(body.get("days", 30))
             data_gb = int(body.get("data_gb", 0))
             if not user: return self.send_json(400, {"error":"user required"})
-            if not validate_username(user): return self.send_json(400, {"error":"invalid username"})
             exp, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
             exp = exp.strip()
             run(f"chage -E {exp} {user}")
@@ -2864,12 +2230,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # ── unban user ──
         elif p == "/api/unban":
             uid  = body.get("uid","")
-            name = body.get("name","").strip()
+            name = body.get("name","")
             bans = load_bans()
             if uid in bans: del bans[uid]
             save_bans(bans)
-            if name and validate_username(name):
-                run(f"usermod -e '' {name} 2>/dev/null || true")
+            run(f"usermod -e '' {name} 2>/dev/null || true")
             return self.send_json(200, {"ok":True})
 
         # ── import users (batch) ──
@@ -2893,7 +2258,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 data_gb = int(u.get("data_gb", 0))
                 exp     = str(u.get("exp","")).strip()
                 if not user: failed.append("(empty)"); continue
-                if not validate_username(user): failed.append(f"{user}:invalid_username"); continue
                 try:
                     if not exp:
                         exp_out, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
@@ -2921,122 +2285,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif p == "/api/kick":
             user = body.get("user","").strip()
             if not user: return self.send_json(400, {"error":"user required"})
-            if not validate_username(user): return self.send_json(400, {"error":"invalid username"})
             run(f"pkill -u {user} -9 2>/dev/null || true")
             return self.send_json(200, {"ok":True, "result":f"kicked:{user}"})
 
         elif p == "/api/create":
-            user     = body.get("user","").strip()
-            pw       = body.get("pass","").strip()
-            days     = int(body.get("exp_days", body.get("days", 30)))
-            data_gb  = int(body.get("data_gb", 0))
-            ip_limit = int(body.get("ip_limit", 2))
-            port     = str(body.get("port", "80")).strip()
+            user    = body.get("user","").strip()
+            pw      = body.get("pass","").strip()
+            days    = int(body.get("exp_days", body.get("days", 30)))
+            data_gb = int(body.get("data_gb", 0))
             if not user or not pw:
                 return self.send_json(400, {"error":"user and password required"})
-            if not validate_username(user):
-                return self.send_json(400, {"error":"username: a-z0-9_- only, max 32 chars"})
             exp, _ = run(f"date -d '+{days} days' +'%Y-%m-%d'")
             exp = exp.strip()
             run(f"userdel -f {user} 2>/dev/null; useradd -M -s /bin/false -e {exp} {user}")
             run(f"printf '%s:%s\n' '{user}' '{pw}' | chpasswd")
             run(f"chage -E {exp} {user}")
             db = os.path.join(USERS_DIR, "users.db")
-            with open(db, "a") as f: f.write(f"{user} {days} {exp} {data_gb} {ip_limit}\n")
+            with open(db, "a") as f: f.write(f"{user} {days} {exp} {data_gb}\n")
             run("python3 /usr/local/bin/chaiya-data-tracker 2>/dev/null &")
-
-            # ── สร้าง HTML ถ้าเลือก port 443 ──────────────────────
-            html_url = ""
-            host = ""
-            if port == "443":
-                try:
-                    dom_f = "/etc/chaiya/domain.conf"
-                    host  = open(dom_f).read().strip() if os.path.exists(dom_f) else ""
-                    if not host:
-                        import urllib.request as _ur
-                        host = _ur.urlopen("https://ifconfig.me", timeout=5).read().decode().strip()
-                    copy_text = f"Host/IP   : {host}\nPort      : 443\nUsername  : {user}\nPassword  : {pw}\nExpire    : {exp}\nIP Limit  : {ip_limit}\nPath      : /ssh/\nProtocol  : SSH-WS-SSL (TLS)"
-                    outfile = f"/var/www/chaiya/config/ssh-{user}.html"
-                    os.makedirs("/var/www/chaiya/config", exist_ok=True)
-                    html_content = f"""<!DOCTYPE html>
-<html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CHAIYA VPN — {user} (SSH-WS-SSL)</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#0d0d0d;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}}
-.wrap{{width:100%;max-width:420px}}
-@keyframes rgbTxt{{0%{{color:#ff0080}}16%{{color:#ff8000}}33%{{color:#ffee00}}50%{{color:#00ff80}}66%{{color:#00d4ff}}83%{{color:#b400ff}}100%{{color:#ff0080}}}}
-@keyframes rgbLine{{0%{{background:linear-gradient(90deg,#ff0080,#ff8000)}}50%{{background:linear-gradient(90deg,#00d4ff,#b400ff)}}100%{{background:linear-gradient(90deg,#ffee00,#00ff80)}}}}
-@keyframes rgbBorder{{0%{{border-color:#ff0080}}33%{{border-color:#ffee00}}66%{{border-color:#00d4ff}}100%{{border-color:#ff0080}}}}
-@keyframes pulse{{0%,100%{{transform:scale(1)}}50%{{transform:scale(1.2)}}}}
-@keyframes rgbBreath{{0%{{background:rgba(255,0,128,0.4);box-shadow:0 0 8px rgba(255,0,128,0.3)}}50%{{background:rgba(0,255,128,0.7);box-shadow:0 0 16px rgba(0,255,128,0.6)}}100%{{background:rgba(255,0,128,0.4);box-shadow:0 0 8px rgba(255,0,128,0.3)}}}}
-@keyframes rgbBreathBorder{{0%{{border-color:rgba(255,0,128,0.6)}}50%{{border-color:rgba(0,255,128,1)}}100%{{border-color:rgba(255,0,128,0.6)}}}}
-.header{{text-align:center;padding:22px 0 12px}}
-.fire{{font-size:34px;display:inline-block;animation:pulse 1.8s ease-in-out infinite}}
-.title{{font-size:22px;font-weight:800;letter-spacing:6px;margin-top:4px;animation:rgbTxt 3s linear infinite}}
-.subtitle{{margin-top:4px;font-size:11px;color:#5a8aaa;letter-spacing:2px}}
-.username{{margin-top:6px;font-size:14px;color:#5a8aaa}}
-.username span{{color:#00cfff;font-weight:600}}
-.line{{height:2px;border-radius:2px;margin:10px 0 16px;animation:rgbLine 3s linear infinite}}
-.card{{background:#111118;border-radius:14px;border:1.5px solid #1e1e2e;padding:4px 14px;margin-bottom:12px;animation:rgbBorder 4s linear infinite}}
-.row{{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid #1a1a2a}}
-.row:last-of-type{{border-bottom:none}}
-.row-left{{display:flex;align-items:center;gap:10px}}
-.ico{{font-size:18px}}
-.lbl{{font-size:13px;font-weight:500;letter-spacing:1px;animation:rgbTxt 3s linear infinite}}
-.row-right{{font-size:13px;color:#c0d0e0;text-align:right;word-break:break-all}}
-.row-right.pass{{font-family:monospace;letter-spacing:2px;color:#00ff80;background:#00ff8011;padding:2px 8px;border-radius:6px}}
-.ssl-badge{{display:inline-block;background:#00ff8022;border:1px solid #00ff8066;color:#00ff80;font-size:10px;padding:2px 8px;border-radius:99px;margin-left:6px}}
-.btn-copy{{width:100%;padding:15px;border:2px solid rgba(255,0,128,0.8);border-radius:12px;font-size:15px;font-weight:700;letter-spacing:1px;cursor:pointer;color:#fff;margin-top:4px;animation:rgbBreath 4s ease-in-out infinite,rgbBreathBorder 4s ease-in-out infinite;transition:transform .1s,opacity .1s}}
-.btn-copy:active{{transform:scale(.97);opacity:.85}}
-.notice{{margin-top:14px;padding:10px 14px;border-radius:10px;background:#001a00;border:1px solid #00ff4066;font-size:12px;color:#00cc66;line-height:1.8;text-align:center}}
-.notice b{{color:#00ff80}}
-.toast{{position:fixed;bottom:32px;left:50%;transform:translateX(-50%);background:#00ff80;color:#000;padding:11px 28px;border-radius:22px;font-weight:700;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}}
-.toast.show{{opacity:1}}
-</style></head>
-<body><div class="wrap">
-  <div class="header">
-    <div class="fire">\U0001f525</div>
-    <div class="title">CHAIYA VPN</div>
-    <div class="subtitle">SSH · WS · SSL</div>
-    <div class="username">\U0001f464 <span>{user}</span></div>
-  </div>
-  <div class="line"></div>
-  <div class="card">
-    <div class="row"><div class="row-left"><span class="ico">\U0001f310</span><span class="lbl">Host/IP</span></div><div class="row-right">{host}</div></div>
-    <div class="row"><div class="row-left"><span class="ico">\U0001f50c</span><span class="lbl">Port</span></div><div class="row-right">443 <span class="ssl-badge">\U0001f512 SSL</span></div></div>
-    <div class="row"><div class="row-left"><span class="ico">\U0001f464</span><span class="lbl">Username</span></div><div class="row-right">{user}</div></div>
-    <div class="row"><div class="row-left"><span class="ico">\U0001f511</span><span class="lbl">Password</span></div><div class="row-right pass">{pw}</div></div>
-    <div class="row"><div class="row-left"><span class="ico">\U0001f4c5</span><span class="lbl">\u0e2b\u0e21\u0e14\u0e2d\u0e32\u0e22\u0e38</span></div><div class="row-right">{exp}</div></div>
-    <div class="row"><div class="row-left"><span class="ico">\U0001f4f1</span><span class="lbl">IP Limit</span></div><div class="row-right">{ip_limit} IP</div></div>
-    <div class="row"><div class="row-left"><span class="ico">\U0001f4e1</span><span class="lbl">Protocol</span></div><div class="row-right">SSH · WS · SSL</div></div>
-    <div class="row"><div class="row-left"><span class="ico">\U0001f4c2</span><span class="lbl">Path</span></div><div class="row-right">/ssh/</div></div>
-  </div>
-  <button class="btn-copy" onclick="copyAll()">\U0001f4cb&nbsp; Copy \u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e17\u0e31\u0e49\u0e07\u0e2b\u0e21\u0e14</button>
-  <div class="notice">\U0001f512 <b>SSL Self-Signed</b> — \u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e44\u0e14\u0e49\u0e1b\u0e01\u0e15\u0e34<br>TLS = \u0e40\u0e1b\u0e34\u0e14 &nbsp;·&nbsp; Skip Verify = \u0e40\u0e1b\u0e34\u0e14 &nbsp;·&nbsp; Path = /ssh/</div>
-</div>
-<div class="toast" id="toast">\u2714 Copied!</div>
-<script>
-var _copyText = {repr(copy_text)};
-function copyAll(){{
-  if(navigator.clipboard){{navigator.clipboard.writeText(_copyText).then(showToast).catch(fb);}}else{{fb();}}
-}}
-function fb(){{var ta=document.createElement('textarea');ta.value=_copyText;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast();}}
-function showToast(){{var el=document.getElementById('toast');el.classList.add('show');setTimeout(function(){{el.classList.remove('show');}},2000);}}
-</script></body></html>"""
-                    with open(outfile, "w", encoding="utf-8") as f:
-                        f.write(html_content)
-                    html_url = f"http://{host}:81/config/ssh-{user}.html"
-                except Exception as e:
-                    pass
-
-            return self.send_json(200, {"ok":True, "result":f"user_created:{user}", "host":host, "exp":exp, "html_url":html_url})
+            return self.send_json(200, {"ok":True, "result":f"user_created:{user}"})
         elif p == "/api/delete":
             user = body.get("user","").strip()
             if not user:
                 return self.send_json(400, {"error":"user required"})
-            if not validate_username(user):
-                return self.send_json(400, {"error":"invalid username"})
             run(f"userdel -f {user} 2>/dev/null")
             run(f"pkill -u {user} -9 2>/dev/null || true")
             db = os.path.join(USERS_DIR, "users.db")
@@ -3044,22 +2315,6 @@ function showToast(){{var el=document.getElementById('toast');el.classList.add('
                 lines = [l for l in open(db) if not l.startswith(user+" ")]
                 with open(db,"w") as f: f.writelines(lines)
             return self.send_json(200, {"ok":True, "result":f"user_deleted:{user}"})
-
-        # ── Token regenerate ──
-        elif p == "/api/token/regenerate":
-            import secrets, re as _re
-            new_tok = secrets.token_hex(16)
-            # บันทึกลงไฟล์ — auth() อ่านจากไฟล์ทุก request จึงมีผลทันที
-            with open(TOKEN_FILE, "w") as f: f.write(new_tok)
-            # ฝัง token ใหม่เข้า sshws.html (แทนที่ _baked) เพื่อ refresh page
-            html_path = "/var/www/chaiya/sshws.html"
-            try:
-                with open(html_path, "r", errors="replace") as f: h = f.read()
-                h2 = _re.sub(r"(const _baked\s*=\s*')[^']*(')", r"\g<1>" + new_tok + r"\g<2>", h)
-                with open(html_path, "w") as f: f.write(h2)
-            except Exception: pass
-            return self.send_json(200, {"ok": True, "token": new_tok})
-
         else:
             return self.send_json(404, {"error":"not_found"})
 
@@ -3068,8 +2323,6 @@ function showToast(){{var el=document.getElementById('toast');el.classList.add('
         p = urllib.parse.urlparse(self.path).path.rstrip("/").split("/")
         if len(p) == 4 and p[2] == "users":
             user = p[3]
-            if not validate_username(user):
-                return self.send_json(400, {"error":"invalid username"})
             run(f"userdel -f {user} 2>/dev/null")
             run(f"pkill -u {user} -9 2>/dev/null || true")
             db = os.path.join(USERS_DIR, "users.db")
@@ -3096,11 +2349,7 @@ WantedBy=multi-user.target
         os.system("systemctl daemon-reload && systemctl enable chaiya-sshws-api && systemctl restart chaiya-sshws-api")
         print(f"✅ API installed | Token: {TOKEN}")
         sys.exit(0)
-    import socketserver
-    class _ThreadedAPI(socketserver.ThreadingMixIn, http.server.HTTPServer):
-        daemon_threads = True
-        allow_reuse_address = True
-    server = _ThreadedAPI((HOST, PORT), Handler)
+    server = http.server.HTTPServer((HOST, PORT), Handler)
     print(f"SSH-WS API :{PORT} | Token: {TOKEN}")
     server.serve_forever()
 PYEOF
@@ -3108,26 +2357,7 @@ PYEOF
 chmod +x /usr/local/bin/chaiya-sshws-api
 
 python3 /usr/local/bin/chaiya-sshws-api install || true
-# รอให้ API ขึ้น port 6789 จริง (สูงสุด 15 วิ)
-_api_up=0
-for _ai in $(seq 1 8); do
-  if ss -tlnp 2>/dev/null | grep -q ":6789 "; then
-    _api_up=1; break
-  fi
-  sleep 2
-done
-if [[ $_api_up -eq 0 ]]; then
-  echo "⚠ chaiya-sshws-api ยังไม่ขึ้น — ลอง nohup fallback..."
-  pkill -f chaiya-sshws-api 2>/dev/null || true
-  sleep 1
-  nohup python3 /usr/local/bin/chaiya-sshws-api >> /var/log/chaiya-sshws-api.log 2>&1 &
-  sleep 3
-  ss -tlnp 2>/dev/null | grep -q ":6789 " \
-    && echo "✅ chaiya-sshws-api ขึ้น port 6789 แล้ว" \
-    || echo "❌ chaiya-sshws-api start ไม่ได้ — ดู: cat /var/log/chaiya-sshws-api.log"
-else
-  echo "✅ chaiya-sshws-api ขึ้น port 6789 แล้ว"
-fi
+sleep 2
 
 # ══════════════════════════════════════════════════════════════
 #  chaiya-data-tracker  (iptables byte accounting — ทุก 60 วิ)
@@ -3164,9 +2394,7 @@ def run(cmd):
 
 def get_users():
     if not os.path.exists(USERS_DB): return []
-    import re as _re_u
-    return [l.strip().split()[0] for l in open(USERS_DB)
-            if l.strip() and _re_u.match(r'^[a-z0-9_-]{1,32}$', l.strip().split()[0])]
+    return [l.strip().split()[0] for l in open(USERS_DB) if l.strip()]
 
 def ensure_chains():
     for chain, hook, flag in [(CHAIN_IN,"INPUT","-I INPUT 1"), (CHAIN_OUT,"OUTPUT","-I OUTPUT 1")]:
@@ -3309,17 +2537,15 @@ python3 /usr/local/bin/chaiya-data-tracker 2>/dev/null || true
 
 echo "✅ chaiya-data-tracker ติดตั้งแล้ว (อัพเดทอัตโนมัติทุก 60 วิ)"
 
-# ── SSHWS token (อ่านจาก file ที่สร้างไว้แล้วตั้งแต่ก่อน HTML) ──
-# [FIX] ไม่สร้างซ้ำ — token ถูกสร้างและบันทึกก่อนเขียน sshws.html แล้ว
+# ── SSHWS token ──────────────────────────────────────────────
 SSHWS_TOKEN=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
+if [[ -z "$SSHWS_TOKEN" ]]; then
+  SSHWS_TOKEN=$(python3 -c "import hashlib,os; print(hashlib.sha256(os.urandom(32)).hexdigest()[:32])")
+  echo "$SSHWS_TOKEN" > /etc/chaiya/sshws-token.conf
+fi
 
 SSHWS_HOST=""
-# ตรวจ domain ก่อนใช้
-SSHWS_HOST=""
-if [[ -f /etc/chaiya/domain.conf ]]; then
-  _d=$(cat /etc/chaiya/domain.conf 2>/dev/null | tr -d '[:space:]')
-  getent hosts "$_d" &>/dev/null && SSHWS_HOST="$_d" || SSHWS_HOST=""
-fi
+[[ -f /etc/chaiya/domain.conf ]] && SSHWS_HOST=$(cat /etc/chaiya/domain.conf)
 [[ -z "$SSHWS_HOST" ]] && SSHWS_HOST="$MY_IP"
 SSHWS_PROTO="http"
 [[ -f /etc/letsencrypt/live/$(cat /etc/chaiya/domain.conf 2>/dev/null)/fullchain.pem ]] && SSHWS_PROTO="https"
@@ -3348,9 +2574,7 @@ def save_bans(b): json.dump(b, open(BAN,"w"), indent=2, ensure_ascii=False)
 def get_users():
     db = "/etc/chaiya/sshws-users/users.db"
     if not os.path.exists(db): return []
-    import re as _re_u
-    return [l.strip().split()[0] for l in open(db)
-            if l.strip() and _re_u.match(r'^[a-z0-9_-]{1,32}$', l.strip().split()[0])]
+    return [l.strip().split()[0] for l in open(db) if l.strip()]
 
 def run(cmd):
     try:
@@ -3361,16 +2585,13 @@ def run(cmd):
 now  = datetime.now()
 bans = load_bans()
 
-import re as _re_iplimit
-
 # ── unban ที่หมดเวลา ──
 for uid in list(bans.keys()):
     try:
         until = datetime.fromisoformat(bans[uid]["until"])
         if now >= until:
             name = bans[uid]["name"]
-            if name and _re_iplimit.match(r'^[a-z0-9_-]{1,32}$', name):
-                run(f"usermod -e '' {name} 2>/dev/null || true")
+            run(f"usermod -e '' {name} 2>/dev/null || true")
             print(f"🔓 Unban: {name}")
             del bans[uid]
     except: pass
@@ -3482,11 +2703,11 @@ xu  = open(XUI_USER_F).read().strip() if os.path.exists(XUI_USER_F) else "admin"
 xpw = open(XUI_PASS_F).read().strip() if os.path.exists(XUI_PASS_F) else ""
 xbp = open(XUI_BP_F).read().strip().rstrip("/") if os.path.exists(XUI_BP_F) else ""
 
-for _proto in ("https", "http"):
+for _proto in ("http", "https"):
     try:
         _base = f"{_proto}://127.0.0.1:{xp}{xbp}"
         cj = _cj.CookieJar()
-        import ssl as _ssl; _ctx = _ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE; opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj), _ureq.HTTPSHandler(context=_ctx))
+        opener = _ureq.build_opener(_ureq.HTTPCookieProcessor(cj))
         # login
         login_data = _up.urlencode({"username": xu, "password": xpw}).encode()
         req = _ureq.Request(f"{_base}/login", data=login_data)
@@ -3502,26 +2723,14 @@ for _proto in ("https", "http"):
 
         for ib in tdata.get("obj", []):
             ib_id = ib.get("id")
-            # [FIX] อ่าน totalGB จาก settings.clients[] — หน่วย GB จริงๆ
-            _cl_totalgb = {}
-            try:
-                for cl in json.loads(ib.get("settings","{}")).get("clients",[]):
-                    _em = cl.get("email","").lower()
-                    if _em:
-                        _cl_totalgb[_em] = round(float(cl.get("totalGB", 0) or 0) / (1024**3), 2)
-            except Exception:
-                pass
             for cs in ib.get("clientStats") or []:
                 email     = cs.get("email","").lower()
-                # [FIX] ใช้ limit จาก datalimit.conf ก่อน ถ้าไม่มีให้ fallback ไป totalGB ใน xui
-                # เดิม: ถ้า email ไม่อยู่ใน limits และ tgb <= 0 → skip ทั้งที่ xui set quota ไว้แล้ว
-                tgb = _cl_totalgb.get(email, 0)
-                limit_gb = limits.get(email, tgb)
-                if limit_gb <= 0:
+                if email not in limits:
                     continue
+                limit_gb  = limits[email]
                 used_bytes = cs.get("down",0) + cs.get("up",0)
                 used_gb    = used_bytes / (1024**3)
-                if limit_gb >= 1.0 and used_gb >= limit_gb:
+                if used_gb >= limit_gb:
                     log(f"⚠ {email}: ใช้ {used_gb:.2f} GB / {limit_gb} GB — กำลัง disable...")
                     try:
                         settings_obj = json.loads(ib.get("settings","{}"))
@@ -3586,14 +2795,7 @@ echo "✅ logrotate ตั้งค่าแล้ว (rotate ทุกวัน
 # ══════════════════════════════════════════════════════════════
 _SSHWS_TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]' || echo "N/A")
 _SSHWS_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-# ตรวจ domain ว่า resolve ได้จริงบนเครื่องนี้ก่อนใช้
-_SSHWS_HOST="$_SSHWS_IP"
-if [[ -f /etc/chaiya/domain.conf ]]; then
-  _dom_tmp=$(cat /etc/chaiya/domain.conf 2>/dev/null | tr -d '[:space:]')
-  if [[ -n "$_dom_tmp" ]] && getent hosts "$_dom_tmp" &>/dev/null; then
-    _SSHWS_HOST="$_dom_tmp"
-  fi
-fi
+_SSHWS_HOST=$( [[ -f /etc/chaiya/domain.conf ]] && cat /etc/chaiya/domain.conf || echo "$_SSHWS_IP" )
 _SSHWS_PROTO="http"
 [[ -f "/etc/letsencrypt/live/${_SSHWS_HOST}/fullchain.pem" ]] && _SSHWS_PROTO="https"
 
@@ -3828,17 +3030,9 @@ except: print(999)
     # ลบ key file ที่ผิด เพื่อให้วนกลับไปถามใหม่
     rm -f "$LICENSE_FILE" 2>/dev/null
 
-    # ถ้า key หมดอายุ / ถูก disable → ไม่มีทางแก้โดยพิมพ์ key เดิม → exit
-    if [[ "$msg" == "key_expired" || "$msg" == "key_disabled" ]]; then
+    # ถ้า key หมดอายุ / ถูก disable / ip_limit → ไม่มีทางแก้โดยพิมพ์ key เดิม → exit
+    if [[ "$msg" == "key_expired" || "$msg" == "key_disabled" || "$msg" == "ip_limit" ]]; then
       exit 1
-    fi
-    # ip_limit → อาจเกิดจาก VPS เปลี่ยน IP (reboot/NAT) → ให้ retry ได้
-    if [[ "$msg" == "ip_limit" ]]; then
-      printf "\n  ${YE}ถ้า VPS นี้เพิ่ง reboot หรือเปลี่ยน IP ให้กด Enter เพื่อลองใหม่${RS}\n"
-      printf "  ${YE}หรือกด Ctrl+C เพื่อออก${RS}\n"
-      read -rp "" _dummy
-      rm -f "$LICENSE_FILE" 2>/dev/null
-      continue
     fi
 
     # invalid_key หรือ network error → ให้ใส่ key ใหม่ได้เลย (loop ต่อ)
@@ -3922,52 +3116,53 @@ xui_proto() {
 xui_login() {
   local p u pw bp
   p=$(xui_port); u=$(xui_user); pw=$(xui_pass)
-  # อ่าน basepath จาก db โดยตรงก่อนเสมอ — ป้องกัน conf เก่าหรือว่าง
-  local _db_bp
-  _db_bp=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')
-  if [[ -n "$_db_bp" && "$_db_bp" != "/" ]]; then
-    bp="$_db_bp"
-    echo "$bp" > /etc/chaiya/xui-basepath.conf
-  else
-    bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
-  fi
-  # normalize trailing slash: "/abc/" → "/abc", "/" → ""(root), "" → ""
-  if [[ "$bp" == "/" || -z "$bp" ]]; then
-    bp=""
-  else
-    bp=$(echo "$bp" | sed 's|/$||')
-  fi
-  local _cookie="/etc/chaiya/xui-cookie.jar"
+  bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
+  local _cookie="/tmp/xui-cookie-$$.jar"
   rm -f "$_cookie"
+  trap 'rm -f "$_cookie"' RETURN
 
-  local _r _url
-  # [FIX] ลอง root path ก่อนเสมอ เพราะ 3x-ui ใหม่ webBasePath="/" = ไม่มี prefix
-  # ลำดับ: http root → https root → http+bp → https+bp
-  local _tries=(
-    "http://127.0.0.1:${p}/login"
-    "https://127.0.0.1:${p}/login"
-    "http://127.0.0.1:${p}${bp}/login"
-    "https://127.0.0.1:${p}${bp}/login"
-  )
-  # dedup กรณี bp ว่าง (root ซ้ำ)
-  local _seen=()
-  for _url in "${_tries[@]}"; do
-    local _dup=0
-    for _s in "${_seen[@]}"; do [[ "$_s" == "$_url" ]] && _dup=1; done
-    [[ "$_dup" == "1" ]] && continue
-    _seen+=("$_url")
-
+  local _r
+  # ลอง https + basepath ก่อน (3x-ui เปิด SSL by default)
+  if [[ -n "$bp" && "$bp" != "/" ]]; then
     _r=$(curl -sk -c "$_cookie" \
-      -X POST "$_url" \
+      -X POST "https://127.0.0.1:${p}${bp}/login" \
       -d "username=${u}&password=${pw}" \
       -H "Content-Type: application/x-www-form-urlencoded" \
       --max-time 10 2>/dev/null)
     if echo "$_r" | grep -q '"success":true'; then
-      [[ -n "$XUI_COOKIE" ]] && cp "$_cookie" "$XUI_COOKIE" 2>/dev/null || true
       return 0
     fi
     rm -f "$_cookie"
-  done
+    # fallback http + basepath
+    _r=$(curl -s -c "$_cookie" \
+      -X POST "http://127.0.0.1:${p}${bp}/login" \
+      -d "username=${u}&password=${pw}" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --max-time 10 2>/dev/null)
+    if echo "$_r" | grep -q '"success":true'; then
+      return 0
+    fi
+    rm -f "$_cookie"
+  fi
+
+  # fallback https ไม่มี basepath
+  _r=$(curl -sk -c "$_cookie" \
+    -X POST "https://127.0.0.1:${p}/login" \
+    -d "username=${u}&password=${pw}" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --max-time 10 2>/dev/null)
+  if echo "$_r" | grep -q '"success":true'; then
+    return 0
+  fi
+  # fallback http ไม่มี basepath
+  _r=$(curl -s -c "$_cookie" \
+    -X POST "http://127.0.0.1:${p}/login" \
+    -d "username=${u}&password=${pw}" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --max-time 10 2>/dev/null)
+  if echo "$_r" | grep -q '"success":true'; then
+    return 0
+  fi
   return 1
 }
 
@@ -3975,50 +3170,39 @@ xui_api() {
   local method="$1" endpoint="$2" data="${3:-}"
   local p bp _r
   p=$(xui_port)
-  bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
-  [[ "$bp" == "/" || -z "$bp" ]] && bp="" || bp=$(echo "$bp" | sed 's|/$||')
-  local _cookie="/etc/chaiya/xui-cookie.jar"
+  bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
+  local _cookie="/tmp/xui-cookie-$$.jar"
+  trap 'rm -f "$_cookie"' RETURN
 
-  # login ถ้าไม่มี cookie
-  if [[ ! -f "$_cookie" ]]; then
-    xui_login 2>/dev/null || true
-  fi
+  xui_login 2>/dev/null || true
 
-  # ตรวจ proto
+  # ตรวจว่า 3x-ui ฟัง https หรือ http (ลอง https ก่อน fallback http)
   local _proto="http"
-  curl -sk --max-time 3 "https://127.0.0.1:${p}/" &>/dev/null && _proto="https"
-
-  _call_api() {
-    local _pr="$1"
-    if [[ -n "$data" ]]; then
-      curl -sk -b "$_cookie" -X "$method" \
-        "${_pr}://127.0.0.1:${p}${bp}${endpoint}" \
-        -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null
-    else
-      curl -sk -b "$_cookie" -X "$method" \
-        "${_pr}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null
-    fi
-  }
-
-  _r=$(_call_api "$_proto")
-
-  # [FIX] session หมด หรือ response ว่าง → login ใหม่แล้วลองซ้ำ
-  if echo "$_r" | grep -qi 'unauthorized\|please login' || [[ -z "$_r" ]]; then
-    rm -f "$_cookie"
-    xui_login 2>/dev/null || true
-    _r=$(_call_api "$_proto")
+  if curl -sk --max-time 3 "https://127.0.0.1:${p}/" &>/dev/null; then
+    _proto="https"
   fi
 
-  # ถ้ายังไม่มี success → ลอง proto อีกตัว (http↔https)
+  if [[ -n "$data" ]]; then
+    _r=$(curl -sk -b "$_cookie" \
+      -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" \
+      -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null)
+  else
+    _r=$(curl -sk -b "$_cookie" \
+      -X "$method" "${_proto}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null)
+  fi
+
+  # ถ้า response ว่างหรือไม่มี success ลอง protocol อีกตัว
   if ! echo "$_r" | grep -q '"success"'; then
     local _proto2="https"; [[ "$_proto" == "https" ]] && _proto2="http"
-    _r2=$(_call_api "$_proto2")
-    # ถ้า proto อีกตัวดีกว่าให้ใช้
-    if echo "$_r2" | grep -q '"success"'; then
-      _r="$_r2"
+    if [[ -n "$data" ]]; then
+      _r=$(curl -sk -b "$_cookie" \
+        -X "$method" "${_proto2}://127.0.0.1:${p}${bp}${endpoint}" \
+        -H "Content-Type: application/json" -d "$data" --max-time 15 2>/dev/null)
+    else
+      _r=$(curl -sk -b "$_cookie" \
+        -X "$method" "${_proto2}://127.0.0.1:${p}${bp}${endpoint}" --max-time 15 2>/dev/null)
     fi
   fi
-
   echo "$_r"
 }
 
@@ -4242,7 +3426,7 @@ var DATA_LIMIT_GB = """ + str(dg_num) + """;
 
 // ── Copy & QR ─────────────────────────────────────────────────
 function copyLink(){
-  if(navigator.clipboard){navigator.clipboard.writeText(vlessLink).then(showToast).catch(function(){var ta=document.createElement("textarea");ta.value=vlessLink;document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);showToast();});}
+  if(navigator.clipboard){navigator.clipboard.writeText(vlessLink).then(showToast);}
   else{var ta=document.createElement("textarea");ta.value=vlessLink;
     document.body.appendChild(ta);ta.select();document.execCommand("copy");
     document.body.removeChild(ta);showToast();}
@@ -4281,23 +3465,31 @@ async function fetchTraffic(){
 
     var usedGb  = d.used_gb  || 0;
     // ใช้ limit จาก API ก่อน ถ้า 0 ให้ fallback ใช้ค่าที่ฝังไว้ใน HTML
-    var limGb   = (d.limit_gb && d.limit_gb >= 1) ? d.limit_gb : (DATA_LIMIT_GB >= 1 ? DATA_LIMIT_GB : 0);
+    var limGb   = (d.limit_gb && d.limit_gb > 0) ? d.limit_gb : (DATA_LIMIT_GB || 0);
     // คำนวณ pct ใหม่ถ้า limit มาจาก fallback
-    var pct     = (limGb >= 1) ? Math.min(100, Math.round(usedGb / limGb * 100 * 10) / 10) : (d.pct || 0);
+    var pct     = (limGb > 0) ? Math.min(100, Math.round(usedGb / limGb * 100 * 10) / 10) : (d.pct || 0);
     var barEl   = document.getElementById('bar-fill');
     var txtEl   = document.getElementById('data-txt');
     var pctEl   = document.getElementById('bar-pct');
 
-    var downGb = d.down_gb || 0;
-    var upGb   = d.up_gb   || 0;
+    if(limGb > 0){
+      // มี limit — แสดง used/limit + bar
+      txtEl.textContent = usedGb.toFixed(2) + ' / ' + limGb + ' GB';
+      var bc = barColor(pct);
+      barEl.classList.remove('bar-rgb');
+      barEl.style.background = 'linear-gradient(90deg,'+bc+','+bc+'88)';
+      barEl.style.boxShadow  = '0 0 8px '+bc+'66';
+      barEl.style.width      = pct+'%';
+      pctEl.textContent      = pct+'%';
+      pctEl.style.color      = bc+'aa';
 
-    if(limGb >= 1){
-      // มี limit — แสดง used/limit + ↓↑ แยก + bar
+      // ── หมดโควต้า: แสดงข้อความเตือนและ disable ปุ่ม ──
       if(pct >= 100 || d.over_limit){
-        txtEl.textContent = '\u26a0\ufe0f Data หมดแล้ว! ' + usedGb.toFixed(2) + ' / ' + limGb + ' GB  \u2193'+downGb.toFixed(2)+' \u2191'+upGb.toFixed(2)+' GB';
+        txtEl.textContent = '\u26a0\ufe0f Data หมดแล้ว! ' + usedGb.toFixed(2) + ' / ' + limGb + ' GB';
         txtEl.style.color = '#ff4060';
         pctEl.textContent = '100% — หมด';
         pctEl.style.color = '#ff4060';
+        // Notify server ให้ kick (ถ้า API รองรับ)
         if(!fetchTraffic._kicked){
           fetchTraffic._kicked = true;
           fetch('/sshws-api/api/kick',{
@@ -4307,26 +3499,20 @@ async function fetchTraffic(){
           }).catch(function(){});
         }
       } else {
-        txtEl.textContent = usedGb.toFixed(2) + ' / ' + limGb + ' GB  \u2193'+downGb.toFixed(2)+' \u2191'+upGb.toFixed(2)+' GB';
         txtEl.style.color = '';
         fetchTraffic._kicked = false;
       }
-      var bc = barColor(pct);
-      barEl.classList.remove('bar-rgb');
-      barEl.style.background = 'linear-gradient(90deg,'+bc+','+bc+'88)';
-      barEl.style.boxShadow  = '0 0 8px '+bc+'66';
-      barEl.style.width      = pct+'%';
-      pctEl.textContent      = pct+'%';
-      pctEl.style.color      = bc+'aa';
     } else {
-      // ไม่จำกัด — แสดง ↓↑ เสมอ
-      txtEl.textContent = '\u2193 '+downGb.toFixed(2)+' GB  \u2191 '+upGb.toFixed(2)+' GB';
+      // ไม่จำกัด
+      var downGb = d.down_gb || 0;
+      var upGb   = d.up_gb   || 0;
+      txtEl.textContent = '↓ '+downGb.toFixed(2)+' ↑ '+upGb.toFixed(2)+' GB';
       txtEl.style.color = '';
       barEl.style.width      = '100%';
       barEl.style.background = '';
       barEl.style.boxShadow  = '';
       barEl.classList.add('bar-rgb');
-      pctEl.textContent      = '\u221e ไม่จำกัด';
+      pctEl.textContent      = '∞ ไม่จำกัด';
       pctEl.style.color      = '#00ff8088';
     }
   } catch(e){}
@@ -4371,37 +3557,14 @@ rgb_bar() {
 }
 
 # ── ฟังก์ชัน detect webBasePath จาก sqlite3 ──────────────────
-# อ่านจาก db โดยตรง ไม่เดา ไม่สร้างเอง
-# รับ arg $1 = จำนวน retry (default 3) เผื่อ db ยัง lock
 detect_xui_basepath() {
-  # อ่าน webBasePath จาก db โดยตรง — installer generate random ให้เอง
-  # ไม่แตะ ไม่แก้ แค่อ่าน
   local db_path="/etc/x-ui/x-ui.db"
-  local max_try="${1:-3}"
-  if ! command -v sqlite3 &>/dev/null; then echo ""; return; fi
-  if [[ ! -f "$db_path" ]];            then echo ""; return; fi
   local bp=""
-  for _dbtry in $(seq 1 "$max_try"); do
-    bp=$(sqlite3 "$db_path" \
-      "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;" \
-      2>/dev/null | tr -d '[:space:]')
-    [[ -n "$bp" ]] && echo "$bp" && return
-    sleep 1
-  done
-  echo ""
-}
-
-detect_xui_secret() { :; }  # ไม่ใช้แล้ว
-
-detect_xui_port() {
-  local db_path="/etc/x-ui/x-ui.db"
-  local _p=""
   if command -v sqlite3 &>/dev/null && [[ -f "$db_path" ]]; then
-    _p=$(sqlite3 "$db_path" "SELECT value FROM settings WHERE key='webPort' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')
+    bp=$(sqlite3 "$db_path" "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;" 2>/dev/null || echo "")
   fi
-  [[ -z "$_p" ]] && _p=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K[0-9]+' | head -1)
-  [[ -z "$_p" ]] && _p="2053"
-  echo "$_p"
+  [[ -z "$bp" ]] && bp="/"
+  echo "$bp"
 }
 
 menu_1() {
@@ -4411,17 +3574,6 @@ menu_1() {
   printf "${R1}┌──────────────────────────────────────────────────┐${RS}\n"
   printf "${R1}│${RS}  ☠️  ${R2}${BLD}ติดตั้ง 3x-ui + ตั้งค่าอัตโนมัติ${RS}           ${R1}│${RS}\n"
   printf "${R1}└──────────────────────────────────────────────────┘${RS}\n\n"
-
-  # [FIX] ตรวจและติดตั้ง sqlite3 ก่อนใช้งาน — จำเป็นสำหรับอ่าน/เขียน x-ui.db
-  if ! command -v sqlite3 &>/dev/null; then
-    printf "  ${YE}⏳ ติดตั้ง sqlite3...${RS}\n"
-    apt-get install -y -qq sqlite3 2>/dev/null || apt-get install -y sqlite3 2>/dev/null || true
-    if ! command -v sqlite3 &>/dev/null; then
-      printf "  ${RD}✗ ติดตั้ง sqlite3 ไม่สำเร็จ — ตรวจ apt แล้วลองใหม่${RS}\n"
-      read -rp "  Enter..."; return
-    fi
-    printf "  ${GR}✔ ติดตั้ง sqlite3 สำเร็จ${RS}\n\n"
-  fi
 
   # ── ถ้า x-ui รันอยู่แล้ว ให้ลบออกอัตโนมัติก่อน ─────────────
   if systemctl is-active --quiet x-ui 2>/dev/null; then
@@ -4461,222 +3613,58 @@ menu_1() {
   # Progress bar เดียว ครอบทุกขั้นตอน (install → port → API → inbound)
   # ════════════════════════════════════════════════════════════
 
-  # ════════════════════════════════════════════════════════════
-  # ROOT CAUSE จากการทดสอบ:
-  # 1. installer version ใหม่ start x-ui ที่ port random ไม่ใช่ 2053
-  # 2. basepath ที่ installer สร้างไม่ตรงกับที่เราสร้าง → login ผิด path
-  # 3. เราต้องอ่าน port + basepath จาก db หลัง install แล้วค่อย set ทับ
-  # แนวทางใหม่: install → stop → อ่าน db → set ทุกอย่างทับ → start
-  # ════════════════════════════════════════════════════════════
-
-  local _xui_db="/etc/x-ui/x-ui.db"
-  local _panel_port="2053"  # target port ที่เราต้องการ
-
   # ── 10% ดาวน์โหลด install script ──
   rgb_bar 10 "ดาวน์โหลด install script..."
   local _xui_sh; _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
-  if ! curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/v2.8.11/install.sh" \
-       -o "$_xui_sh" 2>/dev/null || [[ ! -s "$_xui_sh" ]]; then
-    printf "  ${RD}✗ ดาวน์โหลด install script ล้มเหลว${RS}\n"
-    read -rp "  Enter..."; return
-  fi
+  curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
+       -o "$_xui_sh" 2>/dev/null
 
-  # ── 15% รัน installer ──────────────────────────────────────────
-  # [FIX v2] ไม่ใช้ pipe คงที่ "y\n2053\n2\n\n80\n" อีกต่อไป
-  # เพราะ installer เวอร์ชันใหม่เปลี่ยนลำดับ/จำนวนคำถามได้
-  # วิธีใหม่: ใช้ expect ถ้ามี หรือ timeout-based stdin feeding
-  rgb_bar 15 "กำลังติดตั้ง 3x-ui (อาจใช้ 1-3 นาที)..."
-  if command -v expect &>/dev/null; then
-    expect -c "
-      set timeout 180
-      spawn bash $_xui_sh v2.8.11
-      expect {
-        -re {(?i)(confirm|proceed|install|continue).*\[y/n\]} { send \"y\r\"; exp_continue }
-        -re {(?i)port.*panel}                                  { send \"2053\r\"; exp_continue }
-        -re {(?i)(domain|ip|option 2)}                         { send \"2\r\"; exp_continue }
-        -re {(?i)(basepath|web.*path|enter.*path)}             { send \"\r\"; exp_continue }
-        -re {(?i)(http.*port|port.*80|challenge)}              { send \"80\r\"; exp_continue }
-        eof
-      }
-    " >> /var/log/chaiya-xui-install.log 2>&1 || true
-  else
-    # fallback: ป้อน input ครอบคลุมมากขึ้น (y + port + ตัวเลือก IP + enter + port 80)
-    # ส่ง y เพิ่มพิเศษ 3 ตัว และ enter เพิ่มเผื่อคำถามเพิ่มขึ้น
-    printf "y\ny\n2053\n2\n\n80\ny\n\n\n" | bash "$_xui_sh" v2.8.11 >> /var/log/chaiya-xui-install.log 2>&1 || true
-  fi
+  # ── 15% ติดตั้ง 3x-ui ──
+  rgb_bar 15 "กำลังติดตั้ง 3x-ui..."
+  printf "y\n2053\n2\n\n80\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1
   rm -f "$_xui_sh"
 
-  # ── 25% รอให้ installer เสร็จ + x-ui ขึ้นจริง ──────────────────
-  # installer start x-ui เองตอนสุดท้าย บน port ที่ installer กำหนด
-  # รอ db มีอยู่ + x-ui process ขึ้น = install เสร็จ 100%
-  rgb_bar 25 "รอ installer เสร็จสมบูรณ์..."
-  local _install_ok=0
-  printf "  ${YE}⏳ รอ x-ui ขึ้น (สูงสุด 120s)...${RS}\n"
-  for _i in $(seq 1 60); do
-    # เช็ค db มีก่อน แล้วค่อยเช็ค process
-    if [[ -f "$_xui_db" ]] && pgrep -x x-ui &>/dev/null; then
-      # รออีก 3s ให้ x-ui write db เสร็จ
-      sleep 3
-      _install_ok=1; break
-    fi
-    sleep 2
-  done
+  # ── 50% reset credential ──
+  rgb_bar 50 "ตั้งค่า credential..."
+  /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" 2>/dev/null || \
+    x-ui setting -username "$_u" -password "$_pw" 2>/dev/null || true
+  systemctl restart x-ui 2>/dev/null || true
 
-  if [[ "$_install_ok" == "0" ]]; then
-    printf "  ${RD}✗ install ล้มเหลว — ดู: tail -50 /var/log/chaiya-xui-install.log${RS}\n"
-    read -rp "  Enter..."; return
-  fi
-  printf "  ${GR}✔ installer เสร็จสมบูรณ์${RS}\n"
+  # ── detect port จาก x-ui setting ก่อน (ไม่รอ db) ──
+  local _xp
+  _xp=$(/usr/local/x-ui/x-ui setting 2>/dev/null | grep -oP 'port.*?:\s*\K\d+' | head -1)
+  [[ -n "$_xp" ]] && echo "$_xp" > /etc/chaiya/xui-port.conf
+  local _panel_port; _panel_port=$(xui_port)
 
-  # ── 35% stop x-ui อย่างปลอดภัย ────────────────────────────────
-  # หยุดหลัง install สมบูรณ์ → db พร้อม 100% → ปลอดภัยที่จะแก้
-  rgb_bar 35 "หยุด x-ui เพื่อ overwrite config..."
-  systemctl stop x-ui 2>/dev/null || true
-  pkill -9 x-ui 2>/dev/null || true  # kill ให้แน่ใจ
-  for _si in $(seq 1 15); do
-    pgrep -x x-ui &>/dev/null || break
-    sleep 1
-  done
-  sleep 2  # รอ sqlite3 flush ให้เสร็จ
-
-  if [[ ! -f "$_xui_db" ]]; then
-    printf "  ${RD}✗ ไม่พบ x-ui.db — ดู: tail -50 /var/log/chaiya-xui-install.log${RS}\n"
-    read -rp "  Enter..."; return
-  fi
-
-  # ── 40% อ่าน webBasePath จาก db ──────────────────────────────
-  rgb_bar 40 "อ่าน webBasePath จาก db..."
-  local _basepath _xui_real_port
-  _basepath=$(detect_xui_basepath 5)
-  _xui_real_port=$(detect_xui_port)
-
-  # installer generate random basepath เอง — แค่อ่านมาใช้ ไม่แก้ไข
-  if [[ -n "$_basepath" ]]; then
-    printf "  ${GR}✔ webBasePath: ${WH}%s${RS}\n" "$_basepath"
-    printf "  ${GR}✔ Panel URL: ${WH}http://%s:%s%s/${RS}\n" "$MY_IP" "$_xui_real_port" "$_basepath"
-  else
-    _basepath="/"
-    printf "  ${YE}⚠ ไม่พบ webBasePath ใน db — ใช้ /${RS}\n"
-  fi
-  echo "$_basepath" > /etc/chaiya/xui-basepath.conf
-  echo "$_xui_real_port" > /etc/chaiya/xui-port.conf
-
-  # ── 50% overwrite credential + port ลง db โดยตรง ────────────────
-  # ทำขณะ x-ui หยุด = ปลอดภัย 100% ไม่มี race condition
-  rgb_bar 50 "Set credential + port ลง db..."
-
-  # hash password ด้วย bcrypt
-  local _pw_hash=""
-  _pw_hash=$(python3 -c "
-import bcrypt, sys
-pw = sys.argv[1].encode()
-print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
-" "$_pw" 2>/dev/null || true)
-
-  if [[ -n "$_pw_hash" ]]; then
-    sqlite3 "$_xui_db" \
-      "UPDATE users SET username='${_u}', password='${_pw_hash}' WHERE id=1;" 2>/dev/null || true
-    printf "  ${GR}✔ Set username/password (bcrypt) ลง db สำเร็จ${RS}\n"
-  fi
-
-  # [FIX] ใช้ x-ui CLI ตั้ง credential เสมอ (ทำคู่กับ sqlite3)
-  # เพราะ x-ui version ใหม่อาจใช้ bcrypt format ต่างกัน หรือ overwrite db ตอน start
-  /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" \
-    >> /var/log/chaiya-xui-install.log 2>&1 || true
-  printf "  ${GR}✔ Set credential ผ่าน x-ui CLI สำเร็จ${RS}\n"
-
-  # [FIX] 3x-ui version ใหม่ installer set port ให้แล้ว — ไม่ต้อง overwrite
-  # แค่อัพเดต xui-port.conf ให้ตรงกับที่ installer ตั้ง
-  printf "  ${GR}✔ Port: ${WH}%s${RS} (จาก installer)\n" "$_xui_real_port"
-
-  # verify
-  local _db_user
-  _db_user=$(sqlite3 "$_xui_db" "SELECT username FROM users WHERE id=1;" 2>/dev/null)
-  [[ -z "$_db_user" ]] && _db_user="(ใช้ CLI)" || true
-  printf "  ${CY}→ db verify: port=%s user=%s${RS}\n" "$_xui_real_port" "$_db_user"
-
-  # ── 60% start x-ui พร้อม config ใหม่ ───────────────────────────
-  rgb_bar 60 "Start x-ui พร้อม config ใหม่..."
-  systemctl start x-ui 2>/dev/null || true
-
-  # [FIX] รอ x-ui init db เสร็จก่อน (x-ui version ใหม่ทำ migration ตอน start แรก)
-  # แล้ว re-set credential ทันทีด้วย CLI เพื่อป้องกัน overwrite
-  sleep 8
-  /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" \
-    >> /var/log/chaiya-xui-install.log 2>&1 || true
-  sqlite3 "$_xui_db" \
-    "INSERT OR REPLACE INTO settings(key,value) VALUES('webPort','2053');" 2>/dev/null || true
-  printf "  ${GR}✔ Re-confirm credential หลัง x-ui init เสร็จ${RS}\n"
-
-  # รอ x-ui ขึ้นที่ port 2053 (ที่เรา set ลง db แล้ว)
-  local _bp_trim; _bp_trim=$(echo "$_basepath" | sed 's|/$||')
+  # ── 55% รอ 3x-ui พร้อม (ลอง http ก่อน แล้วค่อย https) ──
+  # สาเหตุที่ลอง http ก่อน: 3x-ui ติดตั้งใหม่ยังไม่มี SSL certificate
+  rgb_bar 55 "รอ port ${_panel_port}..."
   local _ok=0
-  printf "  ${YE}⏳ รอ x-ui ขึ้นที่ port 2053 (สูงสุด 60s)...${RS}\n"
-  for _i in $(seq 1 30); do
-    if curl -s  --max-time 3 "http://127.0.0.1:2053${_bp_trim}/"  &>/dev/null ||
-       curl -sk --max-time 3 "https://127.0.0.1:2053${_bp_trim}/" &>/dev/null ||
-       curl -s  --max-time 3 "http://127.0.0.1:2053/"             &>/dev/null ||
-       curl -sk --max-time 3 "https://127.0.0.1:2053/"            &>/dev/null; then
+  for _i in $(seq 1 20); do
+    if curl -s --max-time 2 "http://127.0.0.1:${_panel_port}/" &>/dev/null; then
+      _ok=1; break
+    fi
+    if curl -sk --max-time 2 "https://127.0.0.1:${_panel_port}/" &>/dev/null; then
       _ok=1; break
     fi
     sleep 2
   done
 
-  if [[ "$_ok" == "0" ]]; then
-    printf "  ${RD}✗ x-ui ไม่ขึ้นที่ port 2053 — ตรวจ: systemctl status x-ui${RS}\n"
-    # debug: แสดง port ที่ x-ui ฟังจริง
-    local _actual_port
-    _actual_port=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K[0-9]+' | head -1)
-    [[ -n "$_actual_port" ]] && printf "  ${YE}→ x-ui กำลังฟัง port: %s${RS}\n" "$_actual_port"
-    read -rp "  Enter..."; return
-  fi
-  printf "  ${GR}✔ x-ui ขึ้นสำเร็จที่ port 2053${RS}\n"
+  # ── detect basepath หลัง 3x-ui พร้อม (db เขียนเสร็จแน่นอนแล้ว) ──
+  # ต้องรอให้ service พร้อมก่อน ไม่งั้น sqlite3 จะอ่านได้แค่ "/" หรือ ""
+  local _basepath; _basepath=$(detect_xui_basepath)
+  local _bp_try=0
+  while [[ ( -z "$_basepath" || "$_basepath" == "/" ) && $_bp_try -lt 5 ]]; do
+    sleep 3
+    _basepath=$(detect_xui_basepath)
+    (( _bp_try++ ))
+  done
+  echo "$_basepath" > /etc/chaiya/xui-basepath.conf
 
-  # ── 80% login API ────────────────────────────────────────────────
+  # ── 80% login API ──
   rgb_bar 80 "Login API..."
   local _login_ok=0
-
-  # debug: แสดงข้อมูลที่จะใช้ login
-  printf "  ${CY}→ Login: user=%s port=%s basepath=%s${RS}\n" "$_u" "2053" "$_basepath"
-
-  for _ltry in 1 2 3 4 5; do
-    if xui_login 2>/dev/null; then
-      _login_ok=1
-      printf "  ${GR}✔ Login API สำเร็จ (ครั้งที่ %s)${RS}\n" "$_ltry"
-      break
-    fi
-    printf "  ${YE}⚠ Login ครั้งที่ %s ล้มเหลว${RS}\n" "$_ltry"
-
-    # [FIX] ทุกครั้งที่ login ล้มเหลว: stop → reset credential (CLI+db) → start ใหม่
-    systemctl stop x-ui 2>/dev/null || true
-    sleep 3
-
-    # อ่าน basepath จาก db อีกครั้ง เผื่อ x-ui reset ค่า
-    local _bp_recheck
-    _bp_recheck=$(detect_xui_basepath 3)
-    if [[ -n "$_bp_recheck" && "$_bp_recheck" != "$_basepath" ]]; then
-      printf "  ${YE}⚠ basepath เปลี่ยน: %s → %s${RS}\n" "$_basepath" "$_bp_recheck"
-      _basepath="$_bp_recheck"
-      echo "$_basepath" > /etc/chaiya/xui-basepath.conf
-      _bp_trim=$(echo "$_basepath" | sed 's|/$||')
-    fi
-
-    # [FIX] ใช้ x-ui CLI เป็นหลัก (ถูกต้องที่สุด — ไม่ต้องสนใจ bcrypt format)
-    /usr/local/x-ui/x-ui setting -username "$_u" -password "$_pw" \
-      >> /var/log/chaiya-xui-install.log 2>&1 || true
-    # เขียน sqlite3 ด้วยเพื่อ double confirm port + bcrypt hash
-    sqlite3 "$_xui_db" \
-      "INSERT OR REPLACE INTO settings(key,value) VALUES('webPort','2053');" 2>/dev/null || true
-    if [[ -n "$_pw_hash" ]]; then
-      sqlite3 "$_xui_db" \
-        "UPDATE users SET username='${_u}', password='${_pw_hash}' WHERE id=1;" 2>/dev/null || true
-    fi
-    printf "  ${YE}⚠ Re-set credential (CLI + db) ครั้งที่ %s${RS}\n" "$_ltry"
-
-    systemctl start x-ui 2>/dev/null || true
-    # [FIX] รอให้ x-ui init db เสร็จก่อน login — เพิ่มจาก 5s เป็น 10s
-    sleep 10
-  done
+  xui_login 2>/dev/null && _login_ok=1
 
   # ── 85–95% สร้าง inbounds ──
   local _inbounds=(
@@ -4685,7 +3673,7 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt(rounds=10)).decode())
   )
   local _ib_n=0 _ib_results=()
   for _item in "${_inbounds[@]}"; do
-    (( _ib_n++ )) || true
+    (( _ib_n++ ))
     local _ibport; _ibport=$(echo "$_item" | cut -d: -f1)
     local _ibremark; _ibremark=$(echo "$_item" | cut -d: -f2)
     local _ibsni; _ibsni=$(echo "$_item" | cut -d: -f3-)
@@ -4759,26 +3747,19 @@ print(json.dumps(payload))
   printf "\n"
 
   # ════════════════════════════════════════════════════════════
-  # สรุปผล
+  # สรุปผล — กระชับ
   # ════════════════════════════════════════════════════════════
+  local _bp_clean; _bp_clean=$(echo "$_basepath" | sed 's|/$||')
   local _proto; _proto=$(xui_proto)
-  local _host_display="$MY_IP"
-  if [[ -f "$DOMAIN_FILE" ]]; then
-    local _d_chk; _d_chk=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '[:space:]')
-    [[ -n "$_d_chk" ]] && getent hosts "$_d_chk" &>/dev/null && _host_display="$_d_chk"
+  # ใช้โดเมนถ้ามี ไม่งั้นใช้ IP
+  local _host_display
+  if [[ -f "$DOMAIN_FILE" ]] && [[ -n "$(cat "$DOMAIN_FILE" 2>/dev/null)" ]]; then
+    _host_display=$(cat "$DOMAIN_FILE")
+  else
+    _host_display="$MY_IP"
   fi
-
-  # อ่าน basepath และ port จริงจาก db (installer set ให้แล้ว)
-  local _final_bp; _final_bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | tr -d '[:space:]')
-  local _final_port; _final_port=$(cat /etc/chaiya/xui-port.conf 2>/dev/null | tr -d '[:space:]')
-  [[ -z "$_final_bp"   ]] && _final_bp="/"
-  [[ -z "$_final_port" ]] && _final_port="2053"
-
-  # normalize: "/" → ไม่ต่อ path, "/abc..." → ต่อตรงๆ
-  local _bp_url; [[ "$_final_bp" == "/" ]] && _bp_url="" || _bp_url="$_final_bp"
-
-  local _panel_url="${_proto}://${_host_display}:${_final_port}${_bp_url}/"
-  local _api_url="${_proto}://${_host_display}:${_final_port}${_bp_url}/panel/api"
+  local _panel_url="${_proto}://${_host_display}:${_panel_port}${_bp_clean}/"
+  local _api_url="${_proto}://${_host_display}:${_panel_port}${_bp_clean}/panel/api"
 
   printf "${R1}┌──────────────────────────────────────────────────┐${RS}\n"
   printf "${R1}│${RS}  🌐 Panel  : ${WH}%s${RS}\n" "$_panel_url"
@@ -4853,63 +3834,45 @@ menu_2() {
   echo "$_wsport" > /etc/chaiya/wsport.conf
   ufw allow "$_wsport"/tcp 2>/dev/null || true
   ufw allow 443/tcp        2>/dev/null || true
-  apt-get install -y certbot dnsutils -qq 2>/dev/null || true
+  apt-get install -y certbot -qq 2>/dev/null || true
 
-  # ── [0/4] ตรวจ DNS ก่อน — ถ้าไม่ชี้มา IP นี้จะล้มแน่ ──────
-  printf "\n${YE}⏳ [0/4] ตรวจสอบ DNS...${RS}\n"
-  local _my_ip; _my_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-  local _dns_ip; _dns_ip=$(dig +short "$domain" 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-  printf "  IP เซิร์ฟเวอร์ : ${WH}%s${RS}\n" "$_my_ip"
-  printf "  DNS ของ %s : ${WH}%s${RS}\n" "$domain" "${_dns_ip:-ไม่พบ}"
-  if [[ -z "$_dns_ip" ]]; then
-    printf "${RD}❌ DNS ไม่พบ A record — ตั้ง A record ชี้มาที่ %s ก่อน แล้วรอ 5-30 นาที${RS}\n" "$_my_ip"
-    read -rp "$(printf "${YE}กด Enter ย้อนกลับ...${RS}")"; return
-  fi
-  if [[ "$_dns_ip" != "$_my_ip" ]]; then
-    printf "${RD}❌ DNS ชี้ไปที่ %s ≠ IP เซิร์ฟเวอร์ %s${RS}\n" "$_dns_ip" "$_my_ip"
-    read -rp "$(printf "${OR}ลองต่อไปถึงแม้ DNS ไม่ตรง? [y/N]: ${RS}")" _force
-    [[ "${_force,,}" != "y" ]] && return
-  else
-    printf "  ${GR}✅ DNS ถูกต้อง${RS}\n"
-  fi
-
-  # ── [1/4] เตรียม nginx รับ ACME challenge ───────────────────
-  printf "\n${YE}⏳ [1/4] เตรียม webroot สำหรับ certbot...${RS}\n"
-  mkdir -p /var/www/html/.well-known/acme-challenge
+  # ── [1/4] ตรวจและหยุด ทุก service ที่ใช้ port 80 ──────────
+  printf "\n${YE}⏳ [1/4] หยุด services บน port 80 ชั่วคราว...${RS}\n"
+  # เก็บ service ที่กำลัง active ไว้ restart ทีหลัง
   local _stopped_svcs=()
-  for _svc in chaiya-sshws apache2 lighttpd; do
+  local _all_port80_svcs=(nginx chaiya-sshws apache2 lighttpd)
+  for _svc in "${_all_port80_svcs[@]}"; do
     if systemctl is-active --quiet "$_svc" 2>/dev/null; then
       systemctl stop "$_svc" 2>/dev/null || true
       _stopped_svcs+=("$_svc")
-      printf "  ${OR}⏹ หยุด %s ชั่วคราว${RS}\n" "$_svc"
+      printf "  ${OR}⏹ %s${RS}\n" "$_svc"
     fi
   done
-  fuser -k 80/tcp 2>/dev/null || true; sleep 1
-  cat > /etc/nginx/conf.d/acme-temp.conf << 'ACMEEOF'
-server {
-    listen 80;
-    server_name _;
-    location /.well-known/acme-challenge/ { root /var/www/html; }
-    location / { return 444; }
-}
-ACMEEOF
-  nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+  # kill process อื่นที่ยังค้างบน port 80
+  fuser -k 80/tcp 2>/dev/null || true
   sleep 1
-  printf "  ${GR}✅ nginx พร้อมรับ ACME challenge บน port 80${RS}\n"
+  # ตรวจว่า port 80 ว่างจริง
+  local _w=0
+  while ss -tlnp 2>/dev/null | grep -q ':80 ' && (( _w < 10 )); do
+    sleep 1; (( _w++ )) || true
+  done
+  if ss -tlnp 2>/dev/null | grep -q ':80 '; then
+    printf "${RD}❌ port 80 ยังถูกใช้อยู่ ไม่สามารถดำเนินการได้${RS}\n"
+    # restart services กลับก่อน return
+    for _s in "${_stopped_svcs[@]}"; do
+      systemctl start "$_s" 2>/dev/null || true
+      printf "  ${GR}▶ %s${RS}\n" "$_s"
+    done
+    read -rp "Enter ย้อนกลับ..."; return
+  fi
+  printf "  ${GR}✅ port 80 ว่างแล้ว${RS}\n"
 
-  # ── [2/4] ขอ SSL certificate (webroot) ──────────────────────
-  printf "\n${YE}⏳ [2/4] ขอ SSL certificate (certbot webroot)...${RS}\n"
-  certbot certonly --webroot \
-    -w /var/www/html \
+  # ── [2/4] ขอ SSL certificate ──────────────────────────────
+  printf "\n${YE}⏳ [2/4] ขอ SSL certificate (certbot standalone)...${RS}\n"
+  certbot certonly --standalone \
     -d "$domain" \
     --non-interactive --agree-tos \
     -m "admin@${domain}" 2>&1
-  rm -f /etc/nginx/conf.d/acme-temp.conf 2>/dev/null || true
-  nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
-  for _s in "${_stopped_svcs[@]}"; do
-    systemctl start "$_s" 2>/dev/null || true
-    printf "  ${GR}▶ เริ่ม %s กลับแล้ว${RS}\n" "$_s"
-  done
 
   local _cert_ok=false
   [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]] && _cert_ok=true
@@ -5186,9 +4149,6 @@ menu_3() {
   read -rp "$(printf "  ${YE}📦 Data limit GB (0=ไม่จำกัด): ${RS}")" DATA_GB
   [[ -z "$DATA_GB" || ! "$DATA_GB" =~ ^[0-9]+$ ]] && DATA_GB=0
 
-  read -rp "$(printf "  ${YE}🔒 IP limit (default 2): ${RS}")" IP_LIMIT
-  [[ -z "$IP_LIMIT" || ! "$IP_LIMIT" =~ ^[0-9]+$ ]] && IP_LIMIT=2
-
   printf "\n  ${WH}🔌 เลือก Inbound (VMess WS):${RS}\n"
   printf "  ${R2}1.${RS} Port ${WH}8080${RS} — AIS  | SNI: ${YE}cj-ebb.speedtest.net${RS}\n"
   printf "  ${R3}2.${RS} Port ${WH}8880${RS} — TRUE | SNI: ${YE}true-internet.zoom.xyz.services${RS}\n"
@@ -5209,26 +4169,16 @@ menu_3() {
   esac
 
   EXP=$(date -d "+${DAYS} days" +"%Y-%m-%d")
+  local TOTAL_BYTES=$(( DATA_GB * 1073741824 ))
   local EXP_MS=$(( $(date -d "$EXP" +%s) * 1000 ))
   local SEC="none"
+  [[ -f "$DOMAIN_FILE" ]] && SEC="tls"
 
   rgb_bar 20 "ตรวจสอบ 3x-ui API..."; printf "\n\n"
-
-  # [FIX] force fresh login ทุกครั้งก่อนเรียก API — ป้องกัน stale cookie
-  rm -f /etc/chaiya/xui-cookie.jar
-  if ! xui_login 2>/dev/null; then
-    printf "${RD}❌ login x-ui ไม่สำเร็จ — ตรวจสอบ port/user/pass ด้วย: cat /etc/chaiya/xui-*.conf${RS}\n"
-    read -rp "  Enter ย้อนกลับ..."; return
-  fi
 
   # ── ตรวจว่า inbound port มีอยู่แล้วหรือยัง ────────────────
   local _inbound_list
   _inbound_list=$(xui_api GET "/panel/api/inbounds/list" 2>/dev/null)
-  # ถ้า inbound list ว่าง/ไม่ success ให้แจ้งเตือนแต่ไม่หยุด (อาจไม่มี inbound เลยก็ได้)
-  if ! echo "$_inbound_list" | grep -q '"success":true'; then
-    printf "  ${YE}⚠ ดึง inbound list ไม่ได้ — จะสร้าง inbound ใหม่ทั้งหมด${RS}\n"
-    _inbound_list='{"success":true,"obj":[]}'
-  fi
 
   local _created_count=0
   local _step=0
@@ -5236,7 +4186,7 @@ menu_3() {
   declare -a _RESULTS=()
 
   for _ps in "${_PORT_SNI_LIST[@]}"; do
-    (( _step++ )) || true
+    (( _step++ ))
     local _vport; _vport=$(echo "$_ps" | cut -d: -f1)
     local _sni;   _sni=$(echo "$_ps"   | cut -d: -f2-)
     local _pct=$(( 25 + _step * 30 / _total ))
@@ -5260,53 +4210,39 @@ print('')
     local API_RESULT=""
     if [[ -n "$_inbound_id" ]]; then
       # เพิ่ม client เข้า inbound เดิม — settings ต้องเป็น JSON string
-      # totalGB รับค่าเป็น GB ตรงๆ ตาม 3x-ui model.go (Total traffic limit in GB)
       local _client_payload
       _client_payload=$(python3 -c "
 import json, sys
 client = {
   'id': sys.argv[1],
-  'flow': '',
   'email': sys.argv[2],
-  'limitIp': int(sys.argv[3]),
-  'totalGB': int(sys.argv[4]) * (1024**3),
-  'expiryTime': int(sys.argv[5]),
+  'limitIp': 2,
+  'totalGB': int(sys.argv[3]),
+  'expiryTime': int(sys.argv[4]),
   'enable': True,
-  'tgId': '',
-  'subId': '',
   'comment': '',
   'reset': 0
 }
 payload = {
-  'id': int(sys.argv[6]),
+  'id': int(sys.argv[5]),
   'settings': json.dumps({'clients': [client]})
 }
 print(json.dumps(payload))
-" "$UUID" "$UNAME" "$IP_LIMIT" "$DATA_GB" "$EXP_MS" "$_inbound_id")
+" "$UUID" "$UNAME" "$TOTAL_BYTES" "$EXP_MS" "$_inbound_id")
       API_RESULT=$(xui_api POST "/panel/api/inbounds/addClient" "$_client_payload" 2>/dev/null)
-      # [FIX] ถ้า fail → fresh login แล้ว retry
-      if ! echo "$API_RESULT" | grep -q '"success":true'; then
-        rm -f /etc/chaiya/xui-cookie.jar
-        xui_login 2>/dev/null || true
-        API_RESULT=$(xui_api POST "/panel/api/inbounds/addClient" "$_client_payload" 2>/dev/null)
-      fi
     else
       # ไม่มี inbound — สร้างใหม่พร้อม client
-      # totalGB รับค่าเป็น GB ตรงๆ ตาม 3x-ui model.go (Total traffic limit in GB)
       local _vless_payload
       _vless_payload=$(python3 -c "
 import json, sys
 settings = json.dumps({
   'clients': [{
     'id': sys.argv[1],
-    'flow': '',
     'email': sys.argv[2],
-    'limitIp': int(sys.argv[3]),
-    'totalGB': int(sys.argv[4]) * (1024**3),
-    'expiryTime': int(sys.argv[5]),
+    'limitIp': 2,
+    'totalGB': int(sys.argv[3]),
+    'expiryTime': int(sys.argv[4]),
     'enable': True,
-    'tgId': '',
-    'subId': '',
     'comment': '',
     'reset': 0
   }],
@@ -5314,36 +4250,29 @@ settings = json.dumps({
 })
 stream = json.dumps({
   'network': 'ws',
-  'security': sys.argv[6],
-  'wsSettings': {'path': '/vless', 'headers': {'Host': sys.argv[7]}}
+  'security': sys.argv[5],
+  'wsSettings': {'path': '/vless', 'headers': {'Host': sys.argv[6]}}
 })
 sniff = json.dumps({'enabled': True, 'destOverride': ['http','tls']})
 payload = {
   'remark': 'CHAIYA-' + sys.argv[2],
   'enable': True,
   'listen': '',
-  'port': int(sys.argv[8]),
+  'port': int(sys.argv[7]),
   'protocol': 'vless',
   'settings': settings,
   'streamSettings': stream,
   'sniffing': sniff
 }
 print(json.dumps(payload))
-" "$UUID" "$UNAME" "$IP_LIMIT" "$DATA_GB" "$EXP_MS" "$SEC" "$_sni" "$_vport")
+" "$UUID" "$UNAME" "$TOTAL_BYTES" "$EXP_MS" "$SEC" "$_sni" "$_vport")
       API_RESULT=$(xui_api POST "/panel/api/inbounds/add" "$_vless_payload" 2>/dev/null)
-      # [FIX] ถ้า fail → fresh login แล้ว retry
-      if ! echo "$API_RESULT" | grep -q '"success":true'; then
-        rm -f /etc/chaiya/xui-cookie.jar
-        xui_login 2>/dev/null || true
-        API_RESULT=$(xui_api POST "/panel/api/inbounds/add" "$_vless_payload" 2>/dev/null)
-      fi
       ufw allow "${_vport}"/tcp 2>/dev/null || true
     fi
 
     # สร้าง link
     local VLESS_LINK
-    # [FIX] security ต้องใช้ค่าจาก SEC ("none" หรือ "tls") ไม่ใช่ว่าง
-    VLESS_LINK="vless://${UUID}@${AUTO_HOST}:${_vport}?path=%2Fvless&security=${SEC}&encryption=none&host=${_sni}&type=ws#CHAIYA-${UNAME}-${_vport}"
+    VLESS_LINK="vless://${UUID}@${AUTO_HOST}:${_vport}?path=%2Fvless&security=&encryption=none&host=${_sni}&type=ws#CHAIYA-${UNAME}-${_vport}"
 
     # บันทึก DB
     echo "$UNAME $DAYS $EXP $DATA_GB $UUID $_vport $_sni $AUTO_HOST" >> "$DB"
@@ -5351,19 +4280,24 @@ print(json.dumps(payload))
     # ── บันทึก data limit ลง datalimit.conf สำหรับ API fallback ──
     if [[ "$DATA_GB" -gt 0 ]]; then
       local _dl_conf="/etc/chaiya/datalimit.conf"
+      # ลบรายการเก่าของ user นี้ก่อน (ถ้ามี) แล้วเพิ่มใหม่
       sed -i "/^${UNAME} /d" "$_dl_conf" 2>/dev/null || true
       echo "${UNAME} ${DATA_GB}" >> "$_dl_conf"
     fi
 
-    # ── บันทึก IP limit ลง iplimit.conf ──
-    local _ipl_conf="/etc/chaiya/iplimit.conf"
-    sed -i "/^${UNAME}=/d" "$_ipl_conf" 2>/dev/null || true
-    echo "${UNAME}=${IP_LIMIT}:720" >> "$_ipl_conf"
-
     # เก็บผลสำหรับแสดง
     _RESULTS+=("$_vport|$_sni|$UUID|$VLESS_LINK|$API_RESULT")
-    (( _created_count++ )) || true
+    (( _created_count++ ))
   done
+
+  # ── ตั้งค่า IP limit enforcement (ban 12 ชั่วโมง) ────────────
+  rgb_bar 85 "ตั้งค่า IP limit 2 IP / แบน 12 ชั่วโมง..."; printf "\n\n"
+
+  # บันทึก config IP limit สำหรับ chaiya-iplimit daemon
+  local _ipl_conf="/etc/chaiya/iplimit.conf"
+  grep -q "^${UNAME}=" "$_ipl_conf" 2>/dev/null || \
+    echo "${UNAME}=2:720" >> "$_ipl_conf" 2>/dev/null || true
+  # format: user=max_ip:ban_minutes (720 min = 12 ชั่วโมง)
 
   # ── สร้างไฟล์ HTML (port แรกในรายการ) ───────────────────────
   if [[ ${#_RESULTS[@]} -gt 0 ]]; then
@@ -5410,20 +4344,12 @@ print(json.dumps(payload))
   local _xp; _xp=$(xui_port)
   local _bp; _bp=$(cat /etc/chaiya/xui-basepath.conf 2>/dev/null | sed 's|/$||')
   local _proto; _proto=$(xui_proto)
-  local _panel_host; _panel_host="$MY_IP"
-  if [[ -f "$DOMAIN_FILE" ]]; then
-    local _ph; _ph=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '[:space:]')
-    getent hosts "$_ph" &>/dev/null && _panel_host="$_ph" || true
-  fi
+  local _panel_host; _panel_host=$(cat "$DOMAIN_FILE" 2>/dev/null || echo "$MY_IP")
 
   printf "${R4}│${RS}  ${YE}🔗 X-UI Panel:${RS}\n"
   printf "${R4}│${RS}  ${WH}%s://%s:%s%s/${RS}\n" "$_proto" "$_panel_host" "$_xp" "$_bp"
   printf "${R4}├──────────────────────────────────────────────────┤${RS}\n"
-  local _cfg_host; _cfg_host="$MY_IP"
-  if [[ -f "$DOMAIN_FILE" ]]; then
-    local _ch; _ch=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '[:space:]')
-    getent hosts "$_ch" &>/dev/null && _cfg_host="$_ch" || true
-  fi
+  local _cfg_host; _cfg_host=$(cat "$DOMAIN_FILE" 2>/dev/null || echo "$MY_IP")
   printf "${R4}│${RS}  ${CY}📥 Config HTML:${RS}\n"
   printf "${R4}│${RS}  ${WH}http://%s:81/config/%s.html${RS}\n" "$_cfg_host" "$UNAME"
   printf "${R4}└──────────────────────────────────────────────────┘${RS}\n\n"
@@ -5469,7 +4395,7 @@ menu_4() {
   printf "${RD}├──────────────────────────────────────────────────────┤${RS}\n"
   local i=0
   for entry in "${EXPIRED_LIST[@]}"; do
-    (( i++ )) || true
+    (( i++ ))
     IFS='|' read -r eu eexp ediff <<< "$entry"
     printf "${RD}│${RS}  ${YE}%-3d${RS}  ${WH}%-18s${RS}  ${RD}%-12s${RS}  ${OR}%-14s${RS}${RD}│${RS}\n" "$i" "$eu" "$eexp" "$ediff"
   done
@@ -5492,7 +4418,7 @@ menu_4() {
     xui_api POST "/panel/api/client/delByEmail/${eu}" "" > /dev/null 2>&1 || true
     rm -f "/var/www/chaiya/config/${eu}.html" 2>/dev/null || true
     printf "${R2}│${RS}  ${RD}🗑  %-20s${RS} → ${GR}ลบแล้ว${RS}                   ${R2}│${RS}\n" "$eu"
-    (( COUNT++ )) || true
+    (( COUNT++ ))
   done
 
   printf "${R2}├──────────────────────────────────────────────────────┤${RS}\n"
@@ -5557,15 +4483,15 @@ try:
     for c in clients:
       idx += 1
       email    = c.get('email', c.get('id', '-'))[:18]
-      # totalGB เก็บเป็น GB โดยตรง
-      total_gb = float(c.get('totalGB', 0) or 0)
+      total_gb = c.get('totalGB', 0)
       exp_ms   = c.get('expiryTime', 0)
       active   = c.get('enable', True) and enable
 
       if total_gb == 0:
         data_str = 'Unlimited'
       else:
-        data_str = f'{total_gb:.1f} GB'
+        gb = total_gb / 1073741824
+        data_str = f'{gb:.1f} GB'
 
       if exp_ms == 0:
         exp_str = 'ไม่จำกัด'
@@ -5615,7 +4541,7 @@ except Exception as e:
       local n=0
       while IFS=' ' read -r user days exp quota uuid port sni rest; do
         [[ -z "$user" ]] && continue
-        (( n++ )) || true
+        (( n++ ))
         EXP_TS=$(date -d "$exp" +%s 2>/dev/null || echo 0)
         if (( EXP_TS < NOW )); then
           SC="$RD"; ST="EXPIRED"
@@ -5659,7 +4585,7 @@ menu_6() {
       ip=$(echo "$addr" | rev | cut -d: -f2- | rev)
       pt=$(echo "$addr" | rev | cut -d: -f1 | rev)
       user=$(who 2>/dev/null | awk -v ip="$ip" '$0~ip{print $1}' | head -1)
-      (( ssh_count++ )) || true
+      (( ssh_count++ ))
       printf "${CY}│${RS} ${YE}%-4d${RS}  ${GR}%-22s${RS}  ${WH}%-20s${RS}  ${OR}%-8s${RS} ${CY}│${RS}\n" \
         "$ssh_count" "${user:--}" "$ip" "$pt"
     done < <(ss -tnpc state established 2>/dev/null | grep ':22 ' | awk '{print $5}' | sort -u)
@@ -5678,7 +4604,7 @@ menu_6() {
     if echo "$xui_online" | grep -q '"success":true'; then
       while IFS= read -r uline; do
         [[ -z "$uline" ]] && continue
-        (( vless_count++ )) || true
+        (( vless_count++ ))
         printf "${R4}│${RS} ${YE}%-4d${RS}  ${GR}%-30s${RS}                        ${R4}│${RS}\n" "$vless_count" "$uline"
       done < <(echo "$xui_online" | python3 -c "
 import sys,json
@@ -5801,7 +4727,7 @@ menu_8() {
 
   local rank=0
   while IFS= read -r line; do
-    (( rank++ )) || true
+    (( rank++ ))
     local pid cpu mem rss cmd
     pid=$(echo "$line" | awk '{print $2}')
     cpu=$(echo "$line" | awk '{print $3}')
@@ -5994,13 +4920,13 @@ menu_11() {
     local bip
     bip=$(echo "$line" | awk '{print $4}')
     [[ -z "$bip" || "$bip" == "0.0.0.0/0" ]] && continue
-    (( ban_count++ )) || true
+    (( ban_count++ ))
     printf "${RD}│${RS}  ${YE}%-4d${RS}  ${WH}%-20s${RS}  ${OR}%-30s${RS} ${RD}│${RS}\n" "$ban_count" "$bip" "iptables DROP"
   done < <(iptables -L INPUT -n 2>/dev/null | grep DROP)
   if [[ -f "$BAN_FILE" && -s "$BAN_FILE" ]]; then
     while IFS= read -r bip; do
       [[ -z "$bip" ]] && continue
-      (( ban_count++ )) || true
+      (( ban_count++ ))
       printf "${RD}│${RS}  ${YE}%-4d${RS}  ${WH}%-20s${RS}  ${OR}%-30s${RS} ${RD}│${RS}\n" "$ban_count" "$bip" "ban.db"
     done < "$BAN_FILE"
   fi
@@ -6104,7 +5030,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
         for f in "${_files[@]}"; do
           local cnt; cnt=$(python3 -c "import json; d=json.load(open('$f')); print(len(d))" 2>/dev/null || echo "?")
           printf "  ${YE}%d.${RS} ${WH}%s${RS} (${GR}%s users${RS})\n" "$i" "$(basename "$f")" "$cnt"
-          (( i++ )) || true
+          (( i++ ))
         done
         printf "\n"
       fi
@@ -6175,10 +5101,10 @@ print(json.dumps(client_payload))
         _res=$(xui_api POST "/panel/api/inbounds/addClient" "$_payload" 2>/dev/null)
         if echo "$_res" | grep -q '"success":true'; then
           printf "  ${GR}✅ %-25s${RS}\n" "$_email"
-          (( _ok++ )) || true
+          (( _ok++ ))
         else
           printf "  ${RD}❌ %-25s (อาจมีอยู่แล้ว)${RS}\n" "$_email"
-          (( _fail++ )) || true
+          (( _fail++ ))
         fi
       done
 
@@ -6397,7 +5323,7 @@ menu_14() {
   declare -a USER_LIST=()
   while IFS=' ' read -r user days exp quota rest; do
     [[ -z "$user" ]] && continue
-    (( n++ )) || true
+    (( n++ ))
     USER_LIST+=("$user")
     local EXP_TS; EXP_TS=$(date -d "$exp" +%s 2>/dev/null || echo 0)
     local SC ST
@@ -6575,9 +5501,10 @@ menu_16() {
         if [[ "$_cf" == "y" || "$_cf" == "Y" ]]; then
           printf "\n${CY}🚀 กำลังรันสคริปต์อัพเดท...${RS}\n\n"
           chmod +x "$tmp_script"
-          # exec แทนที่ process ปัจจุบันด้วย script ใหม่ — session SSH ไม่หลุด
-          # หมายเหตุ: บรรทัดหลัง exec ไม่ถูกรันเลย (ไม่ต้องมี rm)
+          # [FIX] ใช้ exec แทน exit 0 — ไม่ให้ terminal หลุดถ้า SSH อยู่
+          # exec จะแทนที่ process นี้ด้วย script ใหม่โดยไม่ปิด session
           exec bash "$tmp_script"
+          rm -f "$tmp_script" 2>/dev/null
         else
           rm -f "$tmp_script"
           printf "${YE}↩ ยกเลิก${RS}\n"
@@ -6887,7 +5814,7 @@ _m18_setup_nginx_ws() {
     cat > /etc/nginx/sites-available/chaiya-sshws << 'NGINXWS'
 # Chaiya dashboard — port 81 เท่านั้น (port 80 = Python HTTP-CONNECT tunnel)
 server {
-    listen 81;
+    listen 81 default_server;
     server_name _;
     root /var/www/chaiya;
 
@@ -6992,24 +5919,7 @@ _m18_add_ssh_user() {
   read -rsp "$(printf "${YE}Password : ${RS}")"   _p; echo ""
   read -rp "$(printf "${YE}วันหมดอายุ (วัน, default=30): ${RS}")" _d
   [[ -z "$_d" ]] && _d=30
-
-  # ── IP Limit ──────────────────────────────────────────────────
-  read -rp "$(printf "${YE}IP Limit (default=2): ${RS}")" _iplimit
-  [[ -z "$_iplimit" ]] && _iplimit=2
-
   [[ -z "$_u" || -z "$_p" ]] && { printf "${RD}❌ ต้องกรอก user และ password${RS}\n"; return 1; }
-
-  # ── เลือก Port ────────────────────────────────────────────────
-  printf "\n${CY}┌─[ เลือก Port ]──────────────────────────────────────┐${RS}\n"
-  printf "${CY}│${RS}  ${GR}1.${RS}  Port ${WH}80${RS}  — WS HTTP  (ไม่มี SSL)               ${CY}│${RS}\n"
-  printf "${CY}│${RS}  ${GR}2.${RS}  Port ${WH}443${RS} — WSS HTTPS (SSL self-signed) 🔒      ${CY}│${RS}\n"
-  printf "${CY}└──────────────────────────────────────────────────────┘${RS}\n"
-  read -rp "$(printf "${YE}เลือก [1-2, default=1]: ${RS}")" _port_choice
-  local _ssh_port=80 _ssh_proto="ws" _ssh_path="/"
-  case "${_port_choice:-1}" in
-    2) _ssh_port=443; _ssh_proto="wss"; _ssh_path="/ssh/" ;;
-    *) _ssh_port=80;  _ssh_proto="ws";  _ssh_path="/" ;;
-  esac
 
   local _exp; _exp=$(date -d "+${_d} days" +%Y-%m-%d 2>/dev/null \
                   || date -v+${_d}d +%Y-%m-%d 2>/dev/null || echo "")
@@ -7022,197 +5932,13 @@ _m18_add_ssh_user() {
     chage -E "$_exp" "$_u" 2>/dev/null || true
     # บันทึกลง DB
     sed -i "/^${_u} /d" "$DB" 2>/dev/null || true
-    echo "$_u $_d $_exp 0 $_iplimit" >> "$DB"
-
+    echo "$_u $_d $_exp" >> "$DB"
     printf "\n${GR}┌──────────────────────────────────────────────┐${RS}\n"
     printf "${GR}│${RS}  ✅ สร้าง SSH User สำเร็จ!                    ${GR}│${RS}\n"
     printf "${GR}│${RS}  ${YE}User   : ${WH}%-34s${GR}│${RS}\n" "$_u"
     printf "${GR}│${RS}  ${YE}Expire : ${WH}%-34s${GR}│${RS}\n" "$_exp"
-    printf "${GR}│${RS}  ${YE}Port   : ${WH}%-34s${GR}│${RS}\n" "$_ssh_port"
     printf "${GR}│${RS}  ${YE}Shell  : ${WH}/bin/false (tunnel only)         ${GR}│${RS}\n"
     printf "${GR}└──────────────────────────────────────────────┘${RS}\n"
-
-    # ── สร้าง HTML เฉพาะเมื่อเลือก port 443 ─────────────────────
-    if [[ "$_ssh_port" == "443" ]]; then
-      local _host; _host=$(cat /etc/chaiya/domain.conf 2>/dev/null | tr -d '[:space:]')
-      [[ -z "$_host" ]] && _host=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '"'"'{print $1}'"'"')
-      local _outfile="/var/www/chaiya/config/ssh-${_u}.html"
-      mkdir -p /var/www/chaiya/config
-
-      python3 << PYEOF2
-import os
-u       = """$_u"""
-pw      = """$_p"""
-ex      = """$_exp"""
-host    = """$_host"""
-iplimit = """$_iplimit"""
-outfile = """$_outfile"""
-
-tok = ""
-tok_f = "/etc/chaiya/sshws-token.conf"
-if os.path.exists(tok_f):
-    tok = open(tok_f).read().strip()
-
-copy_text = f"""Host/IP   : {host}
-Port      : 443
-Username  : {u}
-Password  : {pw}
-Expire    : {ex}
-IP Limit  : {iplimit}
-Path      : /ssh/
-Protocol  : SSH-WS-SSL (TLS)"""
-
-html = """<!DOCTYPE html>
-<html lang="th">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CHAIYA VPN — """ + u + """ (SSH-WS-SSL)</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d0d0d;font-family:'Segoe UI',sans-serif;min-height:100vh;
-     display:flex;align-items:center;justify-content:center;padding:20px}
-.wrap{width:100%;max-width:420px}
-@keyframes rgbTxt{
-  0%{color:#ff0080}16%{color:#ff8000}33%{color:#ffee00}
-  50%{color:#00ff80}66%{color:#00d4ff}83%{color:#b400ff}100%{color:#ff0080}}
-@keyframes rgbLine{
-  0%{background:linear-gradient(90deg,#ff0080,#ff8000)}
-  25%{background:linear-gradient(90deg,#ffee00,#00ff80)}
-  50%{background:linear-gradient(90deg,#00d4ff,#b400ff)}
-  75%{background:linear-gradient(90deg,#ff0080,#ff8000)}
-  100%{background:linear-gradient(90deg,#ffee00,#00ff80)}}
-@keyframes rgbBorder{
-  0%{border-color:#ff0080}16%{border-color:#ff8000}33%{border-color:#ffee00}
-  50%{border-color:#00ff80}66%{border-color:#00d4ff}83%{border-color:#b400ff}100%{border-color:#ff0080}}
-@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
-@keyframes rgbBreath{
-  0%{background:rgba(255,0,128,0.4);box-shadow:0 0 8px rgba(255,0,128,0.3)}
-  50%{background:rgba(0,255,128,0.7);box-shadow:0 0 16px rgba(0,255,128,0.6)}
-  100%{background:rgba(255,0,128,0.4);box-shadow:0 0 8px rgba(255,0,128,0.3)}}
-@keyframes rgbBreathBorder{
-  0%{border-color:rgba(255,0,128,0.6)}50%{border-color:rgba(0,255,128,1)}
-  100%{border-color:rgba(255,0,128,0.6)}}
-.header{text-align:center;padding:22px 0 12px}
-.fire{font-size:34px;display:inline-block;animation:pulse 1.8s ease-in-out infinite}
-.title{font-size:22px;font-weight:800;letter-spacing:6px;margin-top:4px;animation:rgbTxt 3s linear infinite}
-.subtitle{margin-top:4px;font-size:11px;color:#5a8aaa;letter-spacing:2px}
-.username{margin-top:6px;font-size:14px;color:#5a8aaa}
-.username span{color:#00cfff;font-weight:600}
-.line{height:2px;border-radius:2px;margin:10px 0 16px;animation:rgbLine 3s linear infinite}
-.row{display:flex;align-items:center;justify-content:space-between;
-     padding:11px 4px;border-bottom:1px solid #1a1a2a}
-.row:last-of-type{border-bottom:none}
-.row-left{display:flex;align-items:center;gap:10px}
-.ico{font-size:18px}
-.lbl{font-size:13px;font-weight:500;letter-spacing:1px;animation:rgbTxt 3s linear infinite}
-.row-right{font-size:13px;color:#c0d0e0;text-align:right;word-break:break-all}
-.row-right.pass{font-family:monospace;letter-spacing:2px;color:#00ff80}
-.ssl-badge{display:inline-block;background:#00ff8022;border:1px solid #00ff8066;
-           color:#00ff80;font-size:10px;padding:2px 8px;border-radius:99px;margin-left:6px}
-.btn-copy{width:100%;padding:15px;border:2px solid rgba(255,0,128,0.8);
-          border-radius:12px;font-size:15px;font-weight:700;letter-spacing:1px;
-          cursor:pointer;color:#fff;margin-top:16px;
-          animation:rgbBreath 4s ease-in-out infinite,rgbBreathBorder 4s ease-in-out infinite;
-          transition:transform .1s,opacity .1s}
-.btn-copy:active{transform:scale(.97);opacity:.85}
-.notice{margin-top:14px;padding:10px 14px;border-radius:10px;
-        background:#001a00;border:1px solid #00ff4066;
-        font-size:12px;color:#00cc66;line-height:1.6;text-align:center}
-.notice b{color:#00ff80}
-.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%);
-       background:#00ff80;color:#000;padding:11px 28px;border-radius:22px;
-       font-weight:700;font-size:13px;opacity:0;transition:opacity .3s;
-       pointer-events:none;z-index:999}
-.toast.show{opacity:1}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="header">
-    <div class="fire">🔥</div>
-    <div class="title">CHAIYA VPN</div>
-    <div class="subtitle">SSH · WS · SSL</div>
-    <div class="username">👤 <span>""" + u + """</span></div>
-  </div>
-  <div class="line"></div>
-
-  <div class="row">
-    <div class="row-left"><span class="ico">🌐</span><span class="lbl">Host/IP</span></div>
-    <div class="row-right">""" + host + """</div>
-  </div>
-  <div class="row">
-    <div class="row-left"><span class="ico">🔌</span><span class="lbl">Port</span></div>
-    <div class="row-right">443 <span class="ssl-badge">🔒 SSL</span></div>
-  </div>
-  <div class="row">
-    <div class="row-left"><span class="ico">👤</span><span class="lbl">Username</span></div>
-    <div class="row-right">""" + u + """</div>
-  </div>
-  <div class="row">
-    <div class="row-left"><span class="ico">🔑</span><span class="lbl">Password</span></div>
-    <div class="row-right pass">""" + pw + """</div>
-  </div>
-  <div class="row">
-    <div class="row-left"><span class="ico">📅</span><span class="lbl">หมดอายุ</span></div>
-    <div class="row-right">""" + ex + """</div>
-  </div>
-  <div class="row">
-    <div class="row-left"><span class="ico">📱</span><span class="lbl">IP Limit</span></div>
-    <div class="row-right">""" + iplimit + """ IP</div>
-  </div>
-  <div class="row">
-    <div class="row-left"><span class="ico">📡</span><span class="lbl">Protocol</span></div>
-    <div class="row-right">SSH · WS · SSL</div>
-  </div>
-  <div class="row">
-    <div class="row-left"><span class="ico">📂</span><span class="lbl">Path</span></div>
-    <div class="row-right">/ssh/</div>
-  </div>
-
-  <button class="btn-copy" onclick="copyAll()">📋&nbsp; Copy ข้อมูลทั้งหมด</button>
-
-  <div class="notice">
-    🔒 <b>SSL Self-Signed</b> — ใช้งานได้ปกติ<br>
-    ตั้งค่าแอพ: TLS=เปิด · Skip Verify=เปิด · Path=/ssh/
-  </div>
-</div>
-<div class="toast" id="toast">✔ Copied!</div>
-<script>
-var _copyText = """ + repr(copy_text) + """;
-function copyAll(){
-  if(navigator.clipboard){
-    navigator.clipboard.writeText(_copyText).then(showToast).catch(fb);
-  } else { fb(); }
-}
-function fb(){
-  var ta=document.createElement('textarea');
-  ta.value=_copyText;document.body.appendChild(ta);
-  ta.select();document.execCommand('copy');
-  document.body.removeChild(ta);showToast();
-}
-function showToast(){
-  var el=document.getElementById('toast');
-  el.classList.add('show');
-  setTimeout(function(){el.classList.remove('show');},2000);
-}
-</script>
-</body></html>"""
-
-os.makedirs(os.path.dirname(outfile), exist_ok=True)
-with open(outfile, 'w', encoding='utf-8') as f:
-    f.write(html)
-print("OK:" + outfile)
-PYEOF2
-
-      if [[ $? -eq 0 ]]; then
-        local _cfg_host; _cfg_host=$(cat /etc/chaiya/domain.conf 2>/dev/null | tr -d '[:space:]')
-        [[ -z "$_cfg_host" ]] && _cfg_host=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-        printf "${CY}│${RS}  ${GR}🌐 HTML Config:${RS}
-"
-        printf "${CY}│${RS}  ${WH}http://%s:81/config/ssh-%s.html${RS}\n" "$_cfg_host" "$_u"
-      fi
-    fi
   else
     printf "${RD}❌ useradd ล้มเหลว${RS}\n"; return 1
   fi
@@ -7321,25 +6047,7 @@ _m18_del_ssh_user() {
 # ── Main menu_18 ─────────────────────────────────────────────
 menu_18() {
   clear
-  # ── ดึง IP จริงของเครื่องนี้ ──────────────────────────────
-  local _MY_IP; _MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null     || curl -s --max-time 5 api.ipify.org 2>/dev/null     || hostname -I | awk '{print $1}')
-
-  # ── ตรวจสอบโดเมน: ใช้เฉพาะถ้า resolve ได้และ cert มีจริง ──
-  local _H="$_MY_IP"
-  if [[ -f "$DOMAIN_FILE" ]]; then
-    local _dom; _dom=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '[:space:]')
-    if [[ -n "$_dom" ]]; then
-      # ตรวจว่า domain resolve ได้จริงบนเครื่องนี้
-      local _dom_ip; _dom_ip=$(getent hosts "$_dom" 2>/dev/null | awk '{print $1}' | head -1)
-      if [[ -n "$_dom_ip" ]]; then
-        _H="$_dom"
-      else
-        # domain resolve ไม่ได้ — ใช้ IP แทน ไม่อ่าน domain ผิด
-        _H="$_MY_IP"
-      fi
-    fi
-  fi
-
+  local _H; [[ -f "$DOMAIN_FILE" ]] && _H=$(cat "$DOMAIN_FILE") || _H=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
   local _TOK; _TOK=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
   [[ -z "$_TOK" ]] && { _TOK=$(openssl rand -hex 16); echo "$_TOK" > /etc/chaiya/sshws-token.conf; }
   local _CERT_OK=false
@@ -7352,177 +6060,253 @@ menu_18() {
   local _UDPST; pgrep -f badvpn-udpgw &>/dev/null && _UDPST="active" || _UDPST="inactive"
   _sc18() { [[ "$1" == "active" ]] && printf "${GR}● RUNNING${RS}" || printf "${RD}○ STOPPED${RS}"; }
 
-  # ── สร้าง URL สำหรับ Web Dashboard ──────────────────────────
+  # ── สร้าง URL สำหรับ Web Dashboard ────────────────────────────
   local _DASH_URL="http://${_H}:81/sshws/sshws.html"
   local _DASH_URL_TOK="http://${_H}:81/sshws/sshws.html?token=${_TOK}"
-  $_CERT_OK && _DASH_URL="https://${_H}/sshws/sshws.html"     || true
+  $_CERT_OK && _DASH_URL="https://${_H}/sshws/sshws.html" || true
   $_CERT_OK && _DASH_URL_TOK="https://${_H}/sshws/sshws.html?token=${_TOK}" || true
 
-  # ── แสดงหน้าหลัก menu_18 ─────────────────────────────────────
-  _show_menu18_main() {
-    clear
-    printf "\n${R1}╔══════════════════════════════════════════════════════════╗${RS}\n"
-    printf "${R1}║${RS}  🚇 ${WH}SSH WebSocket Manager${RS}  ${R1}[เมนู 18]${RS}                  ${R1}║${RS}\n"
-    printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-    printf "${R1}║${RS}  ${YE}Host  ${WH}: %-49s${R1}║${RS}\n" "$_H"
-    printf "${R1}║${RS}  ${YE}Port  ${WH}: %-10s  ${YE}Proto ${WH}: %-30s${R1}║${RS}\n" "$_WSPORT" "${_PROTO^^}"
-    printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-    printf "${R1}║${RS}  🌐 ${YE}Web Dashboard (เปิดในมือถือ/เบราว์เซอร์):${RS}          ${R1}║${RS}\n"
-    printf "${R1}║${RS}  ${CY}  %-56s${R1}║${RS}\n" "$_DASH_URL"
-    printf "${R1}║${RS}  ${GR}  (พร้อม Token):${RS}                                      ${R1}║${RS}\n"
-    printf "${R1}║${RS}  ${MG}  %-56s${R1}║${RS}\n" "$_DASH_URL_TOK"
-    printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-    printf "${R1}║${RS}  🚇 chaiya-sshws : $(_sc18 "$_WSST")    🐻 dropbear : $(_sc18 "$_DBST")        ${R1}║${RS}\n"
-    printf "${R1}║${RS}  🌐 nginx        : $(_sc18 "$_NGST")    🎮 badvpn   : $(_sc18 "$_UDPST")        ${R1}║${RS}\n"
-    printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
-    printf "${R1}║${RS}  ${MG} 9.${RS}  🔑  เปลี่ยน Token ใหม่                          ${R1}║${RS}\n"
-    printf "${R1}║${RS}  ${WH}99.${RS}  🔧  ซ่อมบำรุง / แอดมิน  ${RD}[ต้องใส่รหัส]${RS}         ${R1}║${RS}\n"
-    printf "${R1}║${RS}  ${WH} 0.${RS}  ↩  ย้อนกลับ                                      ${R1}║${RS}\n"
-    printf "${R1}╚══════════════════════════════════════════════════════════╝${RS}\n"
-  }
-
-  _show_menu18_main
+  printf "\n${R1}╔══════════════════════════════════════════════════════════╗${RS}\n"
+  printf "${R1}║${RS}  🚇 ${WH}SSH WebSocket Manager${RS}  ${R1}[เมนู 18]${RS}                  ${R1}║${RS}\n"
+  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+  printf "${R1}║${RS}  ${YE}Host  ${WH}: %-49s${R1}║${RS}\n" "$_H"
+  printf "${R1}║${RS}  ${YE}Port  ${WH}: %-10s  ${YE}Proto ${WH}: %-30s${R1}║${RS}\n" "$_WSPORT" "${_PROTO^^}"
+  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+  printf "${R1}║${RS}  🌐 ${YE}Web Dashboard (เปิดในมือถือ/เบราว์เซอร์):${RS}          ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${CY}  %-56s${R1}║${RS}\n" "$_DASH_URL"
+  printf "${R1}║${RS}  ${GR}  (พร้อม Token):${RS}                                      ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${MG}  %-56s${R1}║${RS}\n" "$_DASH_URL_TOK"
+  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+  printf "${R1}║${RS}  🚇 chaiya-sshws : $(_sc18 "$_WSST")    🐻 dropbear : $(_sc18 "$_DBST")        ${R1}║${RS}\n"
+  printf "${R1}║${RS}  🌐 nginx        : $(_sc18 "$_NGST")    🎮 badvpn   : $(_sc18 "$_UDPST")        ${R1}║${RS}\n"
+  printf "${R1}╠══════════════════════════════════════════════════════════╣${RS}\n"
+  printf "${R1}║${RS}  ${GR} 1.${RS}  ▶  เริ่ม / Restart Services ทั้งหมด              ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${RD} 2.${RS}  ■  หยุด SSH WebSocket (chaiya-sshws)             ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${YE} 3.${RS}  👁  ดูสถานะ + Connections ละเอียด               ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${CY} 4.${RS}  ➕  เพิ่ม SSH User                               ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${CY} 5.${RS}  📋  ดูรายชื่อ SSH Users ทั้งหมด                 ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${RD} 6.${RS}  🗑️   ลบ SSH User                                 ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${PU} 7.${RS}  📱  ดู Config สำหรับแอพ (NetMod/KPN/HTTP Injector)${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${OR} 8.${RS}  📋  ดู Log (chaiya-sshws 30 บรรทัดล่าสุด)       ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${MG} 9.${RS}  🔑  Generate Token ใหม่                         ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${WH}10.${RS}  🔄  ติดตั้ง / ซ่อมแซม ws-stunnel + nginx        ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${CY}11.${RS}  🌐  แสดงลิงค์เข้า Web Dashboard                 ${R1}║${RS}\n"
+  printf "${R1}║${RS}  ${WH} 0.${RS}  ↩  ย้อนกลับ                                      ${R1}║${RS}\n"
+  printf "${R1}╚══════════════════════════════════════════════════════════╝${RS}\n"
   read -rp "$(printf "\n${YE}เลือก: ${RS}")" _sub18
 
   case $_sub18 in
 
     1)
-      # ── Restart ทุก service (admin only) ─────────────────────
-      menu_18 ;;
-
-    2) menu_18 ;;
-    3) menu_18 ;;
-    4) menu_18 ;;
-    5) menu_18 ;;
-    6) menu_18 ;;
-    7) menu_18 ;;
-    8) menu_18 ;;
-
-    9)
-      # ── เปลี่ยน Token ใหม่ ────────────────────────────────────
-      local _NEWTOK; _NEWTOK=$(openssl rand -hex 16)
-      echo "$_NEWTOK" > /etc/chaiya/sshws-token.conf
-      # ฝัง token ใหม่เข้า HTML ทันที
-      python3 << PYEOF 2>/dev/null || true
-import re
-path='/var/www/chaiya/sshws.html'
-tok='${_NEWTOK}'
-try:
-  with open(path,'r',errors='replace') as f: h=f.read()
-  h2=re.sub(r"(const _baked\s*=\s*')[^']*(')",r"\g<1>"+tok+r"\g<2>",h)
-  with open(path,'w') as f: f.write(h2)
-except: pass
-PYEOF
-      # reopen nginx เพื่อให้ token ใหม่ใช้งานได้ทันที
-      _TOK="$_NEWTOK"
-      local _NEW_URL_TOK
-      $_CERT_OK && _NEW_URL_TOK="https://${_H}/sshws/sshws.html?token=${_NEWTOK}"                || _NEW_URL_TOK="http://${_H}:81/sshws/sshws.html?token=${_NEWTOK}"
+      # ── Restart ทุก service ───────────────────────────────────
       clear
-      printf "\n${GR}╔══════════════════════════════════════════════════════════╗${RS}\n"
-      printf "${GR}║${RS}  🔑 ${WH}เปลี่ยน Token ใหม่สำเร็จ!${RS}                          ${GR}║${RS}\n"
-      printf "${GR}╠══════════════════════════════════════════════════════════╣${RS}\n"
-      printf "${GR}║${RS}  ${YE}Token ใหม่:${RS}                                           ${GR}║${RS}\n"
-      printf "${GR}║${RS}  ${CY}  %-56s${GR}║${RS}\n" "$_NEWTOK"
-      printf "${GR}╠══════════════════════════════════════════════════════════╣${RS}\n"
-      printf "${GR}║${RS}  ${YE}URL พร้อม Token (ใช้งานได้ทันที):${RS}                    ${GR}║${RS}\n"
-      printf "${GR}║${RS}  ${MG}  %-56s${GR}║${RS}\n" "$_NEW_URL_TOK"
-      printf "${GR}╚══════════════════════════════════════════════════════════╝${RS}\n\n"
-      printf "${WH}💡 คัดลอก URL ด้านบนแล้วเปิดในเบราว์เซอร์ได้เลย${RS}\n\n"
+      printf "${GR}╔══════════════════════════════════════════════════════╗${RS}\n"
+      printf "${GR}║${RS}  ▶  ${WH}Restart SSH WebSocket Services${RS}                 ${GR}║${RS}\n"
+      printf "${GR}╚══════════════════════════════════════════════════════╝${RS}\n\n"
+      printf "${YE}⏳ กำลัง restart...${RS}\n\n"
+      for _svc in dropbear chaiya-sshws nginx chaiya-badvpn; do
+        if systemctl list-unit-files "${_svc}.service" &>/dev/null 2>&1 | grep -q "$_svc"; then
+          systemctl restart "$_svc" 2>/dev/null \
+            && printf "  ${GR}✅ %-22s restart สำเร็จ${RS}\n" "$_svc" \
+            || printf "  ${RD}❌ %-22s restart ล้มเหลว${RS}\n" "$_svc"
+        else
+          printf "  ${YE}⚠️  %-22s ไม่ได้ติดตั้ง — ข้าม${RS}\n" "$_svc"
+        fi
+      done
+      # ตรวจ port 80 หลัง restart
+      sleep 2
+      if ss -tlnp 2>/dev/null | grep -q ':80 '; then
+        printf "\n  ${GR}✅ Port 80 พร้อมรับ connection${RS}\n"
+      else
+        printf "\n  ${RD}⚠️  Port 80 ยังไม่ขึ้น — ตรวจสอบ: journalctl -u chaiya-sshws -n 20${RS}\n"
+      fi
+      printf "\n${GR}✅ เสร็จสมบูรณ์${RS}\n\n"
       read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
 
-    10) menu_18 ;;
-
-    11) menu_18 ;;
-
-    99)
-      # ── ซ่อมบำรุง / แอดมิน (ต้องใส่รหัส) ────────────────────
-      clear
-      printf "\n${R1}╔══════════════════════════════════════════════════════════╗${RS}\n"
-      printf "${R1}║${RS}  🔧 ${WH}ซ่อมบำรุง / แอดมิน${RS}                                ${R1}║${RS}\n"
-      printf "${R1}╚══════════════════════════════════════════════════════════╝${RS}\n\n"
-      read -rsp "$(printf "${YE}🔐 รหัสผ่าน: ${RS}")" _adm_pass
-      printf "\n"
-      if [[ "$_adm_pass" != "Chaiya" ]]; then
-        printf "${RD}❌ รหัสผ่านไม่ถูกต้อง${RS}\n\n"
-        sleep 1; menu_18; return
+    2)
+      # ── หยุด chaiya-sshws ─────────────────────────────────────
+      printf "\n${OR}⚠️  ยืนยันหยุด chaiya-sshws? (y/N): ${RS}"
+      read -r _cf
+      if [[ "$_cf" == "y" || "$_cf" == "Y" ]]; then
+        systemctl stop chaiya-sshws 2>/dev/null \
+          && printf "${GR}✅ หยุด chaiya-sshws สำเร็จ${RS}\n" \
+          || printf "${RD}❌ ล้มเหลว — service อาจไม่ได้ติดตั้ง${RS}\n"
+      else
+        printf "${YE}↩ ยกเลิก${RS}\n"
       fi
-      # ── แสดงเมนูแอดมินเต็ม ────────────────────────────────────
-      while true; do
-        clear
-        printf "\n${MG}╔══════════════════════════════════════════════════════════╗${RS}\n"
-        printf "${MG}║${RS}  🔧 ${WH}ซ่อมบำรุง / แอดมิน${RS}  ${YE}[รหัสผ่านถูกต้อง ✅]${RS}         ${MG}║${RS}\n"
-        printf "${MG}╠══════════════════════════════════════════════════════════╣${RS}\n"
-        printf "${MG}║${RS}  ${GR} 1.${RS}  ▶  เริ่ม / Restart Services ทั้งหมด              ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${RD} 2.${RS}  ■  หยุด SSH WebSocket (chaiya-sshws)             ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${YE} 3.${RS}  👁  ดูสถานะ + Connections ละเอียด               ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${CY} 4.${RS}  ➕  เพิ่ม SSH User                               ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${CY} 5.${RS}  📋  ดูรายชื่อ SSH Users ทั้งหมด                 ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${RD} 6.${RS}  🗑️   ลบ SSH User                                 ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${PU} 7.${RS}  📱  ดู Config สำหรับแอพ                          ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${OR} 8.${RS}  📋  ดู Log (30 บรรทัดล่าสุด)                    ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${WH}10.${RS}  🔄  ติดตั้ง / ซ่อมแซม ws-stunnel + nginx        ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${CY}11.${RS}  🌐  แสดงลิงค์เข้า Web Dashboard                 ${MG}║${RS}\n"
-        printf "${MG}║${RS}  ${WH} 0.${RS}  ↩  ออกจากโหมดแอดมิน                             ${MG}║${RS}\n"
-        printf "${MG}╚══════════════════════════════════════════════════════════╝${RS}\n"
-        read -rp "$(printf "\n${YE}เลือก: ${RS}")" _adm_opt
-        case $_adm_opt in
-          1)
-            clear
-            printf "${GR}⏳ กำลัง restart...${RS}\n\n"
-            for _svc in dropbear chaiya-sshws nginx chaiya-badvpn; do
-              systemctl restart "$_svc" 2>/dev/null                 && printf "  ${GR}✅ %-22s OK${RS}\n" "$_svc"                 || printf "  ${RD}❌ %-22s fail${RS}\n" "$_svc"
-            done
-            sleep 2
-            ss -tlnp 2>/dev/null | grep -q ':80 '               && printf "\n  ${GR}✅ Port 80 OK${RS}\n"               || printf "\n  ${RD}⚠️  Port 80 ยังไม่ขึ้น${RS}\n"
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          2)
-            printf "\n${OR}ยืนยันหยุด chaiya-sshws? (y/N): ${RS}"
-            read -r _c2
-            [[ "$_c2" == "y" || "$_c2" == "Y" ]]               && systemctl stop chaiya-sshws 2>/dev/null && printf "${GR}✅ หยุดแล้ว${RS}\n"               || printf "${YE}↩ ยกเลิก${RS}\n"
-            sleep 1 ;;
-          3)
-            clear
-            _m18_status
-            local _c80; _c80=$(ss -tn state established 2>/dev/null | grep -c ':80 ' || echo 0)
-            local _c143; _c143=$(ss -tn state established 2>/dev/null | grep -c ':143 ' || echo 0)
-            printf "\n${CY}Port 80: ${YE}$_c80${RS}  ${CY}Port 143: ${YE}$_c143${RS}\n\n"
-            systemctl status chaiya-sshws --no-pager -n 5 2>/dev/null || true
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          4)
-            clear; _m18_add_ssh_user
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          5)
-            clear; _m18_list_users
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          6)
-            clear; _m18_del_ssh_user
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          7)
-            clear; _m18_show_appconfig
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          8)
-            clear
-            local _lf="/var/log/chaiya-sshws.log"
-            [[ -f "$_lf" ]] && tail -30 "$_lf" || journalctl -u chaiya-sshws -n 30 --no-pager 2>/dev/null || true
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          10)
-            clear
-            printf "${OR}⚠️  จะ restart nginx + chaiya-sshws ยืนยัน? (y/N): ${RS}"
-            read -r _c10
-            if [[ "$_c10" == "y" || "$_c10" == "Y" ]]; then
-              [[ -f /usr/local/bin/ws-stunnel ]] && _m18_setup_systemd && _m18_setup_nginx_ws                 || printf "${RD}❌ ไม่พบ ws-stunnel${RS}\n"
-            fi
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          11)
-            clear
-            printf "${CY}URL: ${WH}$_DASH_URL${RS}\n"
-            printf "${MG}Token URL: ${WH}$_DASH_URL_TOK${RS}\n\n"
-            read -rp "$(printf "${YE}Enter...${RS}")" ;;
-          0) break ;;
-          *) ;;
-        esac
-      done
-      menu_18 ;;
+      sleep 1; menu_18 ;;
+
+    3)
+      # ── สถานะละเอียด ──────────────────────────────────────────
+      clear
+      _m18_status
+      local _CONNS80; _CONNS80=$(ss -tn state established 2>/dev/null | grep -c ':80 ' || echo "0")
+      local _CONNS22; _CONNS22=$(ss -tn state established 2>/dev/null | grep -c ':22 ' || echo "0")
+      local _CONNS143; _CONNS143=$(ss -tn state established 2>/dev/null | grep -c ':143 ' || echo "0")
+      local _CONNS109; _CONNS109=$(ss -tn state established 2>/dev/null | grep -c ':109 ' || echo "0")
+      printf "\n${CY}┌─[ 🔌 Active Connections (จาก ss) ]─────────────────────┐${RS}\n"
+      printf "${CY}│${RS}  Port  80 (HTTP-CONNECT/WS tunnel) : ${YE}%-6s${RS}             ${CY}│${RS}\n" "${_CONNS80}"
+      printf "${CY}│${RS}  Port  22 (OpenSSH)                : ${YE}%-6s${RS}             ${CY}│${RS}\n" "${_CONNS22}"
+      printf "${CY}│${RS}  Port 143 (Dropbear #1)            : ${YE}%-6s${RS}             ${CY}│${RS}\n" "${_CONNS143}"
+      printf "${CY}│${RS}  Port 109 (Dropbear #2)            : ${YE}%-6s${RS}             ${CY}│${RS}\n" "${_CONNS109}"
+      printf "${CY}└────────────────────────────────────────────────────────┘${RS}\n\n"
+      printf "${YE}📋 systemctl status chaiya-sshws:${RS}\n"
+      systemctl status chaiya-sshws --no-pager -n 5 2>/dev/null || printf "${RD}  service ไม่พบ${RS}\n"
+      printf "\n"
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+
+    4)
+      # ── เพิ่ม SSH User ────────────────────────────────────────
+      clear
+      printf "${CY}╔══════════════════════════════════════════════════════╗${RS}\n"
+      printf "${CY}║${RS}  ➕ ${WH}เพิ่ม SSH User${RS}                                   ${CY}║${RS}\n"
+      printf "${CY}╚══════════════════════════════════════════════════════╝${RS}\n\n"
+      _m18_add_ssh_user
+      printf "\n"
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+
+    5)
+      # ── รายชื่อ SSH Users ─────────────────────────────────────
+      clear
+      printf "${CY}╔══════════════════════════════════════════════════════╗${RS}\n"
+      printf "${CY}║${RS}  📋 ${WH}รายชื่อ SSH Users ทั้งหมด${RS}                        ${CY}║${RS}\n"
+      printf "${CY}╚══════════════════════════════════════════════════════╝${RS}\n"
+      _m18_list_users
+      # แสดง logged-in users ด้วย
+      local _who; _who=$(who 2>/dev/null | grep -v "^$" | head -10)
+      if [[ -n "$_who" ]]; then
+        printf "${GR}┌─[ 👤 Users ที่ Login อยู่ขณะนี้ ]─────────────────────┐${RS}\n"
+        echo "$_who" | while IFS= read -r line; do
+          printf "${GR}│${RS}  ${WH}%.62s${RS}\n" "$line"
+        done
+        printf "${GR}└────────────────────────────────────────────────────────┘${RS}\n\n"
+      fi
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+
+    6)
+      # ── ลบ SSH User ───────────────────────────────────────────
+      clear
+      printf "${RD}╔══════════════════════════════════════════════════════╗${RS}\n"
+      printf "${RD}║${RS}  🗑️  ${WH}ลบ SSH User${RS}                                     ${RD}║${RS}\n"
+      printf "${RD}╚══════════════════════════════════════════════════════╝${RS}\n\n"
+      _m18_del_ssh_user
+      printf "\n"
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+
+    7)
+      # ── Config สำหรับแอพ ──────────────────────────────────────
+      clear
+      _m18_show_appconfig
+      # แสดง QR Code ของ URL ถ้ามี qrencode
+      if command -v qrencode &>/dev/null; then
+        local _qr_url="${_PROTO}://${_H}:${_WSPORT}/"
+        printf "${YE}📷 QR Code URL:${RS}\n"
+        qrencode -t ANSIUTF8 "$_qr_url" 2>/dev/null || true
+      fi
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+
+    8)
+      # ── Log chaiya-sshws ──────────────────────────────────────
+      clear
+      printf "${OR}╔══════════════════════════════════════════════════════╗${RS}\n"
+      printf "${OR}║${RS}  📋 ${WH}Log SSH WebSocket (30 บรรทัดล่าสุด)${RS}             ${OR}║${RS}\n"
+      printf "${OR}╚══════════════════════════════════════════════════════╝${RS}\n\n"
+      local _logfile="/var/log/chaiya-sshws.log"
+      if [[ -f "$_logfile" && -s "$_logfile" ]]; then
+        local _lsize; _lsize=$(wc -l < "$_logfile")
+        printf "${CY}📁 ไฟล์: ${WH}%s${RS}  ${CY}ขนาด: ${YE}%s${RS} บรรทัด\n\n" "$_logfile" "$_lsize"
+        tail -30 "$_logfile" | while IFS= read -r _line; do
+          # ไฮไลต์ connection / error
+          if echo "$_line" | grep -qi "error\|fail\|refused"; then
+            printf "  ${RD}%.72s${RS}\n" "$_line"
+          elif echo "$_line" | grep -qi "CONNECT\|connection"; then
+            printf "  ${GR}%.72s${RS}\n" "$_line"
+          else
+            printf "  ${WH}%.72s${RS}\n" "$_line"
+          fi
+        done
+        printf "\n${CY}─────────────────────────────────────────────────────────${RS}\n"
+        printf "${YE}💡 ดู live log: journalctl -u chaiya-sshws -f${RS}\n"
+      else
+        # ลอง journalctl แทน
+        printf "${OR}⚠️  ไม่พบ log file — ลอง journalctl...${RS}\n\n"
+        journalctl -u chaiya-sshws -n 30 --no-pager 2>/dev/null \
+          || printf "${RD}❌ ไม่มี log — service อาจไม่เคยรัน${RS}\n"
+      fi
+      printf "\n"
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+
+    9)
+      # ── Generate Token ใหม่ ───────────────────────────────────
+      local _NEWTOK; _NEWTOK=$(openssl rand -hex 16)
+      echo "$_NEWTOK" > /etc/chaiya/sshws-token.conf
+      sed -i "s|token=[a-f0-9]*|token=${_NEWTOK}|g" /var/www/chaiya/sshws.html 2>/dev/null || true
+      printf "\n${GR}┌──────────────────────────────────────────────────────┐${RS}\n"
+      printf "${GR}│${RS}  ✅ Generate Token ใหม่สำเร็จ!                       ${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}Token: ${CY}%-44s${GR}│${RS}\n" "$_NEWTOK"
+      printf "${GR}└──────────────────────────────────────────────────────┘${RS}\n\n"
+      sleep 1; menu_18 ;;
+
+    10)
+      # ── ติดตั้ง / ซ่อมแซม ws-stunnel + nginx ────────────────
+      clear
+      printf "${MG}╔══════════════════════════════════════════════════════╗${RS}\n"
+      printf "${MG}║${RS}  🔄 ${WH}ซ่อมแซม / ติดตั้ง ws-stunnel + nginx${RS}          ${MG}║${RS}\n"
+      printf "${MG}╚══════════════════════════════════════════════════════╝${RS}\n\n"
+      printf "${OR}⚠️  จะ restart nginx และ chaiya-sshws ยืนยัน? (y/N): ${RS}"
+      read -r _cf2
+      if [[ "$_cf2" == "y" || "$_cf2" == "Y" ]]; then
+        printf "\n${YE}⏳ กำลังดำเนินการ...${RS}\n\n"
+        # ตรวจว่า ws-stunnel มีอยู่ ถ้าไม่มีสร้างใหม่
+        if [[ ! -f /usr/local/bin/ws-stunnel ]]; then
+          printf "${RD}❌ ไม่พบ /usr/local/bin/ws-stunnel — กรุณา reinstall จากสคริปต์หลัก${RS}\n"
+          read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18; return
+        fi
+        _m18_setup_systemd
+        _m18_setup_nginx_ws
+        printf "\n${GR}✅ ซ่อมแซมเสร็จสมบูรณ์${RS}\n\n"
+      else
+        printf "${YE}↩ ยกเลิก${RS}\n"
+      fi
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
+
+    11)
+      # ── แสดงลิงค์เข้า Web Dashboard ──────────────────────────
+      clear
+      printf "${CY}╔══════════════════════════════════════════════════════╗${RS}\n"
+      printf "${CY}║${RS}  🌐 ${WH}Web Dashboard — ลิงค์เข้าระบบ${RS}               ${CY}║${RS}\n"
+      printf "${CY}╚══════════════════════════════════════════════════════╝${RS}\n\n"
+      local _d_host; [[ -f "$DOMAIN_FILE" ]] && _d_host=$(cat "$DOMAIN_FILE") || _d_host=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+      local _d_tok; _d_tok=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
+      [[ -z "$_d_tok" ]] && { _d_tok=$(openssl rand -hex 16); echo "$_d_tok" > /etc/chaiya/sshws-token.conf; }
+      local _d_cert=false
+      [[ -f "/etc/letsencrypt/live/${_d_host}/fullchain.pem" ]] && _d_cert=true
+      local _d_base; $_d_cert && _d_base="https://${_d_host}" || _d_base="http://${_d_host}:81"
+      local _d_url="${_d_base}/sshws/sshws.html"
+      local _d_url_tok="${_d_base}/sshws/sshws.html?token=${_d_tok}"
+      local _d_api="${_d_base}/sshws-api/"
+      printf "${GR}┌─[ 🌐 URL เปิดในเบราว์เซอร์ / มือถือ ]──────────────────┐${RS}\n"
+      printf "${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}📌 URL ปกติ (ไม่มี Token):${RS}\n"
+      printf "${GR}│${RS}  ${CY}  %s${RS}\n" "$_d_url"
+      printf "${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}🔑 URL พร้อม Token (แนะนำ):${RS}\n"
+      printf "${GR}│${RS}  ${MG}  %s${RS}\n" "$_d_url_tok"
+      printf "${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}⚡ API Endpoint:${RS}\n"
+      printf "${GR}│${RS}  ${WH}  %s${RS}\n" "$_d_api"
+      printf "${GR}│${RS}\n"
+      printf "${GR}│${RS}  ${YE}🔐 Token: ${CY}%-42s${GR}│${RS}\n" "$_d_tok"
+      printf "${GR}│${RS}\n"
+      if command -v qrencode &>/dev/null; then
+        printf "${GR}│${RS}  ${YE}📷 QR Code (URL พร้อม Token):${RS}\n"
+        qrencode -t ANSIUTF8 "$_d_url_tok" 2>/dev/null | while IFS= read -r _qline; do
+          printf "${GR}│${RS}  %s\n" "$_qline"
+        done
+      fi
+      printf "${GR}└─────────────────────────────────────────────────────────┘${RS}\n\n"
+      printf "${WH}💡 เปิดลิงค์ URL พร้อม Token ในเบราว์เซอร์เพื่อจัดการ Users/Services${RS}\n\n"
+      read -rp "$(printf "${YE}Enter ย้อนกลับ...${RS}")"; menu_18 ;;
 
     0) return ;;
     *) menu_18 ;;
@@ -7646,11 +6430,10 @@ else
   echo "  ✅ chaiya-sshws-api ทำงานอยู่บน port 6789"
 fi
 
-# 5. ตรวจ nginx config — ถ้าขาด sshws-api block ให้เขียนใหม่ (ใช้ config เดียวกับชุดแรก — headers ครบ)
+# 5. ตรวจ nginx config — ถ้าขาด sshws-api block ให้เขียนใหม่
 if ! grep -q "sshws-api" /etc/nginx/sites-available/chaiya 2>/dev/null; then
   echo "  ⚠ nginx config ขาด sshws-api — เขียนใหม่"
   cat > /etc/nginx/sites-available/chaiya << 'NGINXEOF'
-# ── Port 81: Web Panel (Dashboard + config download)
 server {
     listen 81;
     server_name _;
@@ -7658,8 +6441,6 @@ server {
     location /config/ {
         alias /var/www/chaiya/config/;
         try_files $uri =404;
-        default_type text/html;
-        add_header Content-Type "text/html; charset=UTF-8";
         add_header Cache-Control "no-cache";
     }
     location /sshws/ {
@@ -7673,43 +6454,22 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Token $http_x_token;
-        proxy_set_header X-Auth-Token $http_x_auth_token;
-        proxy_set_header Authorization $http_authorization;
         proxy_read_timeout 60s;
         proxy_connect_timeout 10s;
-        add_header Access-Control-Allow-Origin "$http_origin" always;
+        add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Authorization,Content-Type,X-Token,X-Auth-Token" always;
     }
-    # xui-traffic: proxy ไปยัง 3x-ui local API (realtime traffic)
-    location /xui-traffic/ {
-        proxy_pass http://127.0.0.1:2053/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header Cookie $http_cookie;
-        proxy_read_timeout 30s;
-    }
 }
-# หมายเหตุ: port 80 ถูกจัดการโดย ws-stunnel (HTTP CONNECT tunnel)
 NGINXEOF
   ln -sf /etc/nginx/sites-available/chaiya /etc/nginx/sites-enabled/chaiya 2>/dev/null || true
 fi
-if nginx -t 2>/dev/null; then
-  systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
-  sleep 1
-  systemctl is-active --quiet nginx     && echo "  ✅ nginx reload/restart สำเร็จ"     || { echo "  ⚠ nginx ไม่ active — พยายาม start ใหม่..."; nginx 2>/dev/null || true; }
-else
-  echo "  ❌ nginx config error — ตรวจ: nginx -t"
-  nginx -t
-fi
+nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null && echo "  ✅ nginx reload สำเร็จ"
 
-# 6. ทดสอบ API จริง (ใช้ /api/status พร้อม token แทน /api/token public)
+# 6. ทดสอบ API จริง
 sleep 1
-_fix_tok=$(cat /etc/chaiya/sshws-token.conf 2>/dev/null | tr -d '[:space:]')
-_api_test=$(curl -s --max-time 5 -H "X-Token: ${_fix_tok}" "http://127.0.0.1:6789/api/status" 2>/dev/null)
-if echo "$_api_test" | grep -q '"connections"'; then
+_api_test=$(curl -s --max-time 5 "http://127.0.0.1:6789/api/token" 2>/dev/null)
+if echo "$_api_test" | grep -q '"token"'; then
   echo "  ✅ API ตอบสนองถูกต้อง"
 else
   echo "  ❌ API ไม่ตอบสนอง: $_api_test"
