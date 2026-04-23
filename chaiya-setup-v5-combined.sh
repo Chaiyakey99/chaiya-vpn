@@ -418,7 +418,15 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt()).decode())
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"       2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"   2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPassword','${XUI_PASS_HASH}');" 2>/dev/null || true
-  ok "3x-ui credentials ตั้งค่าแล้ว"
+  # ── เปิด IP Limit tracking + Traffic stats (จำเป็นสำหรับหน้าออนไลน์) ──
+  for _key in enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
+    sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
+  done
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('enableIpLimit','true');"              2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('enableTrafficStatistics','true');"    2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('timeLocation','Asia/Bangkok');"       2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('trafficDiffReset','false');"          2>/dev/null || true
+  ok "3x-ui credentials + IP/Traffic tracking ตั้งค่าแล้ว"
 fi
 
 systemctl start x-ui
@@ -1250,6 +1258,230 @@ class Handler(BaseHTTPRequestHandler):
                 run_cmd("systemctl reload x-ui 2>/dev/null || systemctl restart x-ui 2>/dev/null || true")
             
             respond(self, 200, {'ok': True, 'user': user, 'actions': actions})
+
+        elif self.path == '/api/delete_vless':
+            import sqlite3 as _sq3, json as _json
+            user = data.get('user', '').strip()
+            inbound_id = data.get('inboundId')
+            if not user:
+                return respond(self, 400, {'error': 'user required'})
+            if not os.path.exists(XUI_DB):
+                return respond(self, 404, {'error': 'xui db not found'})
+            try:
+                con = _sq3.connect(XUI_DB)
+                rows = con.execute(
+                    "SELECT id, settings FROM inbounds WHERE enable=1" if not inbound_id
+                    else "SELECT id, settings FROM inbounds WHERE id=?", *([[inbound_id]] if inbound_id else [])
+                ).fetchall()
+                deleted = 0
+                for ib_id, settings_str in rows:
+                    try:
+                        s = _json.loads(settings_str)
+                        clients = s.get('clients', [])
+                        new_clients = [c for c in clients if c.get('email') != user and c.get('id') != user]
+                        if len(new_clients) < len(clients):
+                            s['clients'] = new_clients
+                            con.execute("UPDATE inbounds SET settings=? WHERE id=?", (_json.dumps(s), ib_id))
+                            deleted += len(clients) - len(new_clients)
+                    except: pass
+                con.commit()
+                con.close()
+                if deleted > 0:
+                    run_cmd("systemctl restart x-ui 2>/dev/null || true")
+                respond(self, 200, {'ok': deleted > 0, 'deleted': deleted, 'user': user})
+            except Exception as e:
+                respond(self, 500, {'error': str(e)})
+
+        elif self.path == '/api/reset_traffic':
+            import sqlite3 as _sq3, json as _json
+            user = data.get('user', '').strip()
+            inbound_id = data.get('inboundId')
+            if not user:
+                return respond(self, 400, {'error': 'user required'})
+            if not os.path.exists(XUI_DB):
+                return respond(self, 404, {'error': 'xui db not found'})
+            try:
+                con = _sq3.connect(XUI_DB)
+                rows = con.execute(
+                    "SELECT id, settings FROM inbounds WHERE enable=1" if not inbound_id
+                    else "SELECT id, settings FROM inbounds WHERE id=?", *([[inbound_id]] if inbound_id else [])
+                ).fetchall()
+                reset = 0
+                for ib_id, settings_str in rows:
+                    try:
+                        s = _json.loads(settings_str)
+                        changed = False
+                        for c in s.get('clients', []):
+                            if c.get('email') == user or c.get('id') == user:
+                                c['up'] = 0
+                                c['down'] = 0
+                                changed = True
+                        if changed:
+                            con.execute("UPDATE inbounds SET settings=?,up=0,down=0 WHERE id=?", (_json.dumps(s), ib_id))
+                            reset += 1
+                    except: pass
+                # รีเซต client_traffics ด้วยถ้ามี table นี้
+                try:
+                    con2 = _sq3.connect(XUI_DB)
+                    con2.execute("UPDATE client_traffics SET up=0, down=0 WHERE email=?", (user,))
+                    con2.commit()
+                    con2.close()
+                except: pass
+                con.commit()
+                con.close()
+                if reset > 0:
+                    run_cmd("systemctl restart x-ui 2>/dev/null || true")
+                respond(self, 200, {'ok': True, 'reset': reset, 'user': user})
+            except Exception as e:
+                respond(self, 500, {'error': str(e)})
+
+        elif self.path == '/api/extend_vless':
+            import sqlite3 as _sq3, json as _json, datetime as _dt
+            user = data.get('user', '').strip()
+            days = int(data.get('days', 30))
+            inbound_id = data.get('inboundId')
+            if not user:
+                return respond(self, 400, {'error': 'user required'})
+            if not os.path.exists(XUI_DB):
+                return respond(self, 404, {'error': 'xui db not found'})
+            try:
+                con = _sq3.connect(XUI_DB)
+                rows = con.execute(
+                    "SELECT id, settings FROM inbounds WHERE enable=1" if not inbound_id
+                    else "SELECT id, settings FROM inbounds WHERE id=?", *([[inbound_id]] if inbound_id else [])
+                ).fetchall()
+                updated = 0
+                new_exp_ms = 0
+                for ib_id, settings_str in rows:
+                    try:
+                        s = _json.loads(settings_str)
+                        changed = False
+                        for c in s.get('clients', []):
+                            if c.get('email') == user or c.get('id') == user:
+                                old_ms = int(c.get('expiryTime', 0) or 0)
+                                now_ms = int(_dt.datetime.now().timestamp() * 1000)
+                                base_ms = max(old_ms, now_ms)
+                                new_exp_ms = base_ms + days * 86400000
+                                c['expiryTime'] = new_exp_ms
+                                changed = True
+                        if changed:
+                            con.execute("UPDATE inbounds SET settings=? WHERE id=?", (_json.dumps(s), ib_id))
+                            updated += 1
+                    except: pass
+                con.commit()
+                con.close()
+                if updated > 0:
+                    run_cmd("systemctl restart x-ui 2>/dev/null || true")
+                respond(self, 200, {'ok': updated > 0, 'user': user, 'days': days, 'expiryTime': new_exp_ms})
+            except Exception as e:
+                respond(self, 500, {'error': str(e)})
+
+        elif self.path == '/api/set_traffic':
+            import sqlite3 as _sq3, json as _json
+            user = data.get('user', '').strip()
+            gb = float(data.get('gb', 0))
+            inbound_id = data.get('inboundId')
+            if not user:
+                return respond(self, 400, {'error': 'user required'})
+            if not os.path.exists(XUI_DB):
+                return respond(self, 404, {'error': 'xui db not found'})
+            try:
+                con = _sq3.connect(XUI_DB)
+                rows = con.execute(
+                    "SELECT id, settings FROM inbounds WHERE enable=1" if not inbound_id
+                    else "SELECT id, settings FROM inbounds WHERE id=?", *([[inbound_id]] if inbound_id else [])
+                ).fetchall()
+                updated = 0
+                for ib_id, settings_str in rows:
+                    try:
+                        s = _json.loads(settings_str)
+                        changed = False
+                        for c in s.get('clients', []):
+                            if c.get('email') == user or c.get('id') == user:
+                                c['totalGB'] = int(gb * 1073741824)
+                                changed = True
+                        if changed:
+                            con.execute("UPDATE inbounds SET settings=? WHERE id=?", (_json.dumps(s), ib_id))
+                            updated += 1
+                    except: pass
+                con.commit()
+                con.close()
+                if updated > 0:
+                    run_cmd("systemctl restart x-ui 2>/dev/null || true")
+                respond(self, 200, {'ok': updated > 0, 'user': user, 'gb': gb})
+            except Exception as e:
+                respond(self, 500, {'error': str(e)})
+
+        elif self.path == '/api/add_traffic':
+            import sqlite3 as _sq3, json as _json
+            user = data.get('user', '').strip()
+            gb = float(data.get('gb', 0))
+            inbound_id = data.get('inboundId')
+            if not user:
+                return respond(self, 400, {'error': 'user required'})
+            if not os.path.exists(XUI_DB):
+                return respond(self, 404, {'error': 'xui db not found'})
+            try:
+                con = _sq3.connect(XUI_DB)
+                rows = con.execute(
+                    "SELECT id, settings FROM inbounds WHERE enable=1" if not inbound_id
+                    else "SELECT id, settings FROM inbounds WHERE id=?", *([[inbound_id]] if inbound_id else [])
+                ).fetchall()
+                updated = 0
+                for ib_id, settings_str in rows:
+                    try:
+                        s = _json.loads(settings_str)
+                        changed = False
+                        for c in s.get('clients', []):
+                            if c.get('email') == user or c.get('id') == user:
+                                old_bytes = int(c.get('totalGB', 0) or 0)
+                                c['totalGB'] = old_bytes + int(gb * 1073741824)
+                                changed = True
+                        if changed:
+                            con.execute("UPDATE inbounds SET settings=? WHERE id=?", (_json.dumps(s), ib_id))
+                            updated += 1
+                    except: pass
+                con.commit()
+                con.close()
+                if updated > 0:
+                    run_cmd("systemctl restart x-ui 2>/dev/null || true")
+                respond(self, 200, {'ok': updated > 0, 'user': user, 'gb': gb})
+            except Exception as e:
+                respond(self, 500, {'error': str(e)})
+
+        elif self.path == '/api/vless_users':
+            import sqlite3 as _sq3, json as _json
+            if not os.path.exists(XUI_DB):
+                return respond(self, 200, {'ok': True, 'users': []})
+            try:
+                con = _sq3.connect(XUI_DB)
+                rows = con.execute(
+                    "SELECT id, remark, port, protocol, settings, up, down, total, expiry_time, enable FROM inbounds"
+                ).fetchall()
+                con.close()
+                all_users = []
+                for ib_id, remark, port, proto, settings_str, ib_up, ib_down, ib_total, ib_exp, ib_enable in rows:
+                    try:
+                        s = _json.loads(settings_str)
+                        for c in s.get('clients', []):
+                            all_users.append({
+                                'inboundId': ib_id,
+                                'inbound': remark,
+                                'port': port,
+                                'protocol': proto,
+                                'user': c.get('email') or c.get('id', ''),
+                                'uuid': c.get('id', ''),
+                                'up': ib_up,
+                                'down': ib_down,
+                                'totalGB': c.get('totalGB', 0),
+                                'expiryTime': c.get('expiryTime', 0),
+                                'limitIp': c.get('limitIp', 0),
+                                'enable': c.get('enable', True),
+                            })
+                    except: pass
+                respond(self, 200, {'ok': True, 'users': all_users})
+            except Exception as e:
+                respond(self, 500, {'error': str(e)})
 
         else:
             respond(self, 404, {'error': 'not found'})
