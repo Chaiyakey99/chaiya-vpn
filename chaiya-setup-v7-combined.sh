@@ -58,14 +58,14 @@ BANNER
 # 109   Dropbear SSH port 2
 # 143   Dropbear SSH port 1
 # 443   nginx HTTPS panel (ถ้ามี SSL cert)
-# 2053  3x-ui panel (internal)
+# 2503  3x-ui panel (internal)
 # 7300  badvpn-udpgw (127.0.0.1 เท่านั้น)
 # 8080  xui VMess-WS inbound
 # 8880  xui VLESS-WS inbound
 # 6789  chaiya-sshws-api (127.0.0.1 เท่านั้น)
 
 SSH_API_PORT=6789
-XUI_PORT=2053
+XUI_PORT=2503
 DROPBEAR_PORT1=143
 DROPBEAR_PORT2=109
 BADVPN_PORT=7300
@@ -420,8 +420,6 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt()).decode())
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"       2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"   2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPassword','${XUI_PASS_HASH}');" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='webBasePath';" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webBasePath','/xui/');" 2>/dev/null || true
   # ── เปิด IP Limit tracking + Traffic stats (จำเป็นสำหรับหน้าออนไลน์) ──
   for _key in enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
@@ -459,7 +457,6 @@ if [[ -f "$XUI_DB" ]]; then
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableTrafficStatistics','true');" 2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('timeLocation','Asia/Bangkok');"    2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('trafficDiffReset','false');"       2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','/xui/');"            2>/dev/null || true
   # ตรวจสอบว่า settings ถูกบันทึก
   _ip_setting=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='enableIpLimit';" 2>/dev/null)
   [[ "$_ip_setting" == "true" ]] && ok "x-ui IP Limit + Traffic tracking ยืนยันแล้ว" || warn "ตรวจสอบ x-ui settings อีกครั้งหลังติดตั้ง"
@@ -672,7 +669,7 @@ class Handler(BaseHTTPRequestHandler):
             respond(self, 200, {'users': list_ssh_users()})
 
         elif self.path == '/api/info':
-            xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '2053'
+            xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '2503'
             respond(self, 200, {
                 'host': get_host(),
                 'xui_port': int(xui_port),
@@ -841,18 +838,23 @@ server {
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Content-Type,Authorization,Cookie" always;
     }
-    # 3x-ui Panel UI — เข้าถึงได้ที่ https://${DOMAIN}/xui/
-    location /xui/ {
-        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
+}
+# 3x-ui panel accessible via HTTPS on port 2503 through nginx SSL proxy
+server {
+    listen 2503 ssl http2;
+    server_name ${DOMAIN};
+    ssl_certificate     ${SSL_CERT};
+    ssl_certificate_key ${SSL_KEY};
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    location / {
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header Cookie \$http_cookie;
         proxy_read_timeout 60s;
-        proxy_cookie_path / /xui/;
-        proxy_cookie_flags ~ nosecure samesite=lax;
     }
 }
 EOF
@@ -893,18 +895,6 @@ server {
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Content-Type,Authorization,Cookie" always;
     }
-    # 3x-ui Panel UI — เข้าถึงได้ที่ http://${DOMAIN}:81/xui/
-    location /xui/ {
-        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header Cookie \$http_cookie;
-        proxy_read_timeout 60s;
-        proxy_cookie_path / /xui/;
-        proxy_cookie_flags ~ nosecure samesite=lax;
-    }
 }
 EOF
 fi
@@ -920,11 +910,9 @@ info "ตั้งค่า Firewall..."
 ufw --force reset &>/dev/null
 ufw default deny incoming &>/dev/null
 ufw default allow outgoing &>/dev/null
-for port in 22 80 81 109 143 443 8080 8880; do
+for port in 22 80 81 109 143 443 2503 8080 8880; do
   ufw allow "$port"/tcp &>/dev/null
 done
-# ปิด port 3x-ui จาก public — เข้าได้ผ่าน nginx proxy /xui/ เท่านั้น
-ufw deny "${REAL_XUI_PORT}"/tcp &>/dev/null
 ufw deny 6789/tcp &>/dev/null
 ufw deny 7300/tcp &>/dev/null
 ufw allow 7300/udp &>/dev/null
@@ -968,7 +956,7 @@ cat > /usr/local/bin/menu << 'MENUEOF'
 G='\033[1;32m' C='\033[1;36m' Y='\033[1;33m' R='\033[0;31m' N='\033[0m'
 DOMAIN=$(cat /etc/chaiya/domain.conf 2>/dev/null || echo "")
 SERVER_IP=$(cat /etc/chaiya/my_ip.conf 2>/dev/null || hostname -I | awk '{print $1}')
-XUI_PORT=$(cat /etc/chaiya/xui-port.conf 2>/dev/null || echo "2053")
+XUI_PORT=$(cat /etc/chaiya/xui-port.conf 2>/dev/null || echo "2503")
 XUI_USER=$(cat /etc/chaiya/xui-user.conf 2>/dev/null || echo "admin")
 clear
 echo ""
@@ -1358,7 +1346,7 @@ class Handler(BaseHTTPRequestHandler):
             respond(self, 200, {'ok': True, 'banned': banned, 'count': len(banned)})
 
         elif self.path == '/api/info':
-            xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '2053'
+            xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '2503'
             respond(self, 200, {
                 'host': get_host(),
                 'xui_port': int(xui_port),
@@ -1904,8 +1892,7 @@ else
 fi
 echo -e "  👤 3x-ui User  : ${YELLOW}${XUI_USER}${NC}"
 echo -e "  🔒 3x-ui Pass  : ${YELLOW}${XUI_PASS}${NC}"
-echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}https://${DOMAIN}/xui/${NC}"
-echo -e "  🖥  3x-ui Direct: ${YELLOW}http://${DOMAIN}:${REAL_XUI_PORT}/ (internal only)${NC}"
+echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}https://${DOMAIN}:2503/${NC}"
 echo -e "  🐻 Dropbear    : ${CYAN}port 143, 109${NC}"
 echo -e "  🌐 WS-Tunnel   : ${CYAN}port 80 → Dropbear:143${NC}"
 echo -e "  🎮 BadVPN UDPGW: ${CYAN}port 7300${NC}"
