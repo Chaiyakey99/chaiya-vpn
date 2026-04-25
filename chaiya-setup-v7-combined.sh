@@ -838,6 +838,19 @@ server {
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Content-Type,Authorization,Cookie" always;
     }
+    # 3x-ui Panel UI — เข้าถึงได้ที่ https://${DOMAIN}/xui/
+    location /xui/ {
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Cookie \$http_cookie;
+        proxy_read_timeout 60s;
+        proxy_cookie_path / /xui/;
+        proxy_cookie_flags ~ nosecure samesite=lax;
+    }
 }
 EOF
 else
@@ -877,6 +890,18 @@ server {
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Content-Type,Authorization,Cookie" always;
     }
+    # 3x-ui Panel UI — เข้าถึงได้ที่ http://${DOMAIN}:81/xui/
+    location /xui/ {
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Cookie \$http_cookie;
+        proxy_read_timeout 60s;
+        proxy_cookie_path / /xui/;
+        proxy_cookie_flags ~ nosecure samesite=lax;
+    }
 }
 EOF
 fi
@@ -892,9 +917,11 @@ info "ตั้งค่า Firewall..."
 ufw --force reset &>/dev/null
 ufw default deny incoming &>/dev/null
 ufw default allow outgoing &>/dev/null
-for port in 22 80 81 109 143 443 8080 8880 "${REAL_XUI_PORT}"; do
+for port in 22 80 81 109 143 443 8080 8880; do
   ufw allow "$port"/tcp &>/dev/null
 done
+# ปิด port 3x-ui จาก public — เข้าได้ผ่าน nginx proxy /xui/ เท่านั้น
+ufw deny "${REAL_XUI_PORT}"/tcp &>/dev/null
 ufw deny 6789/tcp &>/dev/null
 ufw deny 7300/tcp &>/dev/null
 ufw allow 7300/udp &>/dev/null
@@ -1874,7 +1901,8 @@ else
 fi
 echo -e "  👤 3x-ui User  : ${YELLOW}${XUI_USER}${NC}"
 echo -e "  🔒 3x-ui Pass  : ${YELLOW}${XUI_PASS}${NC}"
-echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}https://${DOMAIN}:2053/${NC}"
+echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}https://${DOMAIN}/xui/${NC}"
+echo -e "  🖥  3x-ui Direct: ${YELLOW}http://${DOMAIN}:${REAL_XUI_PORT}/ (internal only)${NC}"
 echo -e "  🐻 Dropbear    : ${CYAN}port 143, 109${NC}"
 echo -e "  🌐 WS-Tunnel   : ${CYAN}port 80 → Dropbear:143${NC}"
 echo -e "  🎮 BadVPN UDPGW: ${CYAN}port 7300${NC}"
