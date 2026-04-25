@@ -839,24 +839,6 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type,Authorization,Cookie" always;
     }
 }
-# 3x-ui panel accessible via HTTPS on port 2503 through nginx SSL proxy
-server {
-    listen 2503 ssl;
-    server_name ${DOMAIN};
-    ssl_certificate     ${SSL_CERT};
-    ssl_certificate_key ${SSL_KEY};
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         HIGH:!aNULL:!MD5;
-    location / {
-        proxy_pass http://127.0.0.1:${REAL_XUI_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header Cookie \$http_cookie;
-        proxy_read_timeout 60s;
-    }
-}
 EOF
 else
 cat > /etc/nginx/sites-available/chaiya << EOF
