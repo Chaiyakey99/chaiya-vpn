@@ -841,7 +841,7 @@ server {
 }
 # 3x-ui panel accessible via HTTPS on port 2503 through nginx SSL proxy
 server {
-    listen 2503 ssl http2;
+    listen 2503 ssl;
     server_name ${DOMAIN};
     ssl_certificate     ${SSL_CERT};
     ssl_certificate_key ${SSL_KEY};
