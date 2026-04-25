@@ -401,7 +401,7 @@ info "ติดตั้ง 3x-ui..."
 if ! command -v x-ui &>/dev/null; then
   _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
   curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" -o "$_xui_sh" 2>/dev/null
-  printf "y\n${XUI_PORT}\n2\n\n\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1
+  printf "y\n${XUI_PORT}\n\n\n\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1
   rm -f "$_xui_sh"
 fi
 
@@ -422,6 +422,9 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt()).decode())
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
   done
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"       2>/dev/null || true
+  # ล้าง basePath ให้ใช้ root "/" เสมอ ไม่งั้น proxy /xui-api/ จะ 404
+  sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='webBasePath';" 2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','');" 2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"   2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPassword','${XUI_PASS_HASH}');" 2>/dev/null || true
   # ── เปิด IP Limit tracking + Traffic stats (จำเป็นสำหรับหน้าออนไลน์) ──
@@ -803,6 +806,8 @@ http://nginx.org/packages/ubuntu ${_codename} nginx" \
 fi
 apt-get install -y nginx
 ok "ติดตั้ง Nginx ใหม่สำเร็จ ($(nginx -v 2>&1 | grep -oP '[\d.]+'))"
+# ลบ default.conf ที่ nginx install สร้างขึ้นมาใหม่
+rm -f /etc/nginx/conf.d/default.conf
 
 info "ตั้งค่า Nginx..."
 # nginx.org package ใช้ conf.d/ ไม่ใช่ sites-enabled/
