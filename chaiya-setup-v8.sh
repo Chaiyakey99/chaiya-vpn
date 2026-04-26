@@ -196,6 +196,15 @@ ok "OpenSSH พร้อม"
 
 # ── DROPBEAR ─────────────────────────────────────────────────
 info "ตั้งค่า Dropbear..."
+
+# ติดตั้ง dropbear ถ้ายังไม่มี (ไม่ใช้ || true เพื่อให้รู้ว่าสำเร็จไหม)
+if ! command -v dropbear &>/dev/null; then
+  apt-get install -y dropbear 2>/dev/null || apt-get install -y dropbear-bin 2>/dev/null || true
+fi
+
+if ! command -v dropbear &>/dev/null; then
+  warn "ไม่พบ dropbear binary — ข้ามขั้นตอนนี้"
+else
 systemctl stop dropbear 2>/dev/null || true
 mkdir -p /etc/dropbear
 [[ ! -f /etc/dropbear/dropbear_rsa_host_key ]]     && dropbearkey -t rsa     -f /etc/dropbear/dropbear_rsa_host_key     2>/dev/null || true
@@ -204,6 +213,24 @@ mkdir -p /etc/dropbear
 
 grep -q '/bin/false' /etc/shells     2>/dev/null || echo '/bin/false'         >> /etc/shells
 grep -q '/usr/sbin/nologin' /etc/shells 2>/dev/null || echo '/usr/sbin/nologin' >> /etc/shells
+
+# สร้าง systemd unit หลัก (บาง distro ไม่มีมาให้)
+if [[ ! -f /lib/systemd/system/dropbear.service ]] && [[ ! -f /etc/systemd/system/dropbear.service ]]; then
+cat > /etc/systemd/system/dropbear.service << 'DBSVC'
+[Unit]
+Description=Dropbear SSH Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dropbear -F -p 143 -p 109
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+DBSVC
+fi
 
 mkdir -p /etc/systemd/system/dropbear.service.d
 cat > /etc/systemd/system/dropbear.service.d/override.conf << EOF
@@ -219,6 +246,7 @@ systemctl enable dropbear
 systemctl stop dropbear 2>/dev/null || true
 sleep 1
 systemctl start dropbear
+fi
 # รอ Dropbear พร้อมสูงสุด 15 วินาที
 _db_ok=0
 for _i in $(seq 1 5); do
