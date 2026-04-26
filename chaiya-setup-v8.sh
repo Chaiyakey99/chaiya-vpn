@@ -66,8 +66,8 @@ BANNER
 # 6789  chaiya-sshws-api (127.0.0.1 เท่านั้น)
 
 SSH_API_PORT=6789
-XUI_PORT=54321       # x-ui internal port (nginx จะ proxy ออก port 2503)
-XUI_NGINX_PORT=2503  # port ที่ user เปิด browser มา
+XUI_PORT=54321       # x-ui internal port (default x-ui)
+XUI_NGINX_PORT=2503  # port ที่ nginx proxy ออกให้ user เปิด browser
 DROPBEAR_PORT1=143
 DROPBEAR_PORT2=109
 BADVPN_PORT=7300
@@ -727,7 +727,7 @@ class Handler(BaseHTTPRequestHandler):
             respond(self, 200, {'users': list_ssh_users()})
 
         elif self.path == '/api/info':
-            xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '54321'
+            xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '2503'
             respond(self, 200, {
                 'host': get_host(),
                 'xui_port': int(xui_port),
@@ -819,6 +819,9 @@ curl -s --max-time 3 http://127.0.0.1:6789/api/status | grep -q '"ok"' && \
   ok "SSH API พร้อม (port 6789)" || warn "SSH API อาจยังไม่พร้อม"
 
 # ── SSL CERTIFICATE ───────────────────────────────────────────
+# เปิด port 8888 ก่อน certbot เพื่อป้องกัน ufw บล็อก standalone challenge
+ufw allow 8888/tcp &>/dev/null || true
+
 info "ขอ SSL Certificate สำหรับ ${DOMAIN}..."
 SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
@@ -876,6 +879,7 @@ cat > /etc/nginx/conf.d/chaiya.conf << EOF
 # ── Dashboard (port 81 HTTPS) ──────────────────────────────────
 server {
     listen 81 ssl http2;
+    listen [::]:81 ssl http2;
     server_name ${DOMAIN};
     ssl_certificate     ${SSL_CERT};
     ssl_certificate_key ${SSL_KEY};
@@ -916,9 +920,11 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type,Authorization,Cookie" always;
     }
 }
-# ── 3x-ui Panel (port 2503 HTTPS proxy) ───────────────────────
+
+# ── 3x-ui Panel proxy (port 2503 HTTPS) ───────────────────────
 server {
     listen 2503 ssl http2;
+    listen [::]:2503 ssl http2;
     server_name ${DOMAIN};
     ssl_certificate     ${SSL_CERT};
     ssl_certificate_key ${SSL_KEY};
@@ -927,15 +933,17 @@ server {
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 10m;
     location / {
-        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header Authorization \$http_authorization;
-        proxy_read_timeout 60s;
+        proxy_read_timeout 120s;
         proxy_cookie_path / /;
     }
 }
@@ -945,6 +953,7 @@ cat > /etc/nginx/conf.d/chaiya.conf << EOF
 # ── Dashboard (port 81 HTTP) ───────────────────────────────────
 server {
     listen 81;
+    listen [::]:81;
     server_name ${DOMAIN} _;
     root /opt/chaiya-panel;
     index index.html;
@@ -978,29 +987,31 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type,Authorization,Cookie" always;
     }
 }
-# ── 3x-ui Panel (port 2503 HTTP proxy) ────────────────────────
+
+# ── 3x-ui Panel proxy (port 2503 HTTP) ────────────────────────
 server {
     listen 2503;
+    listen [::]:2503;
     server_name ${DOMAIN} _;
-    client_max_body_size 100m;
     location / {
-        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT};
         proxy_http_version 1.1;
-        proxy_buffering off;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto "http";
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header Authorization \$http_authorization;
-        proxy_read_timeout 60s;
+        proxy_read_timeout 120s;
         proxy_cookie_path / /;
     }
 }
 EOF
 fi
 
-nginx -t && systemctl restart nginx && ok "Nginx พร้อม (port 81 + 2503)" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
+nginx -t && systemctl restart nginx && ok "Nginx พร้อม (Dashboard:81 / 3x-ui proxy:2503)" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
 # start ws-stunnel คืนหลัง nginx config เสร็จ
 systemctl start chaiya-sshws 2>/dev/null || true
 
@@ -1012,10 +1023,11 @@ ufw default allow outgoing &>/dev/null
 for port in 22 80 81 109 143 443 2503 8080 8880; do
   ufw allow "$port"/tcp &>/dev/null
 done
-# 6789 (SSH API) และ 54321 (x-ui internal) — ปิดจากภายนอก
-ufw deny 6789/tcp &>/dev/null
-ufw deny 7300/tcp &>/dev/null
+# 6789 (SSH API), 54321 (x-ui internal), 7300/tcp — ปิดจากภายนอก
+ufw deny 6789/tcp  &>/dev/null
+ufw deny 7300/tcp  &>/dev/null
 ufw deny 54321/tcp &>/dev/null
+ufw deny 8888/tcp  &>/dev/null
 # 7300/udp เปิดสำหรับ badvpn-udpgw (bind 127.0.0.1 แต่ต้องให้ client tunnel ผ่าน SSH มาได้)
 ufw allow 7300/udp &>/dev/null
 ufw --force enable &>/dev/null
@@ -1448,7 +1460,7 @@ class Handler(BaseHTTPRequestHandler):
             respond(self, 200, {'ok': True, 'banned': banned, 'count': len(banned)})
 
         elif self.path == '/api/info':
-            xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '54321'
+            xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '2503'
             respond(self, 200, {
                 'host': get_host(),
                 'xui_port': int(xui_port),
@@ -1998,11 +2010,16 @@ if [[ $USE_SSL -eq 1 ]]; then
   echo -e "  🔒 SSL         : ${GREEN}✅ HTTPS พร้อม${NC}"
 else
   echo -e "  🌐 Panel URL   : ${YELLOW}http://${DOMAIN}:81 (ยังไม่มี SSL)${NC}"
-  echo -e "  🔒 SSL         : ${YELLOW}⚠️  ยังไม่มี — รัน: certbot certonly --standalone --http-01-port 8888 -d ${DOMAIN}${NC}"
+  echo -e "  🔒 SSL         : ${YELLOW}⚠️  ยังไม่มี${NC}"
+  echo -e "              รัน: certbot certonly --standalone --http-01-port 8888 -d ${DOMAIN}"
 fi
 echo -e "  👤 3x-ui User  : ${YELLOW}${XUI_USER}${NC}"
 echo -e "  🔒 3x-ui Pass  : ${YELLOW}${XUI_PASS}${NC}"
-echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}https://${DOMAIN}:2503/${NC}"
+if [[ $USE_SSL -eq 1 ]]; then
+  echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}https://${DOMAIN}:2503/${NC} (ผ่าน nginx proxy)"
+else
+  echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}http://${DOMAIN}:2503/${NC} (ผ่าน nginx proxy)"
+fi
 echo -e "  🐻 Dropbear    : ${CYAN}port 143, 109${NC}"
 echo -e "  🌐 WS-Tunnel   : ${CYAN}port 80 → Dropbear:143${NC}"
 echo -e "  🎮 BadVPN UDPGW: ${CYAN}port 7300${NC}"
