@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHAIYA PROJECT — Login</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --c1:#00d4ff;--c2:#7b2fff;--c3:#ff2d78;
+  --bg:#04060f;--card:rgba(10,15,35,0.85);
+  --border:rgba(0,212,255,0.25);
+  --text:#e8f4ff;--sub:rgba(180,210,255,0.55);
+}
+html,body{height:100%;overflow:hidden}
+body{
+  background:var(--bg);
+  font-family:'Sarabun',sans-serif;
+  display:flex;align-items:center;justify-content:center;
+  position:relative;
+}
+
+/* ── Starfield ── */
+canvas#stars{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+/* ── Ambient blobs ── */
+.blob{position:fixed;border-radius:50%;filter:blur(80px);opacity:0.18;pointer-events:none;z-index:0;animation:drift 12s ease-in-out infinite alternate}
+.blob1{width:500px;height:500px;background:radial-gradient(circle,var(--c2),transparent 70%);top:-100px;left:-100px;animation-delay:0s}
+.blob2{width:400px;height:400px;background:radial-gradient(circle,var(--c1),transparent 70%);bottom:-80px;right:-80px;animation-delay:-6s}
+.blob3{width:300px;height:300px;background:radial-gradient(circle,var(--c3),transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:-3s}
+@keyframes drift{0%{transform:translate(0,0) scale(1)}100%{transform:translate(30px,20px) scale(1.08)}}
+.blob3{animation:drift3 15s ease-in-out infinite alternate}
+@keyframes drift3{0%{transform:translate(-50%,-50%) scale(1)}100%{transform:translate(calc(-50% + 20px),calc(-50% + 15px)) scale(1.1)}}
+
+/* ── Main card ── */
+.wrap{position:relative;z-index:10;width:100%;max-width:400px;padding:20px}
+
+/* ── Logo area ── */
+.logo-area{text-align:center;margin-bottom:32px}
+.logo-ring{
+  position:relative;width:110px;height:110px;margin:0 auto 18px;
+  display:flex;align-items:center;justify-content:center;
+}
+.ring-svg{position:absolute;inset:0;width:100%;height:100%;animation:spin 8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ring-inner{
+  width:80px;height:80px;border-radius:50%;
+  background:radial-gradient(circle at 35% 35%,#1a2a4a,#060c1e);
+  display:flex;align-items:center;justify-content:center;
+  position:relative;z-index:2;
+  box-shadow:0 0 30px rgba(0,212,255,0.4),inset 0 0 20px rgba(0,212,255,0.1);
+  animation:pulse-ring 3s ease-in-out infinite;
+}
+@keyframes pulse-ring{
+  0%,100%{box-shadow:0 0 25px rgba(0,212,255,0.6),0 0 50px rgba(0,212,255,0.3),0 0 80px rgba(123,47,255,0.2),inset 0 0 15px rgba(0,212,255,0.15)}
+  50%{box-shadow:0 0 60px rgba(0,212,255,1),0 0 100px rgba(0,212,255,0.6),0 0 150px rgba(123,47,255,0.5),inset 0 0 30px rgba(0,212,255,0.25)}
+}
+.heartbeat-svg{width:44px;height:28px;filter:drop-shadow(0 0 6px var(--c1))}
+.heartbeat-path{
+  stroke:var(--c1);stroke-width:2.5;fill:none;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:120;stroke-dashoffset:120;
+  animation:draw 1.8s ease-in-out infinite;
+}
+@keyframes draw{
+  0%{stroke-dashoffset:120;opacity:0.4}
+  40%{stroke-dashoffset:0;opacity:1}
+  70%{stroke-dashoffset:0;opacity:1}
+  100%{stroke-dashoffset:-120;opacity:0.4}
+}
+
+.logo-title{
+  font-family:'Orbitron',monospace;font-weight:900;
+  font-size:2rem;letter-spacing:0.15em;
+  background:linear-gradient(135deg,var(--c1) 0%,#a78bfa 50%,var(--c1) 100%);
+  background-size:200% auto;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  animation:shimmer 4s linear infinite;
+}
+@keyframes shimmer{to{background-position:200% center}}
+.logo-sub{font-size:0.72rem;letter-spacing:0.35em;color:var(--sub);margin-top:2px}
+.logo-badge{
+  display:inline-block;margin-top:10px;
+  padding:4px 16px;border-radius:20px;
+  border:1px solid rgba(0,212,255,0.3);
+  font-size:0.65rem;letter-spacing:0.25em;color:var(--c1);
+  background:rgba(0,212,255,0.06);
+}
+
+/* ── Card ── */
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:28px 24px;
+  backdrop-filter:blur(20px);
+  box-shadow:0 0 0 1px rgba(0,212,255,0.05),0 20px 60px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.05);
+  position:relative;overflow:hidden;
+}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--c1),var(--c2),transparent);
+  opacity:0.6;
+}
+
+
+.sec-title{
+  font-family:'Orbitron',monospace;font-size:0.7rem;letter-spacing:0.2em;
+  color:var(--c1);margin-bottom:20px;display:flex;align-items:center;gap:8px;
+}
+.sec-title::before{content:'';width:3px;height:14px;background:var(--c1);border-radius:2px;display:inline-block}
+
+/* alert */
+.alert{
+  padding:10px 14px;border-radius:8px;font-size:0.85rem;margin-bottom:16px;
+  display:none;animation:fadeIn 0.3s ease;
+}
+.alert.show{display:block}
+.alert.ok{background:rgba(0,255,150,0.1);border:1px solid rgba(0,255,150,0.3);color:#00ff96}
+.alert.err{background:rgba(255,50,80,0.1);border:1px solid rgba(255,50,80,0.3);color:#ff5070}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+
+/* fields */
+.fg{margin-bottom:16px}
+.flbl{font-size:0.78rem;color:var(--sub);margin-bottom:6px;letter-spacing:0.05em}
+.fi-wrap{position:relative;display:flex;align-items:center}
+.fi{
+  width:100%;padding:12px 14px 12px 40px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(0,212,255,0.2);border-radius:10px;
+  color:var(--text);font-size:0.95rem;font-family:'Sarabun',sans-serif;
+  transition:border-color 0.3s,box-shadow 0.3s;outline:none;
+}
+.fi:focus{border-color:var(--c1);box-shadow:0 0 0 3px rgba(0,212,255,0.12)}
+.fi::placeholder{color:rgba(180,210,255,0.3)}
+.fi-icon{position:absolute;left:13px;font-size:1rem;pointer-events:none;z-index:1}
+.fi-eye{position:absolute;right:12px;cursor:pointer;color:var(--sub);font-size:1rem;transition:color 0.2s}
+.fi-eye:hover{color:var(--c1)}
+
+/* buttons */
+.btn-login{
+  width:100%;padding:14px;border:none;border-radius:10px;cursor:pointer;
+  font-family:'Sarabun',sans-serif;font-size:1rem;font-weight:600;
+  background:linear-gradient(135deg,var(--c2),var(--c1));
+  color:#fff;letter-spacing:0.05em;
+  position:relative;overflow:hidden;
+  transition:transform 0.2s,box-shadow 0.2s;
+  box-shadow:0 4px 20px rgba(123,47,255,0.4);
+  margin-bottom:10px;
+}
+.btn-login:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(123,47,255,0.6)}
+.btn-login:active{transform:translateY(0)}
+.btn-login::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(255,255,255,0.15),transparent);
+  pointer-events:none;
+}
+.btn-reset{
+  width:100%;padding:12px;border:1px solid rgba(0,212,255,0.25);border-radius:10px;cursor:pointer;
+  font-family:'Sarabun',sans-serif;font-size:0.9rem;
+  background:rgba(0,212,255,0.06);color:var(--sub);
+  transition:all 0.2s;
+}
+.btn-reset:hover{border-color:var(--c1);color:var(--c1);background:rgba(0,212,255,0.1)}
+
+/* footer */
+.footer{text-align:center;margin-top:18px;font-size:0.6rem;letter-spacing:0.15em;color:rgba(180,210,255,0.25)}
+
+/* ── Modal ── */
+.modal-overlay{
+  position:fixed;inset:0;z-index:100;
+  background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity 0.3s;
+}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{
+  background:rgba(8,12,28,0.96);border:1px solid var(--border);
+  border-radius:16px;padding:28px 24px;width:90%;max-width:380px;
+  position:relative;
+  box-shadow:0 0 60px rgba(0,212,255,0.15),0 30px 80px rgba(0,0,0,0.8);
+  transform:translateY(20px);transition:transform 0.3s;
+}
+.modal-overlay.open .modal{transform:translateY(0)}
+.modal-close{
+  position:absolute;top:14px;right:14px;background:none;border:none;
+  color:var(--sub);cursor:pointer;font-size:1.1rem;
+  transition:color 0.2s;
+}
+.modal-close:hover{color:var(--c3)}
+.modal-title{
+  font-family:'Orbitron',monospace;font-size:0.75rem;letter-spacing:0.2em;
+  color:var(--c1);margin-bottom:20px;
+}
+.modal-alert{padding:8px 12px;border-radius:8px;font-size:0.82rem;margin-bottom:14px;display:none}
+.modal-alert.show{display:block}
+.modal-alert.ok{background:rgba(0,255,150,0.1);border:1px solid rgba(0,255,150,0.3);color:#00ff96}
+.modal-alert.err{background:rgba(255,50,80,0.1);border:1px solid rgba(255,50,80,0.3);color:#ff5070}
+</style>
+</head>
+<body>
+
+<canvas id="stars"></canvas>
+<div class="blob blob1"></div>
+<div class="blob blob2"></div>
+<div class="blob blob3"></div>
+
+<div class="wrap">
+  <div class="logo-area">
+    <div class="logo-ring">
+      <!-- spinning ring -->
+      <svg class="ring-svg" viewBox="0 0 110 110">
+        <defs>
+          <linearGradient id="rg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#00d4ff" stop-opacity="0"/>
+            <stop offset="40%" stop-color="#00d4ff" stop-opacity="1"/>
+            <stop offset="60%" stop-color="#7b2fff" stop-opacity="1"/>
+            <stop offset="100%" stop-color="#7b2fff" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <circle cx="55" cy="55" r="50" fill="none" stroke="url(#rg)" stroke-width="2" stroke-dasharray="6 4" opacity="0.7"/>
+        <circle cx="55" cy="55" r="43" fill="none" stroke="rgba(0,212,255,0.15)" stroke-width="1"/>
+      </svg>
+      <!-- inner glow circle -->
+      <div class="ring-inner">
+        <svg class="heartbeat-svg" viewBox="0 0 60 38">
+          <polyline class="heartbeat-path" points="0,19 12,19 18,4 24,34 30,4 36,28 42,19 60,19"/>
+        </svg>
+      </div>
+    </div>
+    <div class="logo-title">CHAIYA</div>
+    <div class="logo-sub">P R O J E C T</div>
+    <div class="logo-sub" style="margin-top:4px;font-size:0.65rem">V 2 R A Y &nbsp;&amp;&nbsp; S S H</div>
+    <div class="logo-badge">ALL-IN-ONE PRO</div>
+  </div>
+
+  <div class="card">
+    <div id="alert-box" class="alert"></div>
+    <div class="sec-title">เข้าสู่ระบบ</div>
+
+    <div class="fg">
+      <div class="flbl">ชื่อผู้ใช้งาน</div>
+      <div class="fi-wrap">
+        <span class="fi-icon">👤</span>
+        <input class="fi" id="username" placeholder="กรอกชื่อผู้ใช้งาน" autocomplete="username">
+      </div>
+    </div>
+    <div class="fg">
+      <div class="flbl">รหัสผ่าน</div>
+      <div class="fi-wrap">
+        <span class="fi-icon">🔒</span>
+        <input class="fi" id="password" type="password" placeholder="กรอกรหัสผ่าน" autocomplete="current-password">
+        <span class="fi-eye" onclick="togglePw()">👁</span>
+      </div>
+    </div>
+
+    <button class="btn-login" onclick="doLogin()">🔐&nbsp; เข้าสู่ระบบ</button>
+    <button class="btn-reset" onclick="openModal()">🔑&nbsp; ตั้งชื่อผู้ใช้ / รหัสผ่านใหม่</button>
+  </div>
+
+  <div class="footer">CHAIYA-PROJECT &nbsp;·&nbsp; V2RAY&amp;SSH ALL-IN-ONE PRO &nbsp;·&nbsp; SECURE · STABLE · FAST</div>
+</div>
+
+<!-- Reset Modal -->
+<div class="modal-overlay" id="resetModal" onclick="closeModalOutside(event)">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title">🔑 ตั้งค่าผู้ใช้ใหม่</div>
+    <div id="modal-alert" class="modal-alert"></div>
+    <div class="fg">
+      <div class="flbl">ชื่อผู้ใช้ใหม่</div>
+      <div class="fi-wrap">
+        <span class="fi-icon">👤</span>
+        <input class="fi" id="new-user" placeholder="กรอกชื่อผู้ใช้ใหม่">
+      </div>
+    </div>
+    <div class="fg">
+      <div class="flbl">รหัสผ่านใหม่</div>
+      <div class="fi-wrap">
+        <span class="fi-icon">🔒</span>
+        <input class="fi" id="new-pass" type="password" placeholder="กรอกรหัสผ่านใหม่">
+        <span class="fi-eye" onclick="togglePw('new-pass',this)">👁</span>
+      </div>
+    </div>
+    <div class="fg">
+      <div class="flbl">ยืนยันรหัสผ่าน</div>
+      <div class="fi-wrap">
+        <span class="fi-icon">🔒</span>
+        <input class="fi" id="confirm-pass" type="password" placeholder="ยืนยันรหัสผ่านใหม่">
+        <span class="fi-eye" onclick="togglePw('confirm-pass',this)">👁</span>
+      </div>
+    </div>
+    <button class="btn-login" onclick="doReset()">✅&nbsp; บันทึก</button>
+  </div>
+</div>
+
+<script>
+// ── Fireflies ──
+(function(){
+  const c=document.getElementById('stars');
+  const ctx=c.getContext('2d');
+  let W,H,flies=[];
+  const COLORS=['rgba(180,255,120,','rgba(120,255,180,','rgba(200,255,100,','rgba(100,220,255,'];
+  function resize(){W=c.width=innerWidth;H=c.height=innerHeight;init()}
+  function init(){
+    flies=[];
+    for(let i=0;i<55;i++){
+      const col=COLORS[Math.floor(Math.random()*COLORS.length)];
+      flies.push({
+        x:Math.random()*W, y:Math.random()*H,
+        r:Math.random()*2+1,
+        a:Math.random(), // current alpha
+        ta:Math.random(), // target alpha
+        speed:Math.random()*0.008+0.003, // fade speed
+        vx:(Math.random()-0.5)*0.4,
+        vy:(Math.random()-0.5)*0.4,
+        wx:(Math.random()-0.5)*0.02, // wander
+        wy:(Math.random()-0.5)*0.02,
+        col:col,
+        glowR:Math.random()*12+6,
+        pause:Math.random()*80, // pause before changing target
+        pauseT:0,
+      });
+    }
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    flies.forEach(f=>{
+      // wander
+      f.vx+=f.wx; f.vy+=f.wy;
+      f.vx*=0.98; f.vy*=0.98;
+      f.x+=f.vx; f.y+=f.vy;
+      if(f.x<0)f.x=W; if(f.x>W)f.x=0;
+      if(f.y<0)f.y=H; if(f.y>H)f.y=0;
+
+      // blink toward target alpha
+      if(f.pauseT>0){ f.pauseT--; }
+      else{
+        if(Math.abs(f.a-f.ta)<0.02){
+          f.ta=Math.random();
+          f.pauseT=f.pause;
+        }
+        f.a+=(f.ta-f.a)*f.speed;
+      }
+
+      // draw glow
+      const g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,f.glowR*2);
+      g.addColorStop(0,f.col+(f.a*0.9)+')');
+      g.addColorStop(0.4,f.col+(f.a*0.4)+')');
+      g.addColorStop(1,f.col+'0)');
+      ctx.beginPath();ctx.arc(f.x,f.y,f.glowR*2,0,Math.PI*2);
+      ctx.fillStyle=g;ctx.fill();
+
+      // draw core dot
+      ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
+      ctx.fillStyle=f.col+(Math.min(f.a+0.3,1))+')';
+      ctx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+  window.addEventListener('resize',resize);
+  resize();draw();
+})();
+
+// ── UI helpers ──
+function showAlert(msg,type){
+  const el=document.getElementById('alert-box');
+  el.textContent=msg;el.className='alert '+type+' show';
+}
+function showModalAlert(msg,type){
+  const el=document.getElementById('modal-alert');
+  el.textContent=msg;el.className='modal-alert '+type+' show';
+}
+function togglePw(id='password',btn=null){
+  const inp=document.getElementById(id);
+  inp.type=inp.type==='password'?'text':'password';
+  if(btn)btn.textContent=inp.type==='password'?'👁':'🙈';
+}
+function openModal(){document.getElementById('resetModal').classList.add('open')}
+function closeModal(){document.getElementById('resetModal').classList.remove('open')}
+function closeModalOutside(e){if(e.target===document.getElementById('resetModal'))closeModal()}
+
+// ── Login ──
+async function doLogin(){
+  const u=document.getElementById('username').value.trim();
+  const p=document.getElementById('password').value;
+  if(!u||!p)return showAlert('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน','err');
+  showAlert('กำลังเข้าสู่ระบบ...','ok');
+  try{
+    const fd=new URLSearchParams({username:u,password:p});
+    const r=await fetch('/xui-api/login',{method:'POST',body:fd});
+    const j=await r.json().catch(()=>({}));
+    if(j.success){
+      sessionStorage.setItem('chaiya_auth',JSON.stringify({user:u,pass:p,exp:Date.now()+86400000}));
+      window.location.href='sshws.html';
+    }else{
+      showAlert('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง','err');
+    }
+  }catch(e){
+    showAlert('เชื่อมต่อ server ไม่ได้: '+e.message,'err');
+  }
+}
+
+// ── Reset ──
+async function doReset(){
+  const u=document.getElementById('new-user').value.trim();
+  const p=document.getElementById('new-pass').value;
+  const c=document.getElementById('confirm-pass').value;
+  if(!u||!p||!c)return showModalAlert('กรุณากรอกข้อมูลให้ครบ','err');
+  if(p!==c)return showModalAlert('รหัสผ่านไม่ตรงกัน','err');
+  try{
+    const r=await fetch('/api/reset_panel_user',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:u,password:p})
+    });
+    const j=await r.json().catch(()=>({}));
+    if(j.ok){
+      showModalAlert('เปลี่ยนข้อมูลสำเร็จ ✓ กรุณา login ใหม่','ok');
+      setTimeout(()=>closeModal(),2000);
+    }else{
+      showModalAlert('ผิดพลาด: '+(j.error||'unknown'),'err');
+    }
+  }catch(e){
+    showModalAlert('เชื่อมต่อ server ไม่ได้','err');
+  }
+}
+
+// Enter key
+document.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+</script>
+</body>
+</html>
