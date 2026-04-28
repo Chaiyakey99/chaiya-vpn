@@ -501,11 +501,11 @@ fi
 systemctl start x-ui
 sleep 5
 
-# รอ x-ui พร้อม
+# รอ x-ui พร้อม — อ่าน port จาก DB ที่เราตั้งไว้เสมอ (ไม่ใช้ ss เพราะอาจได้ port เก่า)
 REAL_XUI_PORT="$XUI_PORT"
+_db_port=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
+[[ -n "$_db_port" ]] && REAL_XUI_PORT="$_db_port"
 for _i in $(seq 1 15); do
-  _p=$(ss -tlnp 2>/dev/null | grep x-ui | grep -oP ':\K\d+' | head -1)
-  [[ -n "$_p" ]] && REAL_XUI_PORT="$_p"
   curl -s --max-time 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null | grep -q "^[123]" && break
   sleep 2
 done
