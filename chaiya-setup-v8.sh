@@ -53,7 +53,6 @@ BANNER
 [[ $EUID -ne 0 ]] && err "รันด้วย root หรือ sudo เท่านั้น"
 
 # ── PORT MAP ────────────────────────────────────────────────
-# 22    OpenSSH (admin)
 # 80    ws-stunnel HTTP-CONNECT → Dropbear:143
 # 109   Dropbear SSH port 2
 # 143   Dropbear SSH port 1
