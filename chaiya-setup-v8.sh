@@ -178,7 +178,7 @@ fi
 
 # ── FORCE FREE PORTS ─────────────────────────────────────────
 # พอร์ตทุกตัวที่สคริปต์ใช้ — ถ้ามี process อื่นจับอยู่ให้ kill ทันที
-_REQUIRED_PORTS=(22 80 109 143 443 2503 7300 8080 8880 54321 6789)
+_REQUIRED_PORTS=(80 109 143 443 2503 7300 8080 8880 54321 6789)  # ไม่รวม 22 — ห้าม kill SSH
 for _port in "${_REQUIRED_PORTS[@]}"; do
   # หา pid ทุกตัวที่ฟังอยู่บน port นั้น (TCP)
   _pids=$(lsof -ti tcp:$_port 2>/dev/null)
