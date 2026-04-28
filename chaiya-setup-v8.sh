@@ -176,10 +176,22 @@ if [[ -f /etc/x-ui/x-ui.db ]]; then
   sqlite3 /etc/x-ui/x-ui.db "DELETE FROM settings;" 2>/dev/null || true
 fi
 
-# ล้าง port binding ที่อาจค้างอยู่
-for _port in 80 443 6789 7300; do
-  _pid=$(lsof -ti tcp:$_port 2>/dev/null || fuser $_port/tcp 2>/dev/null | awk '{print $1}')
-  [[ -n "$_pid" ]] && kill -9 $_pid 2>/dev/null || true
+# ── FORCE FREE PORTS ─────────────────────────────────────────
+# พอร์ตทุกตัวที่สคริปต์ใช้ — ถ้ามี process อื่นจับอยู่ให้ kill ทันที
+_REQUIRED_PORTS=(22 80 109 143 443 2503 7300 8080 8880 54321 6789)
+for _port in "${_REQUIRED_PORTS[@]}"; do
+  # หา pid ทุกตัวที่ฟังอยู่บน port นั้น (TCP)
+  _pids=$(lsof -ti tcp:$_port 2>/dev/null)
+  if [[ -z "$_pids" ]]; then
+    _pids=$(fuser $_port/tcp 2>/dev/null)
+  fi
+  if [[ -n "$_pids" ]]; then
+    for _pid in $_pids; do
+      _pname=$(ps -p $_pid -o comm= 2>/dev/null || echo "unknown")
+      warn "Port $_port ถูกใช้โดย $_pname (PID $_pid) — kill ทันที"
+      kill -9 "$_pid" 2>/dev/null || true
+    done
+  fi
 done
 sleep 1
 
@@ -469,14 +481,12 @@ print(bcrypt.hashpw(pw, bcrypt.gensalt()).decode())
 " "$XUI_PASS" 2>/dev/null || echo "$XUI_PASS")
 
   sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS_HASH}' WHERE id=1;" 2>/dev/null || true
-  for _key in webPort webUsername webPassword; do
+  for _key in webPort webUsername webPassword webBasePath; do
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
   done
-  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"       2>/dev/null || true
-  # ล้าง basePath ให้ใช้ root "/" เสมอ ไม่งั้น proxy /xui-api/ จะ 404
-  sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='webBasePath';" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','');" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"   2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"          2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webBasePath','/');"                2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"      2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPassword','${XUI_PASS_HASH}');" 2>/dev/null || true
   # ── เปิด IP Limit tracking + Traffic stats (จำเป็นสำหรับหน้าออนไลน์) ──
   for _key in enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
@@ -508,15 +518,20 @@ ok "3x-ui พร้อม (port $REAL_XUI_PORT)"
 XUI_DB="/etc/x-ui/x-ui.db"
 if [[ -f "$XUI_DB" ]]; then
   systemctl stop x-ui 2>/dev/null; sleep 2
-  for _key in enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
+  # force webPort + basePath ซ้ำหลัง x-ui start เพราะ x-ui อาจ overwrite ค่าตอน init
+  for _key in webPort webBasePath enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
   done
-  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableIpLimit','true');"           2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableTrafficStatistics','true');" 2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('timeLocation','Asia/Bangkok');"    2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('trafficDiffReset','false');"       2>/dev/null || true
-  # ตรวจสอบว่า settings ถูกบันทึก
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"            2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','/');"                  2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableIpLimit','true');"             2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableTrafficStatistics','true');"   2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('timeLocation','Asia/Bangkok');"      2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('trafficDiffReset','false');"         2>/dev/null || true
+  # ยืนยัน
+  _port_check=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
   _ip_setting=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='enableIpLimit';" 2>/dev/null)
+  [[ "$_port_check" == "${XUI_PORT}" ]] && ok "x-ui webPort=${XUI_PORT} ยืนยันแล้ว" || warn "webPort อาจไม่ถูกต้อง: $_port_check"
   [[ "$_ip_setting" == "true" ]] && ok "x-ui IP Limit + Traffic tracking ยืนยันแล้ว" || warn "ตรวจสอบ x-ui settings อีกครั้งหลังติดตั้ง"
   systemctl start x-ui; sleep 3
 fi
@@ -1031,17 +1046,33 @@ info "ตั้งค่า Firewall..."
 ufw --force reset &>/dev/null
 ufw default deny incoming &>/dev/null
 ufw default allow outgoing &>/dev/null
+
+# เปิดพอร์ตที่ต้องใช้งาน (public)
 for port in 22 80 109 143 443 2503 8080 8880; do
   ufw allow "$port"/tcp &>/dev/null
+  ok "ufw allow $port/tcp"
 done
-# 6789 (SSH API), 54321 (x-ui internal), 7300/tcp — ปิดจากภายนอก
-ufw deny 6789/tcp  &>/dev/null
-ufw deny 7300/tcp  &>/dev/null
-ufw deny 54321/tcp &>/dev/null
-ufw deny 8888/tcp  &>/dev/null
-# 7300/udp เปิดสำหรับ badvpn-udpgw (bind 127.0.0.1 แต่ต้องให้ client tunnel ผ่าน SSH มาได้)
+
+# 7300/udp สำหรับ badvpn-udpgw (client tunnel ผ่าน SSH มา)
 ufw allow 7300/udp &>/dev/null
+ok "ufw allow 7300/udp"
+
+# ปิดพอร์ต internal — ห้ามเข้าจากนอก
+for port in 6789 54321 8888; do
+  ufw deny "$port"/tcp &>/dev/null
+done
+
 ufw --force enable &>/dev/null
+
+# ยืนยันว่าพอร์ตสำคัญเปิดอยู่จริง
+info "ตรวจสอบพอร์ต..."
+for port in 22 80 109 143 443 2503 8080 8880; do
+  if ss -tlnp 2>/dev/null | grep -q ":${port} " ||      ufw status | grep -q "^${port}"; then
+    ok "port $port พร้อม"
+  else
+    warn "port $port ยังไม่มี service ฟัง (อาจปกติถ้า service ยังไม่ start)"
+  fi
+done
 ok "Firewall พร้อม"
 
 # ── CONFIG.JS ────────────────────────────────────────────────
