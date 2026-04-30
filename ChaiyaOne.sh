@@ -5,12 +5,12 @@
 #   Repo : https://github.com/YOUR_USERNAME/chaiya-panel
 # ============================================================
 
-set -euo pipefail
+set -o pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 # ── CONFIG — แก้ตรงนี้ก่อน push ขึ้น GitHub ──────────────
-GITHUB_USER="YOUR_USERNAME"
-GITHUB_REPO="chaiya-panel"
+GITHUB_USER="Chaiyakey99"
+GITHUB_REPO="chaiya-vpn"
 GITHUB_BRANCH="main"
 RAW="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}"
 # ─────────────────────────────────────────────────────────────
@@ -20,6 +20,7 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 ok()   { echo -e "${GREEN}[OK]${NC} $1"; }
 info() { echo -e "${CYAN}[INFO]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 err()  { echo -e "${RED}[ERR]${NC} $1"; exit 1; }
 dl()   { curl -fsSL "$1" -o "$2" || err "ดาวน์โหลดล้มเหลว: $1"; }
 
@@ -56,10 +57,26 @@ info "ติดตั้ง dependencies..."
 apt-get update -qq
 apt-get install -y -qq \
     nginx certbot python3 python3-pip \
-    dropbear badvpn curl wget sqlite3 \
+    dropbear curl wget sqlite3 \
     || err "ติดตั้ง deps ไม่สำเร็จ"
-pip3 install bcrypt --break-system-packages -q
+pip3 install bcrypt --break-system-packages -q 2>/dev/null || \
+    pip3 install bcrypt -q 2>/dev/null || true
 ok "Dependencies พร้อม"
+
+# ── BADVPN BINARY ──────────────────────────────────────────
+# Ubuntu 22/24 ไม่มี badvpn ใน apt — โหลด binary โดยตรง
+info "ติดตั้ง BadVPN..."
+if [[ ! -x /usr/bin/badvpn-udpgw ]]; then
+    wget -q --timeout=15 -O /usr/bin/badvpn-udpgw \
+        "https://raw.githubusercontent.com/NevermoreSSH/Blueblue/main/newudpgw" 2>/dev/null && \
+        chmod +x /usr/bin/badvpn-udpgw || rm -f /usr/bin/badvpn-udpgw
+    if [[ ! -f /usr/bin/badvpn-udpgw ]]; then
+        wget -q --timeout=15 -O /usr/bin/badvpn-udpgw \
+            "https://raw.githubusercontent.com/bagaswastu/badvpn/master/udpgw/badvpn-udpgw" 2>/dev/null && \
+            chmod +x /usr/bin/badvpn-udpgw || true
+    fi
+fi
+[[ -x /usr/bin/badvpn-udpgw ]] && ok "BadVPN binary พร้อม" || warn "BadVPN ข้ามไป (ไม่มี binary)"
 
 # ── INSTALL X-UI ───────────────────────────────────────────
 info "ติดตั้ง x-ui..."
@@ -77,33 +94,45 @@ ok "x-ui พร้อม"
 
 # ── DROPBEAR ───────────────────────────────────────────────
 info "ตั้งค่า Dropbear..."
-mkdir -p /etc/dropbear
-[[ ! -f /etc/dropbear/dropbear_rsa_host_key ]]   && dropbearkey -t rsa   -f /etc/dropbear/dropbear_rsa_host_key -s 2048 2>/dev/null
-[[ ! -f /etc/dropbear/dropbear_ecdsa_host_key ]] && dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key 2>/dev/null
+_DB_BIN=""
+for _p in /usr/sbin/dropbear /usr/bin/dropbear; do
+    [[ -x "$_p" ]] && _DB_BIN="$_p" && break
+done
 
-for PORT in 143 109; do
+if [[ -z "$_DB_BIN" ]]; then
+    warn "ไม่พบ dropbear binary"
+else
+    mkdir -p /etc/dropbear
+    [[ ! -f /etc/dropbear/dropbear_rsa_host_key ]]   && dropbearkey -t rsa   -f /etc/dropbear/dropbear_rsa_host_key -s 2048 2>/dev/null || true
+    [[ ! -f /etc/dropbear/dropbear_ecdsa_host_key ]] && dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key 2>/dev/null || true
+
+    for PORT in 143 109; do
 cat > /etc/systemd/system/dropbear-${PORT}.service << EOF
 [Unit]
 Description=Dropbear SSH port ${PORT}
 After=network.target
 [Service]
-ExecStart=/usr/sbin/dropbear -F -p ${PORT} -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key
+ExecStart=$_DB_BIN -F -p ${PORT} -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key
 Restart=always
+RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-done
+    done
 
-systemctl daemon-reload
-systemctl enable --now dropbear-143 dropbear-109
-ok "Dropbear พร้อม"
+    systemctl daemon-reload
+    systemctl enable --now dropbear-143 dropbear-109
+    ok "Dropbear พร้อม (port 143, 109)"
+fi
 
-# ── BADVPN ─────────────────────────────────────────────────
-info "ติดตั้ง BadVPN..."
-dl "${RAW}/services/chaiya-badvpn.service" /etc/systemd/system/chaiya-badvpn.service
-systemctl daemon-reload
-systemctl enable --now chaiya-badvpn
-ok "BadVPN พร้อม"
+# ── BADVPN SERVICE ─────────────────────────────────────────
+if [[ -x /usr/bin/badvpn-udpgw ]]; then
+    info "เปิด BadVPN service..."
+    dl "${RAW}/services/chaiya-badvpn.service" /etc/systemd/system/chaiya-badvpn.service
+    systemctl daemon-reload
+    systemctl enable --now chaiya-badvpn
+    ok "BadVPN พร้อม (port 7300)"
+fi
 
 # ── WS-STUNNEL ─────────────────────────────────────────────
 info "ติดตั้ง WS-Stunnel..."
@@ -142,7 +171,6 @@ window.CHAIYA_CONFIG = {
 };
 CFGEOF
 
-# บันทึก credentials
 mkdir -p /etc/chaiya
 echo "${XUI_USER}"       > /etc/chaiya/xui-user.conf
 echo "${XUI_PASS}"       > /etc/chaiya/xui-pass.conf
@@ -166,12 +194,12 @@ systemctl start chaiya-sshws 2>/dev/null || true
 # ── NGINX ──────────────────────────────────────────────────
 info "ตั้งค่า nginx..."
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+mkdir -p /etc/nginx/conf.d
 
 if [[ $USE_SSL -eq 1 ]]; then
-    # โหลด nginx config จาก GitHub แล้วแทน placeholder
     dl "${RAW}/nginx/chaiya.conf" /etc/nginx/conf.d/chaiya.conf
-    sed -i "s|DOMAIN_PLACEHOLDER|${DOMAIN}|g"         /etc/nginx/conf.d/chaiya.conf
-    sed -i "s|PORT_PLACEHOLDER|${REAL_XUI_PORT}|g"    /etc/nginx/conf.d/chaiya.conf
+    sed -i "s|DOMAIN_PLACEHOLDER|${DOMAIN}|g"      /etc/nginx/conf.d/chaiya.conf
+    sed -i "s|PORT_PLACEHOLDER|${REAL_XUI_PORT}|g" /etc/nginx/conf.d/chaiya.conf
 else
     info "ไม่มี SSL — ใช้ config แบบ plain"
     cat > /etc/nginx/conf.d/chaiya.conf << NGEOF
@@ -181,7 +209,11 @@ server {
     index index.html;
     location / { try_files \$uri \$uri/ =404; add_header Cache-Control "no-store"; }
     location /api/ { proxy_pass http://127.0.0.1:6789/api/; proxy_http_version 1.1; proxy_set_header Host \$host; }
-    location /xui-api/ { proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/; proxy_http_version 1.1; proxy_set_header Host \$host; proxy_cookie_path / /xui-api/; }
+    location /xui-api/ { proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/; proxy_http_version 1.1; proxy_set_header Host \$host; proxy_cookie_path / /; }
+}
+server {
+    listen 2503;
+    location / { proxy_pass http://127.0.0.1:${REAL_XUI_PORT}; proxy_http_version 1.1; proxy_set_header Host \$host; }
 }
 NGEOF
 fi
@@ -194,32 +226,47 @@ info "ติดตั้ง menu..."
 dl "${RAW}/bin/menu" /usr/local/bin/menu
 chmod +x /usr/local/bin/menu
 ln -sf /usr/local/bin/menu /usr/local/bin/chaiya
-
-grep -q 'chaiya' /root/.bashrc || echo 'exec /usr/local/bin/chaiya' >> /root/.bashrc
+grep -q 'chaiya' /root/.bashrc || echo 'alias menu="/usr/local/bin/chaiya"' >> /root/.bashrc
 ok "Menu พร้อม"
 
 # ── UFW ────────────────────────────────────────────────────
 info "ตั้งค่า firewall..."
-ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 109/tcp
-ufw allow 143/tcp
-ufw allow 443/tcp
-ufw allow 2503/tcp
-ufw allow 7300/udp
-ufw allow 8080/tcp
-ufw allow 8880/tcp
-ufw deny  6789/tcp
-ufw deny  54321/tcp
+ufw allow 22/tcp   2>/dev/null || true
+ufw allow 80/tcp   2>/dev/null || true
+ufw allow 109/tcp  2>/dev/null || true
+ufw allow 143/tcp  2>/dev/null || true
+ufw allow 443/tcp  2>/dev/null || true
+ufw allow 2503/tcp 2>/dev/null || true
+ufw allow 7300/udp 2>/dev/null || true
+ufw allow 8080/tcp 2>/dev/null || true
+ufw allow 8880/tcp 2>/dev/null || true
+ufw deny  6789/tcp  2>/dev/null || true
+ufw deny  54321/tcp 2>/dev/null || true
 ufw --force enable
 ok "Firewall พร้อม"
+
+# ── FINAL CHECK ────────────────────────────────────────────
+echo ""
+info "ตรวจสอบ services..."
+for svc in nginx x-ui dropbear-143 dropbear-109 chaiya-sshws chaiya-ssh-api chaiya-badvpn; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+        ok "$svc ✅"
+    else
+        warn "$svc ⚠️"
+    fi
+done
 
 # ── DONE ───────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}${BOLD}════════════════════════════════════════${NC}"
 echo -e "${GREEN}  ติดตั้งเสร็จสมบูรณ์!${NC}"
-echo -e "${CYAN}  Panel : https://${DOMAIN}${NC}"
-echo -e "${CYAN}  X-UI  : https://${DOMAIN}:2503${NC}"
+if [[ $USE_SSL -eq 1 ]]; then
+    echo -e "${CYAN}  Panel : https://${DOMAIN}${NC}"
+    echo -e "${CYAN}  X-UI  : https://${DOMAIN}:2503${NC}"
+else
+    echo -e "${YELLOW}  Panel : http://${DOMAIN}:443 (ไม่มี SSL)${NC}"
+    echo -e "${YELLOW}  X-UI  : http://${DOMAIN}:2503${NC}"
+fi
 echo -e "${YELLOW}  User  : ${XUI_USER} / ${XUI_PASS}${NC}"
 echo -e "${GREEN}${BOLD}════════════════════════════════════════${NC}"
 echo ""
