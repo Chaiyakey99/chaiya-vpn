@@ -128,7 +128,20 @@ fi
 # ── BADVPN SERVICE ─────────────────────────────────────────
 if [[ -x /usr/bin/badvpn-udpgw ]]; then
     info "เปิด BadVPN service..."
-    dl "${RAW}/services/chaiya-badvpn.service" /etc/systemd/system/chaiya-badvpn.service
+    cat > /etc/systemd/system/chaiya-badvpn.service << 'EOF'
+[Unit]
+Description=BadVPN UDPGW
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 500 --max-connections-for-client 10
+Restart=always
+RestartSec=5
+User=nobody
+
+[Install]
+WantedBy=multi-user.target
+EOF
     systemctl daemon-reload
     systemctl enable --now chaiya-badvpn
     ok "BadVPN พร้อม (port 7300)"
