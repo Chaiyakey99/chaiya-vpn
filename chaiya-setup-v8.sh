@@ -836,6 +836,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable chaiya-ssh-api
+fuser -k 6789/tcp 2>/dev/null || true
 systemctl restart chaiya-ssh-api
 sleep 2
 curl -s --max-time 3 http://127.0.0.1:6789/api/status | grep -q '"ok"' && \
@@ -2035,6 +2036,7 @@ ok "Dashboard HTML อัพเดตแล้ว"
 
 # ── STEP 3: Restart services ───────────────────────────────────
 info "Restart services..."
+fuser -k 6789/tcp 2>/dev/null || true
 systemctl restart chaiya-ssh-api
 sleep 2
 systemctl is-active --quiet chaiya-ssh-api && ok "chaiya-ssh-api ✅" || echo "⚠️ chaiya-ssh-api อาจมีปัญหา"
