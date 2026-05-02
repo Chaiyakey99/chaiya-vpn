@@ -1431,6 +1431,164 @@ def get_online_ssh_users():
         return online
     except:
         return []
+def get_system_info():
+    """อ่านข้อมูล CPU / RAM / Disk / Network จาก /proc โดยตรง — ไม่ง้อ x-ui"""
+    import time as _time
+
+    # ── CPU ──────────────────────────────────────────────────────
+    cpu_percent = 0.0
+    cpu_cores   = 1
+    try:
+        def _read_cpu():
+            line = open('/proc/stat').readline()
+            vals = list(map(int, line.split()[1:]))
+            idle = vals[3]
+            total = sum(vals)
+            return total, idle
+        t1, i1 = _read_cpu(); _time.sleep(0.3); t2, i2 = _read_cpu()
+        dt = t2 - t1; di = i2 - i1
+        cpu_percent = round((1 - di / dt) * 100, 1) if dt > 0 else 0.0
+        cpu_cores = 0
+        for line in open('/proc/cpuinfo'):
+            if line.startswith('processor'): cpu_cores += 1
+        if cpu_cores == 0: cpu_cores = 1
+    except: pass
+
+    # ── RAM ──────────────────────────────────────────────────────
+    mem_total = mem_used = mem_free = 0
+    try:
+        mem = {}
+        for line in open('/proc/meminfo'):
+            k, v = line.split(':')
+            mem[k.strip()] = int(v.split()[0])
+        mem_total = mem.get('MemTotal', 0)
+        mem_available = mem.get('MemAvailable', mem.get('MemFree', 0))
+        mem_used  = mem_total - mem_available
+        mem_free  = mem_available
+    except: pass
+
+    def _kb_to_gb(kb):
+        return round(kb / 1024 / 1024, 2)
+
+    ram_percent = round(mem_used / mem_total * 100, 1) if mem_total else 0
+
+    # ── Disk ─────────────────────────────────────────────────────
+    disk_total = disk_used = disk_free = 0
+    disk_percent = 0.0
+    try:
+        import os as _os
+        st = _os.statvfs('/')
+        disk_total = st.f_blocks * st.f_frsize
+        disk_free  = st.f_bavail * st.f_frsize
+        disk_used  = disk_total - disk_free
+        disk_percent = round(disk_used / disk_total * 100, 1) if disk_total else 0
+    except: pass
+
+    def _bytes_to_gb(b):
+        return round(b / 1024 / 1024 / 1024, 2)
+
+    # ── Uptime ───────────────────────────────────────────────────
+    uptime_str = ''
+    try:
+        secs = float(open('/proc/uptime').read().split()[0])
+        d = int(secs // 86400); h = int((secs % 86400) // 3600)
+        m = int((secs % 3600) // 60)
+        if d > 0:   uptime_str = f'{d}d {h}h {m}m'
+        elif h > 0: uptime_str = f'{h}h {m}m'
+        else:       uptime_str = f'{m}m'
+    except: uptime_str = '--'
+
+    # ── Network I/O ──────────────────────────────────────────────
+    net_rx_bytes = net_tx_bytes = 0
+    net_rx_speed = net_tx_speed = 0
+    net_iface = ''
+    try:
+        def _read_net():
+            best_rx = best_tx = 0
+            iface = ''
+            for line in open('/proc/net/dev'):
+                line = line.strip()
+                if ':' not in line: continue
+                name, data = line.split(':', 1)
+                name = name.strip()
+                if name in ('lo',): continue
+                cols = data.split()
+                rx, tx = int(cols[0]), int(cols[8])
+                if rx + tx > best_rx + best_tx:
+                    best_rx, best_tx, iface = rx, tx, name
+            return best_rx, best_tx, iface
+        rx1, tx1, iface = _read_net()
+        _time.sleep(0.5)
+        rx2, tx2, _ = _read_net()
+        net_rx_bytes = rx2; net_tx_bytes = tx2; net_iface = iface
+        net_rx_speed = max(0, int((rx2 - rx1) / 0.5))
+        net_tx_speed = max(0, int((tx2 - tx1) / 0.5))
+    except: pass
+
+    def _fmt_speed(bps):
+        if bps >= 1024*1024: return f'{round(bps/1024/1024,1)} MB/s'
+        if bps >= 1024:      return f'{round(bps/1024,1)} KB/s'
+        return f'{bps} B/s'
+
+    def _fmt_bytes(b):
+        if b >= 1024**3: return f'{round(b/1024**3,2)} GB'
+        if b >= 1024**2: return f'{round(b/1024**2,2)} MB'
+        return f'{round(b/1024,2)} KB'
+
+    # ── x-ui version & inbound count ─────────────────────────────
+    xray_version = ''
+    inbound_count = 0
+    try:
+        import sqlite3 as _sq3
+        _db = find_xui_db()
+        if _os.path.exists(_db):
+            con = _sq3.connect(_db, timeout=5); con.execute('PRAGMA journal_mode=WAL')
+            rows = con.execute("SELECT COUNT(*) FROM inbounds WHERE enable=1").fetchone()
+            inbound_count = rows[0] if rows else 0
+            con.close()
+    except: pass
+    try:
+        _, ver, _ = run_cmd("xray version 2>/dev/null | head -1 | awk '{print $2}'")
+        xray_version = ver.strip()
+    except: pass
+
+    return {
+        'success': True,
+        'obj': {
+            'cpu':          cpu_percent,
+            'cpuCores':     cpu_cores,
+            'mem': {
+                'current':  mem_used * 1024,
+                'total':    mem_total * 1024,
+            },
+            'memUsed':      _kb_to_gb(mem_used),
+            'memTotal':     _kb_to_gb(mem_total),
+            'memPercent':   ram_percent,
+            'disk': {
+                'current':  disk_used,
+                'total':    disk_total,
+            },
+            'diskUsed':     _bytes_to_gb(disk_used),
+            'diskTotal':    _bytes_to_gb(disk_free + disk_used),
+            'diskPercent':  disk_percent,
+            'uptime':       uptime_str,
+            'xray': {
+                'version':  xray_version,
+                'state':    'running' if xray_version else 'unknown',
+            },
+            'inbounds':     inbound_count,
+            'netIO': {
+                'up':       net_tx_speed,
+                'down':     net_rx_speed,
+                'upStr':    _fmt_speed(net_tx_speed),
+                'downStr':  _fmt_speed(net_rx_speed),
+                'upTotal':  _fmt_bytes(net_tx_bytes),
+                'downTotal':_fmt_bytes(net_rx_bytes),
+                'iface':    net_iface,
+            },
+        }
+    }
+
 def get_banned_users():
     """ดึงรายการ IP ที่ถูก block ใน iptables (x-ui จะ ban ด้วย iptables)"""
     banned = []
@@ -1606,32 +1764,8 @@ class Handler(BaseHTTPRequestHandler):
                 'udpgw_port': 7300,
             })
         elif self.path == '/api/server-status':
-            import urllib.request as _ur, urllib.parse as _up
             try:
-                xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '54321'
-                xui_user = open('/etc/chaiya/xui-user.conf').read().strip() if os.path.exists('/etc/chaiya/xui-user.conf') else ''
-                xui_pass = open('/etc/chaiya/xui-pass.conf').read().strip() if os.path.exists('/etc/chaiya/xui-pass.conf') else ''
-                base = f'http://127.0.0.1:{xui_port}'
-                login_data = _up.urlencode({'username': xui_user, 'password': xui_pass}).encode()
-                req = _ur.Request(base+'/login', data=login_data, method='POST')
-                req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-                with _ur.urlopen(req, timeout=5) as resp:
-                    cookie = resp.getheader('Set-Cookie', '')
-                    session = ''
-                    for part in cookie.split(';'):
-                        part = part.strip()
-                        if part.startswith('session=') or '3x-ui' in part or 'session' in part.lower():
-                            session = part.split(';')[0].strip()
-                            break
-                    if not session and cookie:
-                        session = cookie.split(';')[0].strip()
-                req2 = _ur.Request(base+'/panel/api/server/status')
-                if session:
-                    req2.add_header('Cookie', session)
-                with _ur.urlopen(req2, timeout=5) as resp2:
-                    import json as _j
-                    data = _j.loads(resp2.read())
-                respond(self, 200, data)
+                respond(self, 200, get_system_info())
             except Exception as e:
                 respond(self, 500, {'success': False, 'error': str(e)})
         elif self.path == '/api/vless_users':
