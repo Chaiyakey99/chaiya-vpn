@@ -102,7 +102,7 @@ ok "IP: ${CYAN}$SERVER_IP${NC}"
 
 
 # ── LICENSE CHECK ─────────────────────────────────────────────
-LICENSE_SERVER="https://license.godvpn.shop/api/check"   # เปลี่ยนเป็น URL จริงของคุณ
+LICENSE_SERVER="http://140.99.98.110:7070"   # Chaiya License Server
 LICENSE_FILE="/etc/chaiya/license.key"
 
 echo ""
@@ -122,22 +122,22 @@ fi
 
 if [[ -z "$_SAVED_KEY" ]]; then
   read -rp "  กรอก License Key: " LICENSE_KEY
-  LICENSE_KEY=$(echo "$LICENSE_KEY" | tr -d '[:space:]')
+  LICENSE_KEY=$(echo "$LICENSE_KEY" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
   [[ -z "$LICENSE_KEY" ]] && err "กรุณาใส่ License Key"
 else
   LICENSE_KEY="$_SAVED_KEY"
 fi
 
-# เช็คกับ license server
+# เช็คกับ license server (GET /api/check?key=...&ip=...)
 info "กำลังตรวจสอบ license..."
-_LIC_RESP=$(curl -s --max-time 10 -X POST "$LICENSE_SERVER" \
-  -H "Content-Type: application/json" \
-  -d "{\"key\":\"${LICENSE_KEY}\",\"ip\":\"${SERVER_IP}\"}" 2>/dev/null)
+_LIC_RESP=$(curl -s --max-time 10 \
+  "${LICENSE_SERVER}/api/check?key=${LICENSE_KEY}&ip=${SERVER_IP}" 2>/dev/null)
 
-_LIC_OK=$(echo "$_LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if d.get('valid') or d.get('ok') else 'no')" 2>/dev/null)
-_LIC_MSG=$(echo "$_LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('message',''))" 2>/dev/null)
+_LIC_STATUS=$(echo "$_LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','error'))" 2>/dev/null)
+_LIC_EXPIRY=$(echo "$_LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('expiry',''))" 2>/dev/null)
+_LIC_MSG=$(echo "$_LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('msg',''))" 2>/dev/null)
 
-if [[ "$_LIC_OK" != "yes" ]]; then
+if [[ "$_LIC_STATUS" != "ok" ]]; then
   echo ""
   echo -e "${RED}╔══════════════════════════════════════╗${NC}"
   echo -e "${RED}║  ❌ License ไม่ถูกต้องหรือหมดอายุ  ║${NC}"
@@ -152,7 +152,7 @@ fi
 mkdir -p /etc/chaiya
 echo "$LICENSE_KEY" > "$LICENSE_FILE"
 chmod 600 "$LICENSE_FILE"
-ok "License ถูกต้อง${_LIC_MSG:+ — $_LIC_MSG}"
+ok "License ถูกต้อง${_LIC_EXPIRY:+ — หมดอายุ: $_LIC_EXPIRY}"
 echo ""
 
 # ── ALWAYS ASK: DOMAIN / USER / PASS ────────────────────────
