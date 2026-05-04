@@ -526,15 +526,10 @@ fi
 
 systemctl start x-ui
 
-# รอ x-ui พร้อม — อ่าน port จาก DB ที่เราตั้งไว้เสมอ (ไม่ใช้ ss เพราะอาจได้ port เก่า)
+# รอ x-ui พร้อม
 REAL_XUI_PORT="$XUI_PORT"
 _db_port=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
 [[ -n "$_db_port" ]] && REAL_XUI_PORT="$_db_port"
-# ดึง webBasePath จาก DB มาใช้กับ nginx proxy
-_db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
-XUI_BASE_PATH="${_db_path:-/}"
-[[ "$XUI_BASE_PATH" != */ ]] && XUI_BASE_PATH="${XUI_BASE_PATH}/"
-# รอสูงสุด 20 วิ (10 × 2s) — break ทันทีเมื่อพร้อม
 for _i in $(seq 1 10); do
   curl -s --max-time 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null | grep -q "^[123]" && break
   sleep 2
@@ -542,32 +537,32 @@ done
 echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
 ok "3x-ui พร้อม (port $REAL_XUI_PORT)"
 
-# ── FIX #5: ใส่ settings อีกครั้งหลัง x-ui start เพื่อป้องกัน x-ui overwrite ──
-# x-ui อาจ init DB ใหม่ตอน start ทับค่าเดิม → insert ซ้ำหลัง start ให้แน่ใจ
+# ── ตั้งค่า x-ui settings (ไม่แตะ webBasePath — ให้ x-ui จัดการเอง) ──
 XUI_DB="/etc/x-ui/x-ui.db"
 if [[ -f "$XUI_DB" ]]; then
   systemctl stop x-ui 2>/dev/null; sleep 1
-  # force webPort + basePath ซ้ำหลัง x-ui start เพราะ x-ui อาจ overwrite ค่าตอน init
-  # ใช้ plaintext password เสมอ — ห้าม hash (dashboard JS login ต้องการ plaintext)
   sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS}' WHERE id=1;" 2>/dev/null || true
-  for _key in webPort webBasePath webUsername webPassword enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
+  for _key in webPort webUsername webPassword enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
   done
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"            2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','/');"                  2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"        2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webPassword','${XUI_PASS}');"        2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableIpLimit','true');"             2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableTrafficStatistics','true');"   2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('timeLocation','Asia/Bangkok');"      2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('trafficDiffReset','false');"         2>/dev/null || true
-  # ยืนยัน
   _port_check=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
-  _ip_setting=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='enableIpLimit';" 2>/dev/null)
   [[ "$_port_check" == "${XUI_PORT}" ]] && ok "x-ui webPort=${XUI_PORT} ยืนยันแล้ว" || warn "webPort อาจไม่ถูกต้อง: $_port_check"
-  [[ "$_ip_setting" == "true" ]] && ok "x-ui IP Limit + Traffic tracking ยืนยันแล้ว" || warn "ตรวจสอบ x-ui settings อีกครั้งหลังติดตั้ง"
-  systemctl start x-ui; sleep 1
+  systemctl start x-ui; sleep 3
 fi
+
+# ── อ่าน webBasePath หลัง x-ui start เสร็จ ──────────────────
+# ดึงค่าที่ x-ui สร้างไว้เอง ไม่เขียนทับ
+_db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
+XUI_BASE_PATH="${_db_path:-/}"
+[[ "$XUI_BASE_PATH" != */ ]] && XUI_BASE_PATH="${XUI_BASE_PATH}/"
+ok "x-ui webBasePath: ${XUI_BASE_PATH}"
 
 # ── สร้าง inbounds ใน x-ui ───────────────────────────────────
 info "สร้าง VMess/VLESS inbounds..."
