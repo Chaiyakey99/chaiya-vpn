@@ -33,6 +33,14 @@ ensure_node() {
   fi
   echo -e "${YELLOW}⚙ ติดตั้ง Node.js v20...${NC}"
   if command -v apt-get &>/dev/null; then
+    # เปลี่ยน mirror เป็น Thailand เพื่อความเร็ว
+    echo -e "${YELLOW}⚙ เปลี่ยน apt mirror → Thailand...${NC}"
+    sudo sed -i 's|http://archive.ubuntu.com|http://th.archive.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true
+    sudo sed -i 's|http://security.ubuntu.com|http://th.archive.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true
+    # ตั้ง timeout ไม่ให้ค้าง
+    echo 'Acquire::http::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/99timeout > /dev/null
+    echo 'Acquire::Retries "3";' | sudo tee -a /etc/apt/apt.conf.d/99timeout > /dev/null
+    sudo apt-get update -qq
     curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
     sudo apt-get install -y nodejs
   elif command -v yum &>/dev/null; then
@@ -130,6 +138,29 @@ app.post('/revoke-license', (req, res) => {
   db.licenses[key].status = 'revoked'; saveDB(db);
   console.log(`[-] Revoked: ${key}`);
   res.json({ success:true, message:`${key} revoked` });
+});
+
+// GET /api/check?key=...&ip=...  ← compat กับ chaiya-setup
+app.get('/api/check', (req, res) => {
+  const { key, ip } = req.query;
+  if (!key) return res.json({ status:'error', msg:'No key provided' });
+  const db = loadDB();
+  const L  = db.licenses[key];
+  if (!L) return res.json({ status:'error', msg:'License not found' });
+  if (L.status === 'revoked') return res.json({ status:'error', msg:'License revoked' });
+  if (Date.now() > L.expiresAt) {
+    L.status = 'expired'; saveDB(db);
+    return res.json({ status:'error', msg:'License expired' });
+  }
+  // บันทึก IP ที่ใช้งาน
+  if (ip && !L.activeDevices.includes(ip)) {
+    if (L.activeDevices.length >= L.maxDevices)
+      return res.json({ status:'error', msg:'Device limit reached' });
+    L.activeDevices.push(ip); saveDB(db);
+  }
+  const expiry = new Date(L.expiresAt).toISOString().split('T')[0];
+  console.log(`[✓] License OK: ${key} | IP: ${ip}`);
+  res.json({ status:'ok', msg:'License valid', expiry, owner:L.owner, product:L.product });
 });
 
 // GET /licenses
