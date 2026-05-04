@@ -171,6 +171,7 @@ pkill -f badvpn-udpgw    2>/dev/null || true
 pkill -f chaiya-ssh-api  2>/dev/null || true
 pkill -f 'app.py'        2>/dev/null || true
 pkill -9 -x nginx        2>/dev/null || true
+sleep 2
 
 # ล้าง nginx config เก่า
 rm -f /etc/nginx/sites-enabled/*
@@ -259,8 +260,6 @@ else
   [[ ! -f /etc/dropbear/dropbear_rsa_host_key ]]     && dropbearkey -t rsa     -f /etc/dropbear/dropbear_rsa_host_key     2>/dev/null || true
   [[ ! -f /etc/dropbear/dropbear_ecdsa_host_key ]]   && dropbearkey -t ecdsa   -f /etc/dropbear/dropbear_ecdsa_host_key   2>/dev/null || true
   [[ ! -f /etc/dropbear/dropbear_ed25519_host_key ]] && dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key 2>/dev/null || true
-  # Ubuntu 24.04 default unit ต้องการ dss key ด้วย — สร้างให้ครบ
-  [[ ! -f /etc/dropbear/dropbear_dss_host_key ]]     && dropbearkey -t dss     -f /etc/dropbear/dropbear_dss_host_key     2>/dev/null || true
 
   grep -q '/bin/false'       /etc/shells 2>/dev/null || echo '/bin/false'       >> /etc/shells
   grep -q '/usr/sbin/nologin' /etc/shells 2>/dev/null || echo '/usr/sbin/nologin' >> /etc/shells
@@ -482,6 +481,7 @@ EOF
 systemctl daemon-reload
 systemctl enable chaiya-sshws
 # ws-stunnel จะ start หลัง nginx — ไม่ start ตอนนี้
+sleep 2
 ok "WS-Stunnel พร้อม (port $WS_TUNNEL_PORT → Dropbear:$DROPBEAR_PORT1)"
 
 # ── 3x-ui INSTALL ────────────────────────────────────────────
@@ -498,17 +498,10 @@ if ! command -v x-ui &>/dev/null; then
   rm -f "$_xui_sh"
 fi
 
-# ถ้า DB ยังไม่มี ให้ start x-ui ก่อนเพื่อให้ init DB แล้วค่อย stop
-XUI_DB="/etc/x-ui/x-ui.db"
-if [[ ! -f "$XUI_DB" ]]; then
-  systemctl start x-ui 2>/dev/null || true
-  # รอ DB init สูงสุด 15 วิ
-  for _i in $(seq 1 15); do [[ -f "$XUI_DB" ]] && break; sleep 1; done
-fi
 systemctl stop x-ui 2>/dev/null || true
-sleep 1
 
 # ตั้งค่า credentials ใน x-ui
+XUI_DB="/etc/x-ui/x-ui.db"
 if [[ -f "$XUI_DB" ]]; then
   # ใช้ plaintext password — x-ui รองรับ plaintext ได้ และ dashboard JS ต้องการ plaintext login
   # ห้าม hash ด้วย bcrypt เพราะ browser login ผ่าน /xui-api/login ต้องส่ง plaintext
@@ -628,6 +621,7 @@ PYEOF
 
 rm -f "$XUI_COOKIE"
 systemctl restart x-ui 2>/dev/null || true
+sleep 2
 ok "Inbounds พร้อม"
 
 # ── SSH API (Python) ──────────────────────────────────────────
@@ -909,12 +903,8 @@ systemctl daemon-reload
 systemctl enable chaiya-ssh-api
 fuser -k 6789/tcp 2>/dev/null || true
 systemctl restart chaiya-ssh-api
-# รอ SSH API พร้อมสูงสุด 10 วิ
-for _i in 1 2 3 4 5; do
-  sleep 2
-  curl -s --max-time 2 http://127.0.0.1:6789/api/status | grep -q '"ok"' && break
-done
-curl -s --max-time 2 http://127.0.0.1:6789/api/status | grep -q '"ok"' && \
+sleep 2
+curl -s --max-time 3 http://127.0.0.1:6789/api/status | grep -q '"ok"' && \
   ok "SSH API พร้อม (port 6789)" || warn "SSH API อาจยังไม่พร้อม"
 
 # ── SSL CERTIFICATE ───────────────────────────────────────────
@@ -948,7 +938,7 @@ fi
 
 # เปิด WS-Stunnel กลับไม่ว่า SSL จะสำเร็จหรือไม่
 info "เปิด WS-Stunnel กลับ..."
-# ไม่ start chaiya-sshws ตอนนี้ — รอหลัง nginx start เสร็จ
+systemctl start chaiya-sshws 2>/dev/null || true
 
 [[ $USE_SSL -eq 1 ]] && ok "SSL Certificate พร้อม" || warn "ไม่มี SSL — ใช้ HTTP แทน"
 
@@ -957,13 +947,38 @@ info "ติดตั้ง Nginx..."
 systemctl stop nginx 2>/dev/null || true
 pkill -9 -x nginx 2>/dev/null || true
 
-# ติดตั้ง nginx จาก nginx.org เสมอ (Ubuntu nginx ใช้ sites-enabled ต่างจาก nginx.org ที่ใช้ conf.d)
-if [[ true ]]; then
+# รอ apt lock ให้ว่างก่อน (กรณี unattended-upgrades กำลังทำงาน)
+_wait_apt() {
+  local _tries=0
+  while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock &>/dev/null; do
+    _tries=$((_tries+1))
+    [[ $_tries -ge 30 ]] && { warn "apt lock ค้างนานเกินไป — พยายามต่อ"; break; }
+    info "รอ apt lock... ($_tries/30)"
+    sleep 5
+  done
+}
+_wait_apt
+
+# ติดตั้ง nginx เฉพาะถ้ายังไม่มี หรือ version เก่าเกินไป
+_nginx_ok=0
+if command -v nginx &>/dev/null && nginx -v 2>&1 | grep -qE '1\.(2[0-9]|[3-9][0-9])'; then
+  # มี binary แต่ต้องตรวจว่า nginx.conf อยู่ด้วย
+  if [[ -f /etc/nginx/nginx.conf ]]; then
+    _nginx_ok=1
+    info "nginx พร้อมอยู่แล้ว ($(nginx -v 2>&1)) — ข้าม reinstall"
+  else
+    warn "nginx binary มีแต่ nginx.conf หาย — reinstall"
+  fi
+fi
+
+if [[ $_nginx_ok -eq 0 ]]; then
+  _wait_apt
   DEBIAN_FRONTEND=noninteractive timeout 60 apt-get purge -y nginx nginx-common nginx-full nginx-core nginx-extras 2>/dev/null || true
   rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
 
   # ใช้ official nginx repo เพื่อให้ได้ nginx 1.24+
   if ! grep -q "nginx.org" /etc/apt/sources.list.d/nginx.list 2>/dev/null; then
+    _wait_apt
     DEBIAN_FRONTEND=noninteractive timeout 60 apt-get install -y -qq gnupg2
     curl -fsSL --max-time 20 https://nginx.org/keys/nginx_signing.key | \
       gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
@@ -974,23 +989,56 @@ http://nginx.org/packages/ubuntu ${_codename} nginx" \
     timeout 60 apt-get update -qq -o Acquire::ForceIPv4=true \
       -o Acquire::http::Timeout=20 2>/dev/null || true
   fi
+  _wait_apt
   DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y nginx
   ok "ติดตั้ง Nginx สำเร็จ ($(nginx -v 2>&1 | grep -oP '[\d.]+'))"
 fi
+
+# ── NGINX.CONF FALLBACK ───────────────────────────────────────
+# กรณี apt lock ทำให้ติดตั้งไม่สมบูรณ์ — สร้าง nginx.conf เองถ้าหาย
+if [[ ! -f /etc/nginx/nginx.conf ]]; then
+  warn "nginx.conf หาย — สร้างใหม่ด้วย fallback"
+  mkdir -p /etc/nginx/conf.d
+  cat > /etc/nginx/nginx.conf << 'NGINXCONF'
+user www-data;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+    access_log  /var/log/nginx/access.log  main;
+    sendfile        on;
+    keepalive_timeout  65;
+    include /etc/nginx/conf.d/*.conf;
+}
+NGINXCONF
+  # สร้าง mime.types ถ้าหาย
+  if [[ ! -f /etc/nginx/mime.types ]]; then
+    DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y nginx-common 2>/dev/null || true
+  fi
+  mkdir -p /var/log/nginx /var/lib/nginx/body /var/lib/nginx/fastcgi \
+           /var/lib/nginx/proxy /var/lib/nginx/scgi /var/lib/nginx/uwsgi
+  chown -R www-data:www-data /var/log/nginx /var/lib/nginx 2>/dev/null || true
+  ok "สร้าง nginx.conf fallback เรียบร้อย"
+fi
+
 # ลบ default.conf ที่ nginx install สร้างขึ้นมาใหม่
 rm -f /etc/nginx/conf.d/default.conf
 
 info "ตั้งค่า Nginx..."
-# รองรับทั้ง nginx.org (conf.d/) และ Ubuntu nginx (sites-enabled/)
+# nginx.org package ใช้ conf.d/ ไม่ใช่ sites-enabled/
 rm -f /etc/nginx/conf.d/default.conf
 rm -f /etc/nginx/conf.d/chaiya.conf
-rm -f /etc/nginx/sites-enabled/default
-rm -f /etc/nginx/sites-enabled/chaiya
 mkdir -p /etc/nginx/conf.d
-# Ubuntu nginx อ่าน nginx.conf ซึ่ง include conf.d/*.conf — ต้องแน่ใจว่า include นี้มีอยู่
-if ! grep -q "conf.d" /etc/nginx/nginx.conf 2>/dev/null; then
-  sed -i '/http {/a\    include /etc/nginx/conf.d/*.conf;' /etc/nginx/nginx.conf 2>/dev/null || true
-fi
 
 # เปิด port 443/2503
 ufw allow 443/tcp  &>/dev/null || true
@@ -1133,14 +1181,8 @@ server {
 EOF
 fi
 
-# หยุด ws-stunnel ก่อน เพื่อ free port 80 ให้ nginx
-pkill -f ws-stunnel 2>/dev/null || true
-systemctl stop chaiya-sshws 2>/dev/null || true
-# รอ port 80 ว่างจริงๆ
-for _w in 1 2 3 4 5; do lsof -ti tcp:80 &>/dev/null || break; sleep 1; done
-nginx -t && ok "Nginx config OK" || { warn "Nginx config มีปัญหา — ตรวจ: nginx -t"; nginx -t; }
-systemctl restart nginx && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" || warn "Nginx ยังมีปัญหา"
-# เปิด ws-stunnel คืนหลัง nginx จับ port แล้ว
+nginx -t && systemctl restart nginx && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
+# start ws-stunnel คืนหลัง nginx config เสร็จ
 systemctl start chaiya-sshws 2>/dev/null || true
 
 # ── FIREWALL ─────────────────────────────────────────────────
@@ -2308,6 +2350,7 @@ ok "Dashboard HTML อัพเดตแล้ว"
 info "Restart services..."
 fuser -k 6789/tcp 2>/dev/null || true
 systemctl restart chaiya-ssh-api
+sleep 2
 systemctl is-active --quiet chaiya-ssh-api && ok "chaiya-ssh-api ✅" || echo "⚠️ chaiya-ssh-api อาจมีปัญหา"
 
 
@@ -2319,6 +2362,7 @@ echo ""
 info "ตรวจสอบ services..."
 # restart dropbear อีกครั้งเพื่อให้แน่ใจ (บางครั้ง race condition ตอนติดตั้ง)
 systemctl restart dropbear 2>/dev/null || true
+sleep 2
 
 for svc in nginx x-ui dropbear chaiya-sshws chaiya-ssh-api chaiya-badvpn; do
   if systemctl is-active --quiet "$svc"; then
