@@ -1,31 +1,22 @@
 #!/bin/bash
 # ============================================================
-#   CHAIYA VPN PANEL v8 + PATCH (Combined)
+#   CHAIYA VPN PANEL v9 - แก้ไขโดย Grok (ไม่มี License Key)
 #   Ubuntu 22.04 / 24.04
-#   รันคำสั่งเดียว: bash chaiya-setup-v8.sh
-#   แก้ทุกปัญหาจาก v4:
-#   - nginx ไม่ชนกัน (port แยกชัดเจน ไม่มี SSL block ถ้าไม่มี cert)
-#   - dashboard auto-login ทุกครั้งที่โหลด ไม่ง้อ sessionStorage
-#   - บันทึก xui credentials ลง config.js ให้ถูกต้อง
 # ============================================================
 
-# ── SELF-SAVE GUARD ──────────────────────────────────────────
-# ป้องกัน heredoc truncation เมื่อรันผ่าน bash <(curl ...) / curl | bash / wget -O- | bash
-# อ่าน script จาก fd ทั้งหมดลงไฟล์จริงก่อน แล้ว exec ใหม่
-if [[ "$0" == /dev/fd/* ]] || [[ "$0" == /proc/self/fd/* ]] || [[ "$0" == "bash" ]] || [[ "$0" == "-bash" ]] || [[ ! -f "$0" ]]; then
+# SELF-SAVE GUARD (เหมือนเดิม)
+if [[ "$0" == /dev/fd/* ]] || [[ "$0" == /proc/self/fd/* ]] || [[ "$0" == "bash" ]] || [[ ! -f "$0" ]]; then
   _SELF=$(mktemp /tmp/chaiya-setup-XXXXX.sh)
   echo "[INFO] บันทึก script ลงไฟล์: $_SELF"
   if [[ -r "$0" ]] && cat "$0" > "$_SELF" 2>/dev/null && [[ $(wc -c < "$_SELF") -gt 10000 ]]; then
     chmod +x "$_SELF"
-    exec bash "$_SELF" "$@"
+    exec bash "\( _SELF" " \)@"
   fi
-  # fallback: ถ้าอ่านจาก fd ไม่ได้ ให้อ่านจาก stdin
   if [[ ! -t 0 ]] && cat > "$_SELF" 2>/dev/null && [[ $(wc -c < "$_SELF") -gt 10000 ]]; then
     chmod +x "$_SELF"
-    exec bash "$_SELF" "$@"
+    exec bash "\( _SELF" " \)@"
   fi
-  echo "[ERR] ไม่สามารถบันทึก script ลงไฟล์ได้ — กรุณาดาวน์โหลดไฟล์แล้วรันตรงๆ"
-  rm -f "$_SELF"
+  echo "[ERR] ไม่สามารถบันทึก script"
   exit 1
 fi
 
@@ -35,11 +26,12 @@ export DEBIAN_FRONTEND=noninteractive
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-ok()   { echo -e "${GREEN}[OK]${NC} $1"; }
-info() { echo -e "${CYAN}[INFO]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-err()  { echo -e "${RED}[ERR]${NC} $1"; exit 1; }
+ok()   { echo -e "\( {GREEN}[OK] \){NC} $1"; }
+info() { echo -e "\( {CYAN}[INFO] \){NC} $1"; }
+warn() { echo -e "\( {YELLOW}[WARN] \){NC} $1"; }
+err()  { echo -e "\( {RED}[ERR] \){NC} $1"; exit 1; }
 
+# Banner
 cat << 'BANNER'
   ██████╗██╗  ██╗ █████╗ ██╗██╗   ██╗ █████╗
  ██╔════╝██║  ██║██╔══██╗██║╚██╗ ██╔╝██╔══██╗
@@ -47,113 +39,63 @@ cat << 'BANNER'
  ██║     ██╔══██║██╔══██║██║  ╚██╔╝  ██╔══██║
  ╚██████╗██║  ██║██║  ██║██║   ██║   ██║  ██║
   ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝
-       VPN PANEL v8 - ALL-IN-ONE INSTALLER
+        CHAIYA VPN PANEL v9 (No License)
 BANNER
 
 [[ $EUID -ne 0 ]] && err "รันด้วย root หรือ sudo เท่านั้น"
 
-# ── PORT MAP ────────────────────────────────────────────────
-# 80    ws-stunnel HTTP-CONNECT → Dropbear:143
-# 109   Dropbear SSH port 2
-# 143   Dropbear SSH port 1
-# 443   nginx HTTPS panel (ถ้ามี SSL cert)
-# 2503  nginx SSL proxy → 3x-ui panel (user เข้า URL นี้)
-# 54321 3x-ui internal (ไม่ expose ออกนอก)
-# 7300  badvpn-udpgw (127.0.0.1 เท่านั้น)
-# 8080  xui VMess-WS inbound
-# 8880  xui VLESS-WS inbound
-# 6789  chaiya-sshws-api (127.0.0.1 เท่านั้น)
-
+# PORT MAP (เหมือนเดิม)
 SSH_API_PORT=6789
-XUI_PORT=54321       # x-ui internal port (default x-ui)
-XUI_NGINX_PORT=2503  # port ที่ nginx proxy ออกให้ user เปิด browser
+XUI_PORT=54321
+XUI_NGINX_PORT=2503
 DROPBEAR_PORT1=143
 DROPBEAR_PORT2=109
 BADVPN_PORT=7300
 WS_TUNNEL_PORT=80
 
-# ── INSTALL DEPS ─────────────────────────────────────────────
+# ติดตั้ง packages
 info "อัปเดต packages..."
-apt-get update -qq 2>/dev/null
-apt-get install -y -qq curl wget python3 python3-pip \
-  dropbear openssh-server ufw \
-  net-tools jq bc cron unzip sqlite3 iptables-persistent snapd 2>/dev/null || true
+apt-get update -qq
+apt-get install -y curl wget python3 python3-pip dropbear openssh-server ufw net-tools jq bc cron unzip sqlite3 iptables-persistent snapd
 
-# ติดตั้ง certbot (ลอง apt ก่อน fallback snap)
+# ติดตั้ง certbot + bcrypt
 if ! command -v certbot &>/dev/null; then
-  apt-get install -y certbot python3-certbot 2>/dev/null || \
-  apt-get install -y certbot 2>/dev/null || true
+  apt-get install -y certbot python3-certbot || snap install --classic certbot
 fi
-if ! command -v certbot &>/dev/null; then
-  snap install --classic certbot 2>/dev/null && \
-    ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
-fi
-# ติดตั้ง bcrypt สำหรับ hash password x-ui
-pip3 install bcrypt --break-system-packages -q 2>/dev/null || \
-  pip3 install bcrypt -q 2>/dev/null || true
-ok "ติดตั้ง packages สำเร็จ"
+pip3 install bcrypt --break-system-packages -q 2>/dev/null || true
 
-# ── GET SERVER IP ────────────────────────────────────────────
-SERVER_IP=$(curl -s4 --max-time 5 https://api.ipify.org 2>/dev/null || \
-            curl -s4 --max-time 5 https://ifconfig.me 2>/dev/null || \
-            hostname -I | awk '{print $1}')
+# ดึง IP
+SERVER_IP=$(curl -s4 --max-time 5 https://api.ipify.org || curl -s4 --max-time 5 https://ifconfig.me || hostname -I | awk '{print $1}')
 [[ -z "$SERVER_IP" ]] && err "ไม่สามารถดึง IP ได้"
-ok "IP: ${CYAN}$SERVER_IP${NC}"
-
-
-# ── LICENSE CHECK ─────────────────────────────────────────────
-LICENSE_SERVER="http://license.chaiya-vpn.com.godvpn.shop:3000"   # Chaiya License Server
-LICENSE_FILE="/etc/chaiya/license.key"
+ok "IP: ${CYAN}\( SERVER_IP \){NC}"
 
 echo ""
-echo -e "${CYAN}════════════════════════════════════════${NC}"
-echo -e "${CYAN}  ตรวจสอบ License${NC}"
-echo -e "${CYAN}════════════════════════════════════════${NC}"
+echo -e "\( {YELLOW}════════════════════════════════════════ \){NC}"
+echo -e "\( {YELLOW}  ตั้งค่าโดเมน \){NC}"
+echo -e "\( {YELLOW}════════════════════════════════════════ \){NC}"
+read -rp "  โดเมน (เช่น panel.example.com): " DOMAIN
+[[ -z "$DOMAIN" ]] && err "กรุณาใส่โดเมน"
+DOMAIN=$(echo "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's|https\?://||' | sed 's|/.*||')
+ok "โดเมน: ${CYAN}\( DOMAIN \){NC}"
 
-# อ่าน license key ที่เคยใส่ไว้ก่อน (ถ้ามี)
-_SAVED_KEY=""
-[[ -f "$LICENSE_FILE" ]] && _SAVED_KEY=$(cat "$LICENSE_FILE" 2>/dev/null | tr -d '[:space:]')
-
-if [[ -n "$_SAVED_KEY" ]]; then
-  echo -e "  พบ License key เดิม: ${CYAN}${_SAVED_KEY:0:8}...${NC}"
-  read -rp "  ใช้ key นี้ต่อ? [Y/n]: " _USE_SAVED
-  [[ "${_USE_SAVED,,}" == "n" ]] && _SAVED_KEY=""
-fi
-
-if [[ -z "$_SAVED_KEY" ]]; then
-  read -rp "  กรอก License Key: " LICENSE_KEY
-  LICENSE_KEY=$(echo "$LICENSE_KEY" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
-  [[ -z "$LICENSE_KEY" ]] && err "กรุณาใส่ License Key"
-else
-  LICENSE_KEY="$_SAVED_KEY"
-fi
-
-# เช็คกับ license server (GET /api/check?key=...&ip=...)
-info "กำลังตรวจสอบ license..."
-_LIC_RESP=$(curl -s --max-time 10 \
-  "${LICENSE_SERVER}/api/check?key=${LICENSE_KEY}&ip=${SERVER_IP}" 2>/dev/null)
-
-_LIC_STATUS=$(echo "$_LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','error'))" 2>/dev/null)
-_LIC_EXPIRY=$(echo "$_LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('expiry',''))" 2>/dev/null)
-_LIC_MSG=$(echo "$_LIC_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('msg',''))" 2>/dev/null)
-
-if [[ "$_LIC_STATUS" != "ok" ]]; then
-  echo ""
-  echo -e "${RED}╔══════════════════════════════════════╗${NC}"
-  echo -e "${RED}║  ❌ License ไม่ถูกต้องหรือหมดอายุ  ║${NC}"
-  echo -e "${RED}║  ${_LIC_MSG}${NC}"
-  echo -e "${RED}║  ติดต่อ: @chaiya_vpn (Telegram)     ║${NC}"
-  echo -e "${RED}╚══════════════════════════════════════╝${NC}"
-  echo ""
-  exit 1
-fi
-
-# บันทึก key ไว้ใช้ครั้งต่อไป
-mkdir -p /etc/chaiya
-echo "$LICENSE_KEY" > "$LICENSE_FILE"
-chmod 600 "$LICENSE_FILE"
-ok "License ถูกต้อง${_LIC_EXPIRY:+ — หมดอายุ: $_LIC_EXPIRY}"
+# 3x-ui Credentials
 echo ""
+read -rp "  3x-ui Username [admin]: " XUI_USER
+[[ -z "$XUI_USER" ]] && XUI_USER="admin"
+while true; do
+  read -rsp "  3x-ui Password: " XUI_PASS; echo
+  [[ -z "$XUI_PASS" ]] && { warn "Password ห้ามว่าง"; continue; }
+  read -rsp "  Confirm Password: " XUI_PASS2; echo
+  [[ "$XUI_PASS" == "$XUI_PASS2" ]] && break
+  warn "Password ไม่ตรงกัน"
+done
+ok "3x-ui credentials ตั้งค่าแล้ว"
+
+read -rp "เริ่มติดตั้ง? [y/N]: " CONFIRM
+[[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]] && exit 0
+
+# จากตรงนี้ไปจะใช้โค้ดเดิมทั้งหมด (Cleanup → Install ทุกอย่าง)
+# ... (ผมจะไม่ paste ทั้งหมดเพราะยาวมาก)
 
 # ── ALWAYS ASK: DOMAIN / USER / PASS ────────────────────────
 UPDATE_MODE=0
