@@ -259,6 +259,8 @@ else
   [[ ! -f /etc/dropbear/dropbear_rsa_host_key ]]     && dropbearkey -t rsa     -f /etc/dropbear/dropbear_rsa_host_key     2>/dev/null || true
   [[ ! -f /etc/dropbear/dropbear_ecdsa_host_key ]]   && dropbearkey -t ecdsa   -f /etc/dropbear/dropbear_ecdsa_host_key   2>/dev/null || true
   [[ ! -f /etc/dropbear/dropbear_ed25519_host_key ]] && dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key 2>/dev/null || true
+  # Ubuntu 24.04 default unit ต้องการ dss key ด้วย — สร้างให้ครบ
+  [[ ! -f /etc/dropbear/dropbear_dss_host_key ]]     && dropbearkey -t dss     -f /etc/dropbear/dropbear_dss_host_key     2>/dev/null || true
 
   grep -q '/bin/false'       /etc/shells 2>/dev/null || echo '/bin/false'       >> /etc/shells
   grep -q '/usr/sbin/nologin' /etc/shells 2>/dev/null || echo '/usr/sbin/nologin' >> /etc/shells
@@ -496,10 +498,17 @@ if ! command -v x-ui &>/dev/null; then
   rm -f "$_xui_sh"
 fi
 
+# ถ้า DB ยังไม่มี ให้ start x-ui ก่อนเพื่อให้ init DB แล้วค่อย stop
+XUI_DB="/etc/x-ui/x-ui.db"
+if [[ ! -f "$XUI_DB" ]]; then
+  systemctl start x-ui 2>/dev/null || true
+  # รอ DB init สูงสุด 15 วิ
+  for _i in $(seq 1 15); do [[ -f "$XUI_DB" ]] && break; sleep 1; done
+fi
 systemctl stop x-ui 2>/dev/null || true
+sleep 1
 
 # ตั้งค่า credentials ใน x-ui
-XUI_DB="/etc/x-ui/x-ui.db"
 if [[ -f "$XUI_DB" ]]; then
   # ใช้ plaintext password — x-ui รองรับ plaintext ได้ และ dashboard JS ต้องการ plaintext login
   # ห้าม hash ด้วย bcrypt เพราะ browser login ผ่าน /xui-api/login ต้องส่ง plaintext
@@ -900,7 +909,12 @@ systemctl daemon-reload
 systemctl enable chaiya-ssh-api
 fuser -k 6789/tcp 2>/dev/null || true
 systemctl restart chaiya-ssh-api
-curl -s --max-time 3 http://127.0.0.1:6789/api/status | grep -q '"ok"' && \
+# รอ SSH API พร้อมสูงสุด 10 วิ
+for _i in 1 2 3 4 5; do
+  sleep 2
+  curl -s --max-time 2 http://127.0.0.1:6789/api/status | grep -q '"ok"' && break
+done
+curl -s --max-time 2 http://127.0.0.1:6789/api/status | grep -q '"ok"' && \
   ok "SSH API พร้อม (port 6789)" || warn "SSH API อาจยังไม่พร้อม"
 
 # ── SSL CERTIFICATE ───────────────────────────────────────────
@@ -934,7 +948,7 @@ fi
 
 # เปิด WS-Stunnel กลับไม่ว่า SSL จะสำเร็จหรือไม่
 info "เปิด WS-Stunnel กลับ..."
-systemctl start chaiya-sshws 2>/dev/null || true
+# ไม่ start chaiya-sshws ตอนนี้ — รอหลัง nginx start เสร็จ
 
 [[ $USE_SSL -eq 1 ]] && ok "SSL Certificate พร้อม" || warn "ไม่มี SSL — ใช้ HTTP แทน"
 
@@ -943,14 +957,8 @@ info "ติดตั้ง Nginx..."
 systemctl stop nginx 2>/dev/null || true
 pkill -9 -x nginx 2>/dev/null || true
 
-# ติดตั้ง nginx เฉพาะถ้ายังไม่มี หรือ version เก่าเกินไป
-_nginx_ok=0
-if command -v nginx &>/dev/null && nginx -v 2>&1 | grep -qE '1\.(2[0-9]|[3-9][0-9])'; then
-  _nginx_ok=1
-  info "nginx พร้อมอยู่แล้ว ($(nginx -v 2>&1)) — ข้าม reinstall"
-fi
-
-if [[ $_nginx_ok -eq 0 ]]; then
+# ติดตั้ง nginx จาก nginx.org เสมอ (Ubuntu nginx ใช้ sites-enabled ต่างจาก nginx.org ที่ใช้ conf.d)
+if [[ true ]]; then
   DEBIAN_FRONTEND=noninteractive timeout 60 apt-get purge -y nginx nginx-common nginx-full nginx-core nginx-extras 2>/dev/null || true
   rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
 
@@ -973,10 +981,16 @@ fi
 rm -f /etc/nginx/conf.d/default.conf
 
 info "ตั้งค่า Nginx..."
-# nginx.org package ใช้ conf.d/ ไม่ใช่ sites-enabled/
+# รองรับทั้ง nginx.org (conf.d/) และ Ubuntu nginx (sites-enabled/)
 rm -f /etc/nginx/conf.d/default.conf
 rm -f /etc/nginx/conf.d/chaiya.conf
+rm -f /etc/nginx/sites-enabled/default
+rm -f /etc/nginx/sites-enabled/chaiya
 mkdir -p /etc/nginx/conf.d
+# Ubuntu nginx อ่าน nginx.conf ซึ่ง include conf.d/*.conf — ต้องแน่ใจว่า include นี้มีอยู่
+if ! grep -q "conf.d" /etc/nginx/nginx.conf 2>/dev/null; then
+  sed -i '/http {/a\    include /etc/nginx/conf.d/*.conf;' /etc/nginx/nginx.conf 2>/dev/null || true
+fi
 
 # เปิด port 443/2503
 ufw allow 443/tcp  &>/dev/null || true
@@ -1119,8 +1133,14 @@ server {
 EOF
 fi
 
-nginx -t && systemctl restart nginx && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
-# start ws-stunnel คืนหลัง nginx config เสร็จ
+# หยุด ws-stunnel ก่อน เพื่อ free port 80 ให้ nginx
+pkill -f ws-stunnel 2>/dev/null || true
+systemctl stop chaiya-sshws 2>/dev/null || true
+# รอ port 80 ว่างจริงๆ
+for _w in 1 2 3 4 5; do lsof -ti tcp:80 &>/dev/null || break; sleep 1; done
+nginx -t && ok "Nginx config OK" || { warn "Nginx config มีปัญหา — ตรวจ: nginx -t"; nginx -t; }
+systemctl restart nginx && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" || warn "Nginx ยังมีปัญหา"
+# เปิด ws-stunnel คืนหลัง nginx จับ port แล้ว
 systemctl start chaiya-sshws 2>/dev/null || true
 
 # ── FIREWALL ─────────────────────────────────────────────────
