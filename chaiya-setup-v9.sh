@@ -468,7 +468,7 @@ chmod +x /usr/local/bin/ws-stunnel
 cat > /etc/systemd/system/chaiya-sshws.service << 'EOF'
 [Unit]
 Description=Chaiya WS-Stunnel port 80 -> Dropbear:143
-After=network.target dropbear.service nginx.service
+After=network.target dropbear.service
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 /usr/local/bin/ws-stunnel
@@ -936,120 +936,83 @@ if command -v certbot &>/dev/null; then
   done
 fi
 
-# เปิด WS-Stunnel กลับไม่ว่า SSL จะสำเร็จหรือไม่
-info "เปิด WS-Stunnel กลับ..."
-systemctl start chaiya-sshws 2>/dev/null || true
+# ไม่ start chaiya-sshws กลับตอนนี้ — รอให้ nginx config เสร็จก่อน
+# (ถ้า start ตอนนี้ ws-stunnel จะจับ port 80 ไว้ แล้ว nginx start ไม่ได้)
+info "เปิด WS-Stunnel กลับหลัง nginx config เสร็จ..."
 
 [[ $USE_SSL -eq 1 ]] && ok "SSL Certificate พร้อม" || warn "ไม่มี SSL — ใช้ HTTP แทน"
 
 # ── NGINX INSTALL + CONFIG ────────────────────────────────────
 info "ติดตั้ง Nginx..."
+
+# หยุด chaiya-sshws และ kill ทุก process บน port 80 ก่อนเด็ดขาด
+systemctl stop chaiya-sshws 2>/dev/null || true
+pkill -f ws-stunnel 2>/dev/null || true
 systemctl stop nginx 2>/dev/null || true
 pkill -9 -x nginx 2>/dev/null || true
+sleep 2
+fuser -k 80/tcp 2>/dev/null || true
+sleep 1
 
 # รอ apt lock ให้ว่างก่อน (กรณี unattended-upgrades กำลังทำงาน)
 _wait_apt() {
   local _tries=0
   while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock &>/dev/null; do
     _tries=$((_tries+1))
-    [[ $_tries -ge 30 ]] && { warn "apt lock ค้างนานเกินไป — พยายามต่อ"; break; }
+    [[ $_tries -ge 30 ]] && break
     info "รอ apt lock... ($_tries/30)"
     sleep 5
   done
 }
-_wait_apt
 
-# ติดตั้ง nginx เฉพาะถ้ายังไม่มี หรือ version เก่าเกินไป
-_nginx_ok=0
-if command -v nginx &>/dev/null && nginx -v 2>&1 | grep -qE '1\.(2[0-9]|[3-9][0-9])'; then
-  # มี binary แต่ต้องตรวจว่า nginx.conf อยู่ด้วย
-  if [[ -f /etc/nginx/nginx.conf ]]; then
-    _nginx_ok=1
-    info "nginx พร้อมอยู่แล้ว ($(nginx -v 2>&1)) — ข้าม reinstall"
-  else
-    warn "nginx binary มีแต่ nginx.conf หาย — reinstall"
-  fi
-fi
-
-if [[ $_nginx_ok -eq 0 ]]; then
+# ติดตั้ง nginx ถ้ายังไม่มี
+if ! command -v nginx &>/dev/null; then
   _wait_apt
-  DEBIAN_FRONTEND=noninteractive timeout 60 apt-get purge -y nginx nginx-common nginx-full nginx-core nginx-extras 2>/dev/null || true
-  rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
-
-  # ใช้ official nginx repo เพื่อให้ได้ nginx 1.24+
-  if ! grep -q "nginx.org" /etc/apt/sources.list.d/nginx.list 2>/dev/null; then
-    _wait_apt
-    DEBIAN_FRONTEND=noninteractive timeout 60 apt-get install -y -qq gnupg2
-    curl -fsSL --max-time 20 https://nginx.org/keys/nginx_signing.key | \
-      gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
-    _codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
-    echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
-http://nginx.org/packages/ubuntu ${_codename} nginx" \
-      > /etc/apt/sources.list.d/nginx.list 2>/dev/null || true
-    timeout 60 apt-get update -qq -o Acquire::ForceIPv4=true \
-      -o Acquire::http::Timeout=20 2>/dev/null || true
-  fi
+  DEBIAN_FRONTEND=noninteractive apt-get purge -y nginx nginx-common nginx-full nginx-core nginx-extras 2>/dev/null || true
+  rm -rf /etc/nginx
   _wait_apt
   DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y nginx
-  ok "ติดตั้ง Nginx สำเร็จ ($(nginx -v 2>&1 | grep -oP '[\d.]+'))"
 fi
 
-# ── NGINX.CONF FALLBACK ───────────────────────────────────────
-# กรณี apt lock ทำให้ติดตั้งไม่สมบูรณ์ — สร้าง nginx.conf เองถ้าหาย
+# ── ล้าง config ทุกอย่างที่ nginx อาจ listen 80 ──────────────
+rm -f /etc/nginx/conf.d/default.conf
+rm -f /etc/nginx/sites-enabled/default
+rm -f /etc/nginx/sites-available/default
+rm -f /etc/nginx/conf.d/chaiya.conf
+
+# แก้ nginx.conf หลัก: ลบ include sites-enabled และ listen 80 ออก
+if [[ -f /etc/nginx/nginx.conf ]]; then
+  sed -i '/sites-enabled/d'  /etc/nginx/nginx.conf
+  sed -i '/listen\s*80/d'    /etc/nginx/nginx.conf
+fi
+
+# สร้าง nginx.conf ใหม่ถ้าหาย (กรณี apt lock ทำให้ติดตั้งไม่สมบูรณ์)
 if [[ ! -f /etc/nginx/nginx.conf ]]; then
-  warn "nginx.conf หาย — สร้างใหม่ด้วย fallback"
+  warn "nginx.conf หาย — สร้างใหม่"
   mkdir -p /etc/nginx/conf.d
   cat > /etc/nginx/nginx.conf << 'NGINXCONF'
 user www-data;
 worker_processes auto;
 error_log /var/log/nginx/error.log notice;
 pid /var/run/nginx.pid;
-
-events {
-    worker_connections 1024;
-}
-
+events { worker_connections 1024; }
 http {
     include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
-    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
-                      '$status $body_bytes_sent "$http_referer" '
-                      '"$http_user_agent" "$http_x_forwarded_for"';
-    access_log  /var/log/nginx/access.log  main;
-    sendfile        on;
-    keepalive_timeout  65;
+    sendfile      on;
+    keepalive_timeout 65;
     include /etc/nginx/conf.d/*.conf;
 }
 NGINXCONF
-  # สร้าง mime.types ถ้าหาย
-  if [[ ! -f /etc/nginx/mime.types ]]; then
-    DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y nginx-common 2>/dev/null || true
-  fi
-  mkdir -p /var/log/nginx /var/lib/nginx/body /var/lib/nginx/fastcgi \
-           /var/lib/nginx/proxy /var/lib/nginx/scgi /var/lib/nginx/uwsgi
+  mkdir -p /var/log/nginx /var/lib/nginx/body
   chown -R www-data:www-data /var/log/nginx /var/lib/nginx 2>/dev/null || true
-  ok "สร้าง nginx.conf fallback เรียบร้อย"
+  [[ ! -f /etc/nginx/mime.types ]] && apt-get install --reinstall -y nginx-common 2>/dev/null || true
 fi
 
-# ── หยุด chaiya-sshws ก่อน nginx start (ปลดล็อก port 80) ───
-info "หยุด WS-Stunnel ชั่วคราว เพื่อให้ nginx start ได้..."
-systemctl stop chaiya-sshws 2>/dev/null || true
-fuser -k 80/tcp 2>/dev/null || true
-sleep 2
-
-# ── ลบ default site ทุกที่ที่ nginx อาจ listen 80 ──────────
-rm -f /etc/nginx/conf.d/default.conf
-rm -f /etc/nginx/sites-enabled/default
-rm -f /etc/nginx/sites-available/default
-# ลบ include sites-enabled ออกจาก nginx.conf หลัก (ubuntu package ใส่มา)
-if [[ -f /etc/nginx/nginx.conf ]]; then
-  sed -i '/sites-enabled/d' /etc/nginx/nginx.conf
-  sed -i '/listen\s*80/d'   /etc/nginx/nginx.conf
-fi
+ok "ติดตั้ง Nginx สำเร็จ ($(nginx -v 2>&1 | grep -oP '[\d.]+' | head -1))"
+mkdir -p /etc/nginx/conf.d
 
 info "ตั้งค่า Nginx..."
-rm -f /etc/nginx/conf.d/chaiya.conf
-mkdir -p /etc/nginx/conf.d
 
 # เปิด port 443/2503
 ufw allow 443/tcp  &>/dev/null || true
@@ -1193,17 +1156,14 @@ EOF
 fi
 
 if nginx -t 2>/dev/null; then
-  systemctl restart nginx && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" || {
-    warn "Nginx restart ล้มเหลว — ลอง start ใหม่..."
-    fuser -k 80/tcp 2>/dev/null || true
-    sleep 1
-    systemctl start nginx && ok "Nginx พร้อม (retry สำเร็จ)" || warn "Nginx ยังมีปัญหา — ตรวจ: journalctl -u nginx -n 20"
-  }
+  systemctl restart nginx \
+    && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" \
+    || warn "Nginx ยังมีปัญหา — ตรวจ: journalctl -u nginx -n 20"
 else
   warn "Nginx config มีปัญหา — ตรวจ: nginx -t"
 fi
 
-# start ws-stunnel กลับหลัง nginx ขึ้นแล้ว (nginx ไม่ใช้ port 80 — ไม่ชนกัน)
+# start ws-stunnel กลับ — nginx ไม่ได้ใช้ port 80 จึงไม่ชนกัน
 sleep 1
 systemctl start chaiya-sshws 2>/dev/null || true
 
