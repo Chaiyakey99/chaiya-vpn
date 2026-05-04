@@ -102,7 +102,7 @@ ok "IP: ${CYAN}$SERVER_IP${NC}"
 
 
 # ── LICENSE CHECK ─────────────────────────────────────────────
-LICENSE_SERVER="http://203.159.92.228:3000"   # Chaiya License Server
+LICENSE_SERVER="http://license.chaiya-vpn.com.godvpn.shop:3000"   # Chaiya License Server
 LICENSE_FILE="/etc/chaiya/license.key"
 
 echo ""
