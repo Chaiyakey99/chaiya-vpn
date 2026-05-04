@@ -500,8 +500,13 @@ fi
 
 systemctl stop x-ui 2>/dev/null || true
 
-# ตั้งค่า credentials ใน x-ui
+# ── อ่าน webBasePath ที่ x-ui install script สร้างไว้ ────────
+# ต้องอ่านก่อน stop/start ครั้งใดๆ เพราะ x-ui สร้าง random path ตอน install
 XUI_DB="/etc/x-ui/x-ui.db"
+_db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
+XUI_BASE_PATH="${_db_path:-/}"
+[[ "$XUI_BASE_PATH" != */ ]] && XUI_BASE_PATH="${XUI_BASE_PATH}/"
+ok "x-ui webBasePath: ${XUI_BASE_PATH}"
 if [[ -f "$XUI_DB" ]]; then
   # ใช้ plaintext password — x-ui รองรับ plaintext ได้ และ dashboard JS ต้องการ plaintext login
   # ห้าม hash ด้วย bcrypt เพราะ browser login ผ่าน /xui-api/login ต้องส่ง plaintext
@@ -555,19 +560,13 @@ if [[ -f "$XUI_DB" ]]; then
   _port_check=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
   [[ "$_port_check" == "${XUI_PORT}" ]] && ok "x-ui webPort=${XUI_PORT} ยืนยันแล้ว" || warn "webPort อาจไม่ถูกต้อง: $_port_check"
   systemctl start x-ui
-  # รอ x-ui พร้อมจริงๆ ก่อนอ่าน webBasePath (สูงสุด 30 วิ)
   for _i in $(seq 1 15); do
     sleep 2
     curl -s --max-time 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null | grep -q "^[123]" && break
   done
 fi
 
-# ── อ่าน webBasePath หลัง x-ui start เสร็จ ──────────────────
-# ดึงค่าที่ x-ui สร้างไว้เอง ไม่เขียนทับเด็ดขาด
-_db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
-XUI_BASE_PATH="${_db_path:-/}"
-[[ "$XUI_BASE_PATH" != */ ]] && XUI_BASE_PATH="${XUI_BASE_PATH}/"
-ok "x-ui webBasePath: ${XUI_BASE_PATH}"
+# XUI_BASE_PATH ถูกอ่านไว้แล้วตั้งแต่หลัง install (บรรทัดก่อนหน้า) ไม่ต้องอ่านซ้ำ
 
 # ── สร้าง inbounds ใน x-ui ───────────────────────────────────
 info "สร้าง VMess/VLESS inbounds..."
