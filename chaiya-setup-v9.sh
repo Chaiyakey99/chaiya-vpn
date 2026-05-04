@@ -483,11 +483,10 @@ if [[ -f "$XUI_DB" ]]; then
   # ห้าม hash ด้วย bcrypt เพราะ browser login ผ่าน /xui-api/login ต้องส่ง plaintext
 
   sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS}' WHERE id=1;" 2>/dev/null || true
-  for _key in webPort webUsername webPassword webBasePath; do
+  for _key in webPort webUsername webPassword; do
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
   done
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"        2>/dev/null || true
-  sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webBasePath','/');"              2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"    2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webPassword','${XUI_PASS}');"   2>/dev/null || true
   # ── เปิด IP Limit tracking + Traffic stats (จำเป็นสำหรับหน้าออนไลน์) ──
@@ -508,6 +507,10 @@ sleep 5
 REAL_XUI_PORT="$XUI_PORT"
 _db_port=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
 [[ -n "$_db_port" ]] && REAL_XUI_PORT="$_db_port"
+# ดึง webBasePath จาก DB มาใช้กับ nginx proxy
+_db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
+XUI_BASE_PATH="${_db_path:-/}"
+[[ "$XUI_BASE_PATH" != */ ]] && XUI_BASE_PATH="${XUI_BASE_PATH}/"
 for _i in $(seq 1 15); do
   curl -s --max-time 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null | grep -q "^[123]" && break
   sleep 2
@@ -977,7 +980,7 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type" always;
     }
     location /xui-api/ {
-        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}${XUI_BASE_PATH};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -1044,7 +1047,7 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type" always;
     }
     location /xui-api/ {
-        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}/;
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}${XUI_BASE_PATH};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
