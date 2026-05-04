@@ -85,11 +85,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   net-tools jq bc cron unzip sqlite3 2>/dev/null || true
 ok "packages หลักเสร็จ"
 
-info "ติดตั้ง packages เสริม..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  --no-install-recommends \
-  iptables-persistent 2>/dev/null || true
-ok "packages เสริมเสร็จ"
+# iptables-persistent ถูกตัดออก — ค้างเพราะ interactive prompt บน Ubuntu 24.04
 
 # ติดตั้ง certbot (ลอง apt ก่อน ข้าม snap เพราะช้ามาก)
 info "ติดตั้ง certbot..."
@@ -287,7 +283,7 @@ DBSVC
   systemctl stop dropbear 2>/dev/null || true
   sleep 1
   systemctl start dropbear
-  # รอ Dropbear พร้อมสูงสุด 15 วินาที
+  # รอ Dropbear พร้อมสูงสุด 15 วินาที — break ทันทีเมื่อ active
   _db_ok=0
   for _i in $(seq 1 5); do
     sleep 3
@@ -295,7 +291,8 @@ DBSVC
       _db_ok=1; break
     fi
     warn "Dropbear ยังไม่พร้อม ลองใหม่ครั้งที่ $_i..."
-    systemctl restart dropbear 2>/dev/null || true
+    # restart เฉพาะรอบสุดท้าย ป้องกัน race condition
+    [[ $_i -lt 5 ]] || systemctl restart dropbear 2>/dev/null || true
   done
   if [[ $_db_ok -eq 1 ]]; then
     ok "Dropbear พร้อม (port $DROPBEAR_PORT1, $DROPBEAR_PORT2)"
@@ -486,13 +483,17 @@ ok "WS-Stunnel พร้อม (port $WS_TUNNEL_PORT → Dropbear:$DROPBEAR_PORT
 info "ติดตั้ง 3x-ui..."
 if ! command -v x-ui &>/dev/null; then
   _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
-  curl -Ls "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" -o "$_xui_sh" 2>/dev/null
-  printf "y\n${XUI_PORT}\n\n\n\n" | bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1
+  # ใส่ timeout ดาวน์โหลด 30s ป้องกันค้าง
+  curl -Ls --max-time 30 "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
+    -o "$_xui_sh" 2>/dev/null || { warn "ดาวน์โหลด 3x-ui install.sh ล้มเหลว"; rm -f "$_xui_sh"; }
+  if [[ -s "$_xui_sh" ]]; then
+    # timeout 300s ป้องกันค้างไม่จบ — printf input ป้องกัน interactive prompt
+    printf "y\n${XUI_PORT}\n\n\n\n" | timeout 300 bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
+  fi
   rm -f "$_xui_sh"
 fi
 
 systemctl stop x-ui 2>/dev/null || true
-sleep 2
 
 # ตั้งค่า credentials ใน x-ui
 XUI_DB="/etc/x-ui/x-ui.db"
@@ -519,7 +520,6 @@ if [[ -f "$XUI_DB" ]]; then
 fi
 
 systemctl start x-ui
-sleep 5
 
 # รอ x-ui พร้อม — อ่าน port จาก DB ที่เราตั้งไว้เสมอ (ไม่ใช้ ss เพราะอาจได้ port เก่า)
 REAL_XUI_PORT="$XUI_PORT"
@@ -529,7 +529,8 @@ _db_port=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';" 2
 _db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
 XUI_BASE_PATH="${_db_path:-/}"
 [[ "$XUI_BASE_PATH" != */ ]] && XUI_BASE_PATH="${XUI_BASE_PATH}/"
-for _i in $(seq 1 15); do
+# รอสูงสุด 20 วิ (10 × 2s) — break ทันทีเมื่อพร้อม
+for _i in $(seq 1 10); do
   curl -s --max-time 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:${REAL_XUI_PORT}/" 2>/dev/null | grep -q "^[123]" && break
   sleep 2
 done
@@ -540,7 +541,7 @@ ok "3x-ui พร้อม (port $REAL_XUI_PORT)"
 # x-ui อาจ init DB ใหม่ตอน start ทับค่าเดิม → insert ซ้ำหลัง start ให้แน่ใจ
 XUI_DB="/etc/x-ui/x-ui.db"
 if [[ -f "$XUI_DB" ]]; then
-  systemctl stop x-ui 2>/dev/null; sleep 2
+  systemctl stop x-ui 2>/dev/null; sleep 1
   # force webPort + basePath ซ้ำหลัง x-ui start เพราะ x-ui อาจ overwrite ค่าตอน init
   # ใช้ plaintext password เสมอ — ห้าม hash (dashboard JS login ต้องการ plaintext)
   sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${XUI_PASS}' WHERE id=1;" 2>/dev/null || true
@@ -560,7 +561,7 @@ if [[ -f "$XUI_DB" ]]; then
   _ip_setting=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='enableIpLimit';" 2>/dev/null)
   [[ "$_port_check" == "${XUI_PORT}" ]] && ok "x-ui webPort=${XUI_PORT} ยืนยันแล้ว" || warn "webPort อาจไม่ถูกต้อง: $_port_check"
   [[ "$_ip_setting" == "true" ]] && ok "x-ui IP Limit + Traffic tracking ยืนยันแล้ว" || warn "ตรวจสอบ x-ui settings อีกครั้งหลังติดตั้ง"
-  systemctl start x-ui; sleep 3
+  systemctl start x-ui; sleep 1
 fi
 
 # ── สร้าง inbounds ใน x-ui ───────────────────────────────────
@@ -921,9 +922,10 @@ done
 if command -v certbot &>/dev/null; then
   for _try in 1 2 3; do
     info "certbot attempt ${_try}/3..."
-    certbot certonly --standalone --non-interactive --agree-tos \
+    # timeout 90s ป้องกัน certbot ค้างรอ DNS/network
+    timeout 90 certbot certonly --standalone --non-interactive --agree-tos \
       --register-unsafely-without-email \
-      -d "$DOMAIN" 2>&1 | tail -5
+      -d "$DOMAIN" 2>&1 | tail -5 || true
     [[ -f "$SSL_CERT" ]] && { USE_SSL=1; break; }
     sleep 5
   done
@@ -936,25 +938,35 @@ systemctl start chaiya-sshws 2>/dev/null || true
 [[ $USE_SSL -eq 1 ]] && ok "SSL Certificate พร้อม" || warn "ไม่มี SSL — ใช้ HTTP แทน"
 
 # ── NGINX INSTALL + CONFIG ────────────────────────────────────
-info "ติดตั้ง Nginx ใหม่..."
+info "ติดตั้ง Nginx..."
 systemctl stop nginx 2>/dev/null || true
 pkill -9 -x nginx 2>/dev/null || true
-apt-get purge -y nginx nginx-common nginx-full nginx-core nginx-extras 2>/dev/null || true
-rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
 
-# ใช้ official nginx repo เพื่อให้ได้ nginx 1.24+ (รองรับทุก directive)
-if ! grep -q "nginx.org" /etc/apt/sources.list.d/nginx.list 2>/dev/null; then
-  apt-get install -y -qq gnupg2
-  curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
-    -o /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
-  _codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
-  echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
-http://nginx.org/packages/ubuntu ${_codename} nginx" \
-    > /etc/apt/sources.list.d/nginx.list 2>/dev/null || true
-  apt-get update -qq 2>/dev/null || true
+# ติดตั้ง nginx เฉพาะถ้ายังไม่มี หรือ version เก่าเกินไป
+_nginx_ok=0
+if command -v nginx &>/dev/null && nginx -v 2>&1 | grep -qE '1\.(2[0-9]|[3-9][0-9])'; then
+  _nginx_ok=1
+  info "nginx พร้อมอยู่แล้ว ($(nginx -v 2>&1)) — ข้าม reinstall"
 fi
-apt-get install -y nginx
-ok "ติดตั้ง Nginx ใหม่สำเร็จ ($(nginx -v 2>&1 | grep -oP '[\d.]+'))"
+
+if [[ $_nginx_ok -eq 0 ]]; then
+  DEBIAN_FRONTEND=noninteractive apt-get purge -y nginx nginx-common nginx-full nginx-core nginx-extras 2>/dev/null || true
+  rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
+
+  # ใช้ official nginx repo เพื่อให้ได้ nginx 1.24+
+  if ! grep -q "nginx.org" /etc/apt/sources.list.d/nginx.list 2>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gnupg2
+    curl -fsSL --max-time 20 https://nginx.org/keys/nginx_signing.key | \
+      gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg 2>/dev/null || true
+    _codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
+http://nginx.org/packages/ubuntu ${_codename} nginx" \
+      > /etc/apt/sources.list.d/nginx.list 2>/dev/null || true
+    apt-get update -qq -o Acquire::ForceIPv4=true 2>/dev/null || true
+  fi
+  DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+  ok "ติดตั้ง Nginx สำเร็จ ($(nginx -v 2>&1 | grep -oP '[\d.]+'))"
+fi
 # ลบ default.conf ที่ nginx install สร้างขึ้นมาใหม่
 rm -f /etc/nginx/conf.d/default.conf
 
@@ -1111,9 +1123,9 @@ systemctl start chaiya-sshws 2>/dev/null || true
 
 # ── FIREWALL ─────────────────────────────────────────────────
 info "ตั้งค่า Firewall..."
-ufw --force reset &>/dev/null
-ufw default deny incoming &>/dev/null
-ufw default allow outgoing &>/dev/null
+ufw --force reset 2>/dev/null || true
+ufw default deny incoming 2>/dev/null || true
+ufw default allow outgoing 2>/dev/null || true
 
 # เปิดพอร์ตที่ต้องใช้งาน (public)
 for port in 22 80 109 143 443 2503 8080 8880; do
@@ -2286,7 +2298,7 @@ echo ""
 info "ตรวจสอบ services..."
 # restart dropbear อีกครั้งเพื่อให้แน่ใจ (บางครั้ง race condition ตอนติดตั้ง)
 systemctl restart dropbear 2>/dev/null || true
-sleep 5
+sleep 2
 
 for svc in nginx x-ui dropbear chaiya-sshws chaiya-ssh-api chaiya-badvpn; do
   if systemctl is-active --quiet "$svc"; then
