@@ -1031,12 +1031,23 @@ NGINXCONF
   ok "สร้าง nginx.conf fallback เรียบร้อย"
 fi
 
-# ลบ default.conf ที่ nginx install สร้างขึ้นมาใหม่
+# ── หยุด chaiya-sshws ก่อน nginx start (ปลดล็อก port 80) ───
+info "หยุด WS-Stunnel ชั่วคราว เพื่อให้ nginx start ได้..."
+systemctl stop chaiya-sshws 2>/dev/null || true
+fuser -k 80/tcp 2>/dev/null || true
+sleep 2
+
+# ── ลบ default site ทุกที่ที่ nginx อาจ listen 80 ──────────
 rm -f /etc/nginx/conf.d/default.conf
+rm -f /etc/nginx/sites-enabled/default
+rm -f /etc/nginx/sites-available/default
+# ลบ include sites-enabled ออกจาก nginx.conf หลัก (ubuntu package ใส่มา)
+if [[ -f /etc/nginx/nginx.conf ]]; then
+  sed -i '/sites-enabled/d' /etc/nginx/nginx.conf
+  sed -i '/listen\s*80/d'   /etc/nginx/nginx.conf
+fi
 
 info "ตั้งค่า Nginx..."
-# nginx.org package ใช้ conf.d/ ไม่ใช่ sites-enabled/
-rm -f /etc/nginx/conf.d/default.conf
 rm -f /etc/nginx/conf.d/chaiya.conf
 mkdir -p /etc/nginx/conf.d
 
@@ -1181,8 +1192,19 @@ server {
 EOF
 fi
 
-nginx -t && systemctl restart nginx && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" || warn "Nginx มีปัญหา — ตรวจ: nginx -t"
-# start ws-stunnel คืนหลัง nginx config เสร็จ
+if nginx -t 2>/dev/null; then
+  systemctl restart nginx && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" || {
+    warn "Nginx restart ล้มเหลว — ลอง start ใหม่..."
+    fuser -k 80/tcp 2>/dev/null || true
+    sleep 1
+    systemctl start nginx && ok "Nginx พร้อม (retry สำเร็จ)" || warn "Nginx ยังมีปัญหา — ตรวจ: journalctl -u nginx -n 20"
+  }
+else
+  warn "Nginx config มีปัญหา — ตรวจ: nginx -t"
+fi
+
+# start ws-stunnel กลับหลัง nginx ขึ้นแล้ว (nginx ไม่ใช้ port 80 — ไม่ชนกัน)
+sleep 1
 systemctl start chaiya-sshws 2>/dev/null || true
 
 # ── FIREWALL ─────────────────────────────────────────────────
