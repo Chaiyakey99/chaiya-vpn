@@ -74,21 +74,39 @@ WS_TUNNEL_PORT=80
 
 # ── INSTALL DEPS ─────────────────────────────────────────────
 info "อัปเดต packages..."
-apt-get update -qq 2>/dev/null
-apt-get install -y -qq curl wget python3 python3-pip \
-  dropbear openssh-server ufw \
-  net-tools jq bc cron unzip sqlite3 iptables-persistent snapd 2>/dev/null || true
+apt-get update -qq -o Acquire::ForceIPv4=true 2>/dev/null || apt-get update -qq 2>/dev/null || true
+ok "apt update เสร็จ"
 
-# ติดตั้ง certbot (ลอง apt ก่อน fallback snap)
+info "ติดตั้ง packages หลัก..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+  --no-install-recommends \
+  curl wget python3 python3-pip \
+  dropbear openssh-server ufw \
+  net-tools jq bc cron unzip sqlite3 2>/dev/null || true
+ok "packages หลักเสร็จ"
+
+info "ติดตั้ง packages เสริม..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+  --no-install-recommends \
+  iptables-persistent 2>/dev/null || true
+ok "packages เสริมเสร็จ"
+
+# ติดตั้ง certbot (ลอง apt ก่อน ข้าม snap เพราะช้ามาก)
+info "ติดตั้ง certbot..."
 if ! command -v certbot &>/dev/null; then
-  apt-get install -y certbot python3-certbot 2>/dev/null || \
-  apt-get install -y certbot 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-certbot-nginx 2>/dev/null || \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot 2>/dev/null || true
 fi
-if ! command -v certbot &>/dev/null; then
-  snap install --classic certbot 2>/dev/null && \
+# fallback snap — ใส่ timeout 60s ป้องกันค้าง
+if ! command -v certbot &>/dev/null && command -v snap &>/dev/null; then
+  info "ลอง snap certbot (timeout 60s)..."
+  timeout 60 snap install --classic certbot 2>/dev/null && \
     ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
 fi
-# ติดตั้ง bcrypt สำหรับ hash password x-ui
+command -v certbot &>/dev/null && ok "certbot พร้อม" || warn "certbot ไม่พบ (ติดตั้งทีหลังได้)"
+
+# ติดตั้ง bcrypt
+info "ติดตั้ง bcrypt..."
 pip3 install bcrypt --break-system-packages -q 2>/dev/null || \
   pip3 install bcrypt -q 2>/dev/null || true
 ok "ติดตั้ง packages สำเร็จ"
