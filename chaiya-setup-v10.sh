@@ -112,7 +112,38 @@ command -v certbot &>/dev/null && ok "certbot พร้อม" || warn "certbot 
 info "ติดตั้ง bcrypt..."
 pip3 install bcrypt --break-system-packages -q --timeout=30 2>/dev/null || \
   pip3 install bcrypt -q --timeout=30 2>/dev/null || true
-pip3 install speedtest-cli --break-system-packages -q --timeout=30 2>/dev/null || true
+info "ติดตั้ง speedtest-cli..."
+pip3 install speedtest-cli --break-system-packages -q --timeout=30 2>/dev/null || \
+  pip3 install speedtest-cli -q --timeout=30 2>/dev/null || true
+
+# ถ้า speedtest-cli ยังใช้ไม่ได้ ลอง ookla official speedtest
+if ! command -v speedtest-cli &>/dev/null && ! python3 -c "import speedtest" 2>/dev/null; then
+  info "ลอง ookla speedtest binary..."
+  _arch=$(uname -m)
+  case "$_arch" in
+    x86_64)   _sf="x86_64"  ;;
+    aarch64)  _sf="aarch64" ;;
+    armv7l)   _sf="armhf"   ;;
+    *)        _sf=""         ;;
+  esac
+  if [[ -n "$_sf" ]]; then
+    _ookla_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${_sf}.tgz"
+    wget -q --timeout=30 -O /tmp/speedtest.tgz "$_ookla_url" 2>/dev/null && \
+      tar -xzf /tmp/speedtest.tgz -C /usr/local/bin speedtest 2>/dev/null && \
+      chmod +x /usr/local/bin/speedtest && \
+      rm -f /tmp/speedtest.tgz && \
+      ok "ookla speedtest พร้อม" || warn "ookla speedtest ติดตั้งไม่สำเร็จ"
+  fi
+fi
+
+# ตรวจสอบ speedtest พร้อมใช้งาน
+if command -v speedtest-cli &>/dev/null || python3 -c "import speedtest" 2>/dev/null; then
+  ok "speedtest-cli พร้อม"
+elif command -v speedtest &>/dev/null; then
+  ok "ookla speedtest พร้อม"
+else
+  warn "speedtest ไม่พร้อม — speed test ใน panel จะใช้ client-side แทน"
+fi
 ok "ติดตั้ง packages สำเร็จ"
 
 # ── GET SERVER IP ────────────────────────────────────────────
@@ -1078,20 +1109,37 @@ server {
         add_header Cache-Control "no-store";
     }
     location /api/speedtest {
+        if (\$request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin "*";
+            add_header Access-Control-Allow-Methods "GET,POST,OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type";
+            return 204;
+        }
         proxy_pass http://127.0.0.1:6789/api/speedtest;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 120s;
+        proxy_connect_timeout 10s;
+        proxy_intercept_errors off;
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Content-Type" always;
     }
     location /api/ {
+        if (\$request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin "*";
+            add_header Access-Control-Allow-Methods "GET,POST,OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type";
+            return 204;
+        }
         proxy_pass http://127.0.0.1:6789/api/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+        proxy_intercept_errors off;
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Content-Type" always;
@@ -1106,7 +1154,8 @@ server {
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header Authorization \$http_authorization;
         proxy_read_timeout 60s;
-        proxy_cookie_path / /;
+        # rewrite cookie path จาก webBasePath จริงของ x-ui → /xui-api/ ที่ browser รู้จัก
+        proxy_cookie_path ${XUI_BASE_PATH} /xui-api/;
         add_header Access-Control-Allow-Origin "\$http_origin" always;
         add_header Access-Control-Allow-Credentials "true" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
@@ -1155,10 +1204,35 @@ server {
         add_header Cache-Control "no-store";
     }
     location /api/ {
+        if (\$request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin "*";
+            add_header Access-Control-Allow-Methods "GET,POST,OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type";
+            return 204;
+        }
         proxy_pass http://127.0.0.1:6789/api/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
-        proxy_read_timeout 30s;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+        proxy_intercept_errors off;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Content-Type" always;
+    }
+    location /api/speedtest {
+        if (\$request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin "*";
+            add_header Access-Control-Allow-Methods "GET,POST,OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type";
+            return 204;
+        }
+        proxy_pass http://127.0.0.1:6789/api/speedtest;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 10s;
+        proxy_intercept_errors off;
         add_header Access-Control-Allow-Origin "*" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
         add_header Access-Control-Allow-Headers "Content-Type" always;
@@ -1173,7 +1247,8 @@ server {
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header Authorization \$http_authorization;
         proxy_read_timeout 60s;
-        proxy_cookie_path / /;
+        # rewrite cookie path จาก webBasePath จริงของ x-ui → /xui-api/ ที่ browser รู้จัก
+        proxy_cookie_path ${XUI_BASE_PATH} /xui-api/;
         add_header Access-Control-Allow-Origin "\$http_origin" always;
         add_header Access-Control-Allow-Credentials "true" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
