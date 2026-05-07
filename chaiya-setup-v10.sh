@@ -503,29 +503,11 @@ fi
 
 systemctl stop x-ui 2>/dev/null || true
 
-# ── Start x-ui ครั้งแรกเพื่อให้ generate random webBasePath ────
-# x-ui จะ generate random path ตอน start ครั้งแรก ถ้า DB ยังไม่มี path
 XUI_DB="/etc/x-ui/x-ui.db"
-systemctl start x-ui 2>/dev/null || true
-sleep 3
-systemctl stop x-ui 2>/dev/null || true
-sleep 1
-
-# ── รอให้ x-ui generate webBasePath จริงๆ ────────────────────
-# วนรอจนกว่า x-ui จะ set random path (ไม่ใช่ / หรือว่าง)
-_db_path=""
-for _i in 1 2 3 4 5 6 7 8 9 10; do
-  _db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
-  if [[ -n "$_db_path" && "$_db_path" != "/" ]]; then
-    break
-  fi
-  # ยังไม่มี — start x-ui แล้วรอ
-  systemctl start x-ui 2>/dev/null || true
-  sleep 3
-  systemctl stop x-ui 2>/dev/null || true
-  sleep 1
-done
-XUI_BASE_PATH="${_db_path}"
+# ── อ่าน webBasePath ที่ x-ui สร้างไว้ตอน install ────────────
+# ไม่แตะค่านี้เลย x-ui generate random path เองอัตโนมัติ
+_db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
+XUI_BASE_PATH="${_db_path:-/}"
 [[ "$XUI_BASE_PATH" != */ ]] && XUI_BASE_PATH="${XUI_BASE_PATH}/"
 ok "x-ui webBasePath: ${XUI_BASE_PATH}"
 echo "$XUI_BASE_PATH" > /etc/chaiya/xui-path.conf
