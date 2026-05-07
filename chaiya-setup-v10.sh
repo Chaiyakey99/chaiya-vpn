@@ -30,6 +30,8 @@ if [[ "$0" == /dev/fd/* ]] || [[ "$0" == /proc/self/fd/* ]] || [[ "$0" == "bash"
 fi
 
 set -o pipefail
+stty cols 200 2>/dev/null || true
+export COLUMNS=200
 export DEBIAN_FRONTEND=noninteractive
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
