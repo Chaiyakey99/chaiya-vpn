@@ -504,11 +504,11 @@ fi
 systemctl stop x-ui 2>/dev/null || true
 
 XUI_DB="/etc/x-ui/x-ui.db"
-# ── อ่าน webBasePath ที่ x-ui สร้างไว้ตอน install ────────────
-# ไม่แตะค่านี้เลย x-ui generate random path เองอัตโนมัติ
-_db_path=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';" 2>/dev/null)
-XUI_BASE_PATH="${_db_path:-/}"
-[[ "$XUI_BASE_PATH" != */ ]] && XUI_BASE_PATH="${XUI_BASE_PATH}/"
+# ── generate random webBasePath แล้ว set ลง DB ────────────
+_RAND_PATH=$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 12)
+XUI_BASE_PATH="/${_RAND_PATH}/"
+sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='webBasePath';" 2>/dev/null || true
+sqlite3 "$XUI_DB" "INSERT INTO settings(key,value) VALUES('webBasePath','${XUI_BASE_PATH}');" 2>/dev/null || true
 ok "x-ui webBasePath: ${XUI_BASE_PATH}"
 echo "$XUI_BASE_PATH" > /etc/chaiya/xui-path.conf
 if [[ -f "$XUI_DB" ]]; then
@@ -546,18 +546,19 @@ done
 echo "$REAL_XUI_PORT" > /etc/chaiya/xui-port.conf
 ok "3x-ui พร้อม (port $REAL_XUI_PORT)"
 
-# ── ตั้งค่า x-ui settings (ไม่แตะ webBasePath — ให้ x-ui จัดการเอง) ──
+# ── ตั้งค่า x-ui settings (รวม webBasePath) ──
 XUI_DB="/etc/x-ui/x-ui.db"
 if [[ -f "$XUI_DB" ]]; then
   systemctl stop x-ui 2>/dev/null; sleep 1
   _XUI_HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'${XUI_PASS}',bcrypt.gensalt()).decode())" 2>/dev/null || echo "${XUI_PASS}")
   sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${_XUI_HASH}' WHERE id=1;" 2>/dev/null || true
-  for _key in webPort webUsername webPassword enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
+  for _key in webPort webUsername webPassword webBasePath enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
   done
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webPort','${XUI_PORT}');"            2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webUsername','${XUI_USER}');"        2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webPassword','${_XUI_HASH}');"        2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('webBasePath','${XUI_BASE_PATH}');"   2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableIpLimit','true');"             2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableTrafficStatistics','true');"   2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('timeLocation','Asia/Bangkok');"      2>/dev/null || true
