@@ -2459,9 +2459,9 @@ fi
 echo -e "  👤 3x-ui User  : ${YELLOW}${XUI_USER}${NC}"
 echo -e "  🔒 3x-ui Pass  : ${YELLOW}${XUI_PASS}${NC}"
 if [[ $USE_SSL -eq 1 ]]; then
-  echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}https://${DOMAIN}:2503/${NC} (ผ่าน nginx proxy)"
+  echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}https://${DOMAIN}:2503${XUI_BASE_PATH}${NC} (ผ่าน nginx proxy)"
 else
-  echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}http://${DOMAIN}:2503/${NC} (ผ่าน nginx proxy)"
+  echo -e "  🖥  3x-ui Panel : ${CYAN}${BOLD}http://${DOMAIN}:2503${XUI_BASE_PATH}${NC} (ผ่าน nginx proxy)"
 fi
 echo -e "  🐻 Dropbear    : ${CYAN}port 143, 109${NC}"
 echo -e "  🌐 WS-Tunnel   : ${CYAN}port 80 → Dropbear:143${NC}"
