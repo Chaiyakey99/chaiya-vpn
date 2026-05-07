@@ -515,7 +515,7 @@ if [[ -f "$XUI_DB" ]]; then
   # ใช้ bcrypt hash — x-ui version ใหม่ต้องการ hash ไม่ใช่ plaintext
 
   _XUI_HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'${XUI_PASS}',bcrypt.gensalt()).decode())" 2>/dev/null || echo "${XUI_PASS}")
-  sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${_XUI_HASH}' WHERE id=1;" 2>/dev/null || true
+  sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${_XUI_HASH}';" 2>/dev/null || true
   for _key in webPort webUsername webPassword; do
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
   done
@@ -551,7 +551,7 @@ XUI_DB="/etc/x-ui/x-ui.db"
 if [[ -f "$XUI_DB" ]]; then
   systemctl stop x-ui 2>/dev/null; sleep 1
   _XUI_HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'${XUI_PASS}',bcrypt.gensalt()).decode())" 2>/dev/null || echo "${XUI_PASS}")
-  sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${_XUI_HASH}' WHERE id=1;" 2>/dev/null || true
+  sqlite3 "$XUI_DB" "UPDATE users SET username='${XUI_USER}', password='${_XUI_HASH}';" 2>/dev/null || true
   for _key in webPort webUsername webPassword webBasePath enableIpLimit enableTrafficStatistics timeLocation trafficDiffReset; do
     sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
   done
@@ -1097,8 +1097,7 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type" always;
     }
     location /xui-api/ {
-        proxy_pass https://127.0.0.1:${REAL_XUI_PORT}${XUI_BASE_PATH};
-        proxy_ssl_verify off;
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}${XUI_BASE_PATH};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -1107,7 +1106,7 @@ server {
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header Authorization \$http_authorization;
         proxy_read_timeout 60s;
-        proxy_cookie_path ${XUI_BASE_PATH} /xui-api/;
+        proxy_cookie_path / /;
         add_header Access-Control-Allow-Origin "\$http_origin" always;
         add_header Access-Control-Allow-Credentials "true" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
@@ -1127,8 +1126,7 @@ server {
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 10m;
     location / {
-        proxy_pass https://127.0.0.1:${REAL_XUI_PORT};
-        proxy_ssl_verify off;
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -1139,7 +1137,7 @@ server {
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header Authorization \$http_authorization;
         proxy_read_timeout 120s;
-        proxy_cookie_path ${XUI_BASE_PATH} /xui-api/;
+        proxy_cookie_path / /;
     }
 }
 EOF
@@ -1166,8 +1164,7 @@ server {
         add_header Access-Control-Allow-Headers "Content-Type" always;
     }
     location /xui-api/ {
-        proxy_pass https://127.0.0.1:${REAL_XUI_PORT}${XUI_BASE_PATH};
-        proxy_ssl_verify off;
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT}${XUI_BASE_PATH};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -1176,7 +1173,7 @@ server {
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header Authorization \$http_authorization;
         proxy_read_timeout 60s;
-        proxy_cookie_path ${XUI_BASE_PATH} /xui-api/;
+        proxy_cookie_path / /;
         add_header Access-Control-Allow-Origin "\$http_origin" always;
         add_header Access-Control-Allow-Credentials "true" always;
         add_header Access-Control-Allow-Methods "GET,POST,OPTIONS" always;
@@ -1190,8 +1187,7 @@ server {
     listen [::]:2503;
     server_name ${DOMAIN} _;
     location / {
-        proxy_pass https://127.0.0.1:${REAL_XUI_PORT};
-        proxy_ssl_verify off;
+        proxy_pass http://127.0.0.1:${REAL_XUI_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -1202,7 +1198,7 @@ server {
         proxy_set_header Cookie \$http_cookie;
         proxy_set_header Authorization \$http_authorization;
         proxy_read_timeout 120s;
-        proxy_cookie_path ${XUI_BASE_PATH} /xui-api/;
+        proxy_cookie_path / /;
     }
 }
 EOF
