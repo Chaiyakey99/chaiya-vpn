@@ -630,7 +630,7 @@ try:
 
     inbounds = [
         (8080, 'AIS – กันรั่ว',  'cj-ebb.speedtest.net',           'vless',  'inbound-8080', '/vless'),
-        (443,  'AIS – กันรั่ว 443',  'cj-ebb.speedtest.net',        'vless',  'inbound-443',  '/vless'),
+        (443,  'AIS – กันรั่ว',       'cj-ebb.speedtest.net',        'vmess',  'inbound-443',  '/vmess'),
         (8880, 'TRUE – VDO', 'true-internet.zoom.xyz.services', 'vless',  'inbound-8880', '/vless'),
     ]
 
