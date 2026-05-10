@@ -1079,20 +1079,6 @@ http {
     keepalive_timeout 65;
     include /etc/nginx/conf.d/*.conf;
 }
-stream {
-    map \$ssl_preread_server_name \$backend {
-        cj-ebb.speedtest.net  127.0.0.1:10443;
-        default               127.0.0.1:10444;
-    }
-    server {
-        listen 443;
-        listen [::]:443;
-        ssl_preread on;
-        proxy_pass \$backend;
-        proxy_connect_timeout 5s;
-        proxy_timeout 600s;
-    }
-}
 NGINXCONF
   mkdir -p /var/log/nginx /var/lib/nginx/body
   chown -R www-data:www-data /var/log/nginx /var/lib/nginx 2>/dev/null || true
@@ -1107,15 +1093,14 @@ info "ตั้งค่า Nginx..."
 # เปิด port 443/2503
 ufw allow 443/tcp  &>/dev/null || true
 ufw allow 10443/tcp &>/dev/null || true
-ufw allow 10444/tcp &>/dev/null || true
 ufw allow 2503/tcp &>/dev/null || true
 
 if [[ $USE_SSL -eq 1 ]]; then
 cat > /etc/nginx/conf.d/chaiya.conf << EOF
 # ── Dashboard (port 443 HTTPS) ──────────────────────────────────
 server {
-    listen 10444 ssl http2;
-    listen [::]:10444 ssl http2;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name ${DOMAIN};
     ssl_certificate     ${SSL_CERT};
     ssl_certificate_key ${SSL_KEY};
@@ -1128,6 +1113,14 @@ server {
     location / {
         try_files \$uri \$uri/ =404;
         add_header Cache-Control "no-store";
+    }
+    location /vless {
+        proxy_pass http://127.0.0.1:10443;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 600s;
     }
     location /api/speedtest {
         if (\$request_method = OPTIONS) {
@@ -1215,14 +1208,22 @@ else
 cat > /etc/nginx/conf.d/chaiya.conf << EOF
 # ── Dashboard (port 443 HTTP) ───────────────────────────────────
 server {
-    listen 10444;
-    listen [::]:10444;
+    listen 443;
+    listen [::]:443;
     server_name ${DOMAIN} _;
     root /opt/chaiya-panel;
     index index.html;
     location / {
         try_files \$uri \$uri/ =404;
         add_header Cache-Control "no-store";
+    }
+    location /vless {
+        proxy_pass http://127.0.0.1:10443;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 600s;
     }
     location /api/ {
         if (\$request_method = OPTIONS) {
