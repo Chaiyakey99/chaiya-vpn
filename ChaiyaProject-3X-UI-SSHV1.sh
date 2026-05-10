@@ -621,20 +621,24 @@ for _try in 1 2 3; do
 done
 
 python3 << PYEOF
-import sqlite3, uuid, json
+import sqlite3, uuid, json, os
 
-DB = '/etc/x-ui/x-ui.db'
+DB  = '/etc/x-ui/x-ui.db'
+CERT = '/etc/letsencrypt/live/${DOMAIN}/fullchain.pem'
+KEY  = '/etc/letsencrypt/live/${DOMAIN}/privkey.pem'
+USE_TLS = os.path.isfile(CERT) and os.path.isfile(KEY)
+
 try:
     con = sqlite3.connect(DB)
     existing = [r[0] for r in con.execute("SELECT port FROM inbounds").fetchall()]
 
     inbounds = [
-        (8080, 'AIS – กันรั่ว',  'cj-ebb.speedtest.net',           'vless',  'inbound-8080', '/vless'),
-        (443,  'AIS – กันรั่ว',       'cj-ebb.speedtest.net',        'vmess',  'inbound-443',  '/vmess'),
-        (8880, 'TRUE – VDO', 'true-internet.zoom.xyz.services', 'vless',  'inbound-8880', '/vless'),
+        (8080, 'AIS – กันรั่ว',  'cj-ebb.speedtest.net',           'vless',  'inbound-8080', '/vless', False),
+        (443,  'AIS – กันรั่ว',  'cj-ebb.speedtest.net',            'vmess',  'inbound-443',  '/vmess', True),
+        (8880, 'TRUE – VDO', 'true-internet.zoom.xyz.services', 'vless',  'inbound-8880', '/vless', False),
     ]
 
-    for port, remark, host, proto, tag, ws_path in inbounds:
+    for port, remark, host, proto, tag, ws_path, want_tls in inbounds:
         if port in existing:
             print(f'[OK] {remark} มีอยู่แล้ว')
             continue
@@ -643,13 +647,29 @@ try:
             settings = json.dumps({'clients': [{'id': uid, 'alterId': 0, 'email': f'default@{tag}', 'limitIp': 2, 'totalGB': 0, 'expiryTime': 0, 'enable': True}]})
         else:
             settings = json.dumps({'clients': [{'id': uid, 'flow': '', 'email': f'default@{tag}', 'limitIp': 2, 'totalGB': 0, 'expiryTime': 0, 'enable': True}], 'decryption': 'none'})
-        stream   = json.dumps({'network': 'ws', 'security': 'none', 'wsSettings': {'path': ws_path, 'headers': {'Host': host}}})
+
+        # port 443 ใช้ TLS ถ้ามี cert
+        if want_tls and USE_TLS:
+            tls_settings = {
+                'serverName': '${DOMAIN}',
+                'certificates': [{'certificateFile': CERT, 'keyFile': KEY}]
+            }
+            stream = json.dumps({
+                'network': 'ws',
+                'security': 'tls',
+                'tlsSettings': tls_settings,
+                'wsSettings': {'path': ws_path, 'headers': {'Host': host}}
+            })
+            print(f'[OK] {proto.upper()} {remark} (port {port}) + TLS')
+        else:
+            stream = json.dumps({'network': 'ws', 'security': 'none', 'wsSettings': {'path': ws_path, 'headers': {'Host': host}}})
+            print(f'[OK] {proto.upper()} {remark} (port {port})')
+
         sniffing = json.dumps({'enabled': True, 'destOverride': ['http', 'tls']})
         con.execute(
             "INSERT INTO inbounds (user_id,up,down,total,remark,enable,expiry_time,listen,port,protocol,settings,stream_settings,tag,sniffing) VALUES (1,0,0,0,?,1,0,'',?,?,?,?,?,?)",
             (remark, port, proto, settings, stream, tag, sniffing)
         )
-        print(f'[OK] {proto.upper()} {remark} (port {port})')
     con.commit()
     con.close()
 except Exception as e:
@@ -1013,19 +1033,6 @@ info "เปิด WS-Stunnel กลับหลัง nginx config เสร็
 
 [[ $USE_SSL -eq 1 ]] && ok "SSL Certificate พร้อม" || warn "ไม่มี SSL — ใช้ HTTP แทน"
 
-# ── ใส่ cert path ลงใน x-ui (Certificates section ใน Panel Settings) ──
-if [[ $USE_SSL -eq 1 ]] && [[ -f /etc/x-ui/x-ui.db ]]; then
-  info "ตั้งค่า x-ui cert path..."
-  systemctl stop x-ui 2>/dev/null; sleep 1
-  for _key in webCertFile webKeyFile; do
-    sqlite3 /etc/x-ui/x-ui.db "DELETE FROM settings WHERE key='${_key}';" 2>/dev/null || true
-  done
-  sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings(key,value) VALUES('webCertFile','${SSL_CERT}');" 2>/dev/null || true
-  sqlite3 /etc/x-ui/x-ui.db "INSERT OR REPLACE INTO settings(key,value) VALUES('webKeyFile','${SSL_KEY}');"  2>/dev/null || true
-  systemctl start x-ui
-  ok "x-ui cert path ตั้งค่าแล้ว (${SSL_CERT})"
-fi
-
 # ── NGINX INSTALL + CONFIG ────────────────────────────────────
 info "ติดตั้ง Nginx..."
 
@@ -1103,14 +1110,15 @@ mkdir -p /etc/nginx/conf.d
 
 info "ตั้งค่า Nginx..."
 
-# เปิด port 443/2503
+# เปิด port
 ufw allow 443/tcp  &>/dev/null || true
 ufw allow 2053/tcp &>/dev/null || true
 ufw allow 2503/tcp &>/dev/null || true
+ufw allow 8443/tcp &>/dev/null || true
 
 if [[ $USE_SSL -eq 1 ]]; then
 cat > /etc/nginx/conf.d/chaiya.conf << EOF
-# ── Dashboard (port 443 HTTPS) ──────────────────────────────────
+# ── Dashboard (port 2053 HTTPS) ──────────────────────────────────
 server {
     listen 2053 ssl http2;
     listen [::]:2053 ssl http2;
@@ -1300,7 +1308,7 @@ fi
 
 if nginx -t 2>/dev/null; then
   systemctl restart nginx \
-    && ok "Nginx พร้อม (Dashboard:443 / 3x-ui proxy:2503)" \
+    && ok "Nginx พร้อม (Dashboard:2053 / 3x-ui proxy:2503)" \
     || warn "Nginx ยังมีปัญหา — ตรวจ: journalctl -u nginx -n 20"
 else
   warn "Nginx config มีปัญหา — ตรวจ: nginx -t"
@@ -1317,7 +1325,7 @@ ufw default deny incoming 2>/dev/null || true
 ufw default allow outgoing 2>/dev/null || true
 
 # เปิดพอร์ตที่ต้องใช้งาน (public)
-for port in 22 80 109 143 443 2503 8080 8880; do
+for port in 22 80 109 143 443 2053 2503 8080 8880; do
   ufw allow "$port"/tcp &>/dev/null
   ok "ufw allow $port/tcp"
 done
@@ -1335,7 +1343,7 @@ ufw --force enable &>/dev/null
 
 # ยืนยันว่าพอร์ตสำคัญเปิดอยู่จริง
 info "ตรวจสอบพอร์ต..."
-for port in 22 80 109 143 443 2503 8080 8880; do
+for port in 22 80 109 143 443 2053 2503 8080 8880; do
   if ss -tlnp 2>/dev/null | grep -q ":${port} " ||      ufw status | grep -q "^${port}"; then
     ok "port $port พร้อม"
   else
@@ -2588,10 +2596,10 @@ echo -e "${GREEN}${BOLD}║   CHAIYA VPN PANEL v8 - ติดตั้งสำ�
 echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 if [[ $USE_SSL -eq 1 ]]; then
-  echo -e "  🌐 Panel URL   : ${CYAN}${BOLD}https://${DOMAIN}${NC}"
+  echo -e "  🌐 Dashboard   : ${CYAN}${BOLD}https://${DOMAIN}:2053${NC}"
   echo -e "  🔒 SSL         : ${GREEN}✅ HTTPS พร้อม${NC}"
 else
-  echo -e "  🌐 Panel URL   : ${YELLOW}http://${DOMAIN}:443 (ยังไม่มี SSL)${NC}"
+  echo -e "  🌐 Dashboard   : ${YELLOW}http://${DOMAIN}:2053 (ยังไม่มี SSL)${NC}"
   echo -e "  🔒 SSL         : ${YELLOW}⚠️  ยังไม่มี${NC}"
   echo -e "              รัน: certbot certonly --standalone -d ${DOMAIN}"
 fi
@@ -2605,8 +2613,9 @@ fi
 echo -e "  🐻 Dropbear    : ${CYAN}port 143, 109${NC}"
 echo -e "  🌐 WS-Tunnel   : ${CYAN}port 80 → Dropbear:143${NC}"
 echo -e "  🎮 BadVPN UDPGW: ${CYAN}port 7300${NC}"
-echo -e "  📡 VMess-WS    : ${CYAN}port 8080, path /vmess${NC}"
-echo -e "  📡 VLESS-WS    : ${CYAN}port 8880, path /vless${NC}"
+echo -e "  📡 VMess-WS    : ${CYAN}port 443 (TLS), path /vmess${NC}"
+echo -e "  📡 VMess-WS    : ${CYAN}port 8080 (none), path /vmess${NC}"
+echo -e "  📡 VLESS-WS    : ${CYAN}port 8880 (none), path /vless${NC}"
 echo ""
 echo -e "  💡 พิมพ์ ${CYAN}menu${NC} เพื่อดูรายละเอียด"
 echo ""
