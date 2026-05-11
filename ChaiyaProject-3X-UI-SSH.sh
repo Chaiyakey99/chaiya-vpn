@@ -533,7 +533,7 @@ if ! command -v x-ui &>/dev/null; then
   if [[ -s "$_xui_sh" ]]; then
     # ส่ง version เป็น argument โดยตรง — install.sh รองรับ bash install.sh <version>
     # ไม่ต้อง pipe interactive input เพราะ argument mode ไม่ถาม
-    timeout 300 bash "$_xui_sh" "${XUI_LOCKED_VERSION}" >> /var/log/chaiya-xui-install.log 2>&1 || true
+    printf "y\n${XUI_PORT}\n\n\n\n" | timeout 300 bash "$_xui_sh" "${XUI_LOCKED_VERSION}" >> /var/log/chaiya-xui-install.log 2>&1 || true
   fi
   rm -f "$_xui_sh"
 else
@@ -549,7 +549,7 @@ else
       -o "$_xui_sh" 2>/dev/null
     if [[ -s "$_xui_sh" ]]; then
       systemctl stop x-ui 2>/dev/null || true
-      timeout 300 bash "$_xui_sh" "${XUI_LOCKED_VERSION}" >> /var/log/chaiya-xui-install.log 2>&1 || true
+      printf "y\n${XUI_PORT}\n\n\n\n" | timeout 300 bash "$_xui_sh" "${XUI_LOCKED_VERSION}" >> /var/log/chaiya-xui-install.log 2>&1 || true
     fi
     rm -f "$_xui_sh"
   fi
@@ -715,7 +715,7 @@ if [[ -n "$CUR_VER" && "$CUR_VER" != "$LOCKED_VER" ]]; then
     "https://raw.githubusercontent.com/MHSanaei/3x-ui/${LOCKED_VER}/install.sh" \
     -o "$_sh" 2>/dev/null
   if [[ -s "$_sh" ]]; then
-    printf "y\n\n\n\n\n" | bash "$_sh" >> /var/log/chaiya-xui-guard.log 2>&1 || true
+    printf "y\n54321\n\n\n\n" | bash "$_sh" "${LOCKED_VER}" >> /var/log/chaiya-xui-guard.log 2>&1 || true
   fi
   rm -f "$_sh"
   systemctl start x-ui 2>/dev/null
