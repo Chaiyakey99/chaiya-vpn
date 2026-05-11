@@ -519,17 +519,40 @@ sleep 2
 ok "WS-Stunnel พร้อม (port $WS_TUNNEL_PORT → Dropbear:$DROPBEAR_PORT1)"
 
 # ── 3x-ui INSTALL ────────────────────────────────────────────
-info "ติดตั้ง 3x-ui..."
+# ล็อกเวอร์ชัน v2.9.4 — เวอร์ชันที่ API compatible กับ ChaiyaPanel
+# ห้ามเปลี่ยนเป็น latest เด็ดขาด เพราะเวอร์ชันใหม่เปลี่ยน session/cookie mechanism
+XUI_LOCKED_VERSION="v2.9.4"
+info "ติดตั้ง 3x-ui ${XUI_LOCKED_VERSION} (locked)..."
 if ! command -v x-ui &>/dev/null; then
   _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
-  # ใส่ timeout ดาวน์โหลด 30s ป้องกันค้าง
-  curl -Ls --max-time 30 "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
+  # ดึง install.sh จาก master เสมอ แล้วส่ง locked version เป็น argument
+  # install.sh รองรับ: bash install.sh v2.9.4 — จะดาวน์โหลด release นั้นโดยตรง
+  curl -Ls --max-time 30 \
+    "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
     -o "$_xui_sh" 2>/dev/null || { warn "ดาวน์โหลด 3x-ui install.sh ล้มเหลว"; rm -f "$_xui_sh"; }
   if [[ -s "$_xui_sh" ]]; then
-    # timeout 300s ป้องกันค้างไม่จบ — printf input ป้องกัน interactive prompt
-    printf "y\n${XUI_PORT}\n\n\n\n" | timeout 300 bash "$_xui_sh" >> /var/log/chaiya-xui-install.log 2>&1 || true
+    # ส่ง version เป็น argument โดยตรง — install.sh รองรับ bash install.sh <version>
+    # ไม่ต้อง pipe interactive input เพราะ argument mode ไม่ถาม
+    timeout 300 bash "$_xui_sh" "${XUI_LOCKED_VERSION}" >> /var/log/chaiya-xui-install.log 2>&1 || true
   fi
   rm -f "$_xui_sh"
+else
+  # มี x-ui อยู่แล้ว — ตรวจเวอร์ชันและ downgrade ถ้าใหม่เกิน
+  _cur_ver=$(/usr/local/x-ui/x-ui -v 2>/dev/null | head -1 | tr -d '[:space:]' || echo "unknown")
+  [[ "$_cur_ver" != v* ]] && _cur_ver="v${_cur_ver}"
+  info "x-ui เวอร์ชันปัจจุบัน: ${_cur_ver}"
+  if [[ "$_cur_ver" != "$XUI_LOCKED_VERSION" && "$_cur_ver" != "vunknown" ]]; then
+    warn "x-ui เวอร์ชัน ${_cur_ver} ไม่ตรงกับ locked ${XUI_LOCKED_VERSION} — ทำการ downgrade..."
+    _xui_sh=$(mktemp /tmp/xui-XXXXX.sh)
+    curl -Ls --max-time 30 \
+      "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh" \
+      -o "$_xui_sh" 2>/dev/null
+    if [[ -s "$_xui_sh" ]]; then
+      systemctl stop x-ui 2>/dev/null || true
+      timeout 300 bash "$_xui_sh" "${XUI_LOCKED_VERSION}" >> /var/log/chaiya-xui-install.log 2>&1 || true
+    fi
+    rm -f "$_xui_sh"
+  fi
 fi
 
 systemctl stop x-ui 2>/dev/null || true
@@ -594,6 +617,11 @@ if [[ -f "$XUI_DB" ]]; then
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('enableTrafficStatistics','true');"   2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('timeLocation','Asia/Bangkok');"      2>/dev/null || true
   sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('trafficDiffReset','false');"         2>/dev/null || true
+  # ปิด auto-update — ป้องกัน x-ui อัพเดทเองแล้ว break API
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('tgBotEnable','false');"              2>/dev/null || true
+  sqlite3 "$XUI_DB" "DELETE FROM settings WHERE key='checkUpdate';" 2>/dev/null || true
+  sqlite3 "$XUI_DB" "INSERT OR REPLACE INTO settings(key,value) VALUES('checkUpdate','false');"              2>/dev/null || true
+  ok "ปิด x-ui auto-update แล้ว (locked ${XUI_LOCKED_VERSION:-v2.9.4})"
   _port_check=$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
   [[ "$_port_check" == "${XUI_PORT}" ]] && ok "x-ui webPort=${XUI_PORT} ยืนยันแล้ว" || warn "webPort อาจไม่ถูกต้อง: $_port_check"
   systemctl start x-ui
@@ -659,6 +687,48 @@ rm -f "$XUI_COOKIE"
 systemctl restart x-ui 2>/dev/null || true
 sleep 2
 ok "Inbounds พร้อม"
+
+# ── ล็อก x-ui ห้ามอัพเดทอัตโนมัติ ──────────────────────────
+info "ล็อก x-ui เวอร์ชันไม่ให้อัพเดทอัตโนมัติ..."
+# 1) สร้าง systemd override — ExecStartPre ลบ update flag ทุกครั้งก่อน start
+mkdir -p /etc/systemd/system/x-ui.service.d
+cat > /etc/systemd/system/x-ui.service.d/no-autoupdate.conf << 'DROPIN'
+[Service]
+# ลบไฟล์ update flag ของ 3x-ui ทุกครั้งก่อน start
+ExecStartPre=-/bin/rm -f /usr/local/x-ui/.update_flag /usr/local/x-ui/update_flag /tmp/x-ui-update*
+DROPIN
+systemctl daemon-reload 2>/dev/null || true
+ok "systemd dropin ปิด update flag แล้ว"
+
+# 2) สร้าง update-blocker script — ถ้า x-ui พยายาม update ตัวเองจะถูก block
+cat > /usr/local/bin/chaiya-xui-version-guard << 'GUARD'
+#!/bin/bash
+# ChaiyaPanel x-ui version guard — รันโดย cron ทุก 10 นาที
+LOCKED_VER="v2.9.4"
+CUR_VER=$(x-ui version 2>/dev/null | grep -oP 'v[\d.]+' | head -1 || echo "")
+if [[ -n "$CUR_VER" && "$CUR_VER" != "$LOCKED_VER" ]]; then
+  echo "[$(date)] x-ui version changed: ${CUR_VER} → restoring ${LOCKED_VER}" >> /var/log/chaiya-xui-guard.log
+  systemctl stop x-ui 2>/dev/null
+  # reinstall locked version
+  _sh=$(mktemp /tmp/xui-guard-XXXXX.sh)
+  curl -Ls --max-time 30 \
+    "https://raw.githubusercontent.com/MHSanaei/3x-ui/${LOCKED_VER}/install.sh" \
+    -o "$_sh" 2>/dev/null
+  if [[ -s "$_sh" ]]; then
+    printf "y\n\n\n\n\n" | bash "$_sh" >> /var/log/chaiya-xui-guard.log 2>&1 || true
+  fi
+  rm -f "$_sh"
+  systemctl start x-ui 2>/dev/null
+  echo "[$(date)] restore complete" >> /var/log/chaiya-xui-guard.log
+fi
+GUARD
+chmod +x /usr/local/bin/chaiya-xui-version-guard
+
+# 3) ตั้ง cron ทุก 10 นาที
+(crontab -l 2>/dev/null | grep -v "chaiya-xui-version-guard"; \
+ echo "*/10 * * * * /usr/local/bin/chaiya-xui-version-guard") | crontab -
+ok "cron version-guard ตั้งค่าแล้ว (ทุก 10 นาที)"
+
 
 # ── SSH API (Python) ──────────────────────────────────────────
 info "ติดตั้ง SSH API..."
@@ -819,32 +889,30 @@ class Handler(BaseHTTPRequestHandler):
                 'udpgw_port': 7300,
             })
         elif self.path == '/api/server-status':
-            import urllib.request as _ur, urllib.parse as _up
+            import urllib.request as _ur, json as _j
             try:
                 xui_port = open('/etc/chaiya/xui-port.conf').read().strip() if os.path.exists('/etc/chaiya/xui-port.conf') else '54321'
                 xui_user = open('/etc/chaiya/xui-user.conf').read().strip() if os.path.exists('/etc/chaiya/xui-user.conf') else ''
                 xui_pass = open('/etc/chaiya/xui-pass.conf').read().strip() if os.path.exists('/etc/chaiya/xui-pass.conf') else ''
-                base = f'http://127.0.0.1:{xui_port}'
-                # login
-                login_data = _up.urlencode({'username': xui_user, 'password': xui_pass}).encode()
-                req = _ur.Request(base+'/login', data=login_data, method='POST')
-                req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+                xui_path = open('/etc/chaiya/xui-path.conf').read().strip() if os.path.exists('/etc/chaiya/xui-path.conf') else '/'
+                if not xui_path.endswith('/'): xui_path += '/'
+                base = f'http://127.0.0.1:{xui_port}{xui_path}'
+                # login — v2.9.x ใช้ JSON
+                login_data = _j.dumps({'username': xui_user, 'password': xui_pass}).encode()
+                req = _ur.Request(base+'login', data=login_data, method='POST')
+                req.add_header('Content-Type', 'application/json')
+                cookie_jar = {}
                 with _ur.urlopen(req, timeout=5) as resp:
-                    cookie = resp.getheader('Set-Cookie', '')
-                    session = ''
-                    for part in cookie.split(';'):
-                        part = part.strip()
-                        if part.startswith('session=') or '3x-ui' in part or 'session' in part.lower():
-                            session = part.split(';')[0].strip()
-                            break
-                    if not session and cookie:
-                        session = cookie.split(';')[0].strip()
+                    for hdr in resp.getheaders():
+                        if hdr[0].lower() == 'set-cookie':
+                            k, _, v = hdr[1].partition('=')
+                            cookie_jar[k.strip()] = v.split(';')[0].strip()
+                cookie_str = '; '.join(f'{k}={v}' for k, v in cookie_jar.items())
                 # server status
-                req2 = _ur.Request(base+'/panel/api/server/status')
-                if session:
-                    req2.add_header('Cookie', session)
+                req2 = _ur.Request(base+'panel/api/server/status')
+                if cookie_str:
+                    req2.add_header('Cookie', cookie_str)
                 with _ur.urlopen(req2, timeout=5) as resp2:
-                    import json as _j
                     data = _j.loads(resp2.read())
                 respond(self, 200, data)
             except Exception as e:
