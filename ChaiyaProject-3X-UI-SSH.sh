@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 #   CHAIYA VPN PANEL v8 + PATCH (Combined)
-#   Ubuntu 22.04 / 24.04
+#   Ubuntu 22.04 / 24.04 / 26.04
 #   รันคำสั่งเดียว: bash chaiya-setup-v8.sh
 #   แก้ทุกปัญหาจาก v4:
 #   - nginx ไม่ชนกัน (port แยกชัดเจน ไม่มี SSL block ถ้าไม่มี cert)
@@ -66,6 +66,14 @@ BANNER
 # 8880  xui VLESS-WS inbound
 # 6789  chaiya-sshws-api (127.0.0.1 เท่านั้น)
 
+# ── UBUNTU VERSION CHECK ─────────────────────────────────────
+UBUNTU_VER=$(lsb_release -rs 2>/dev/null || grep VERSION_ID /etc/os-release | cut -d'"' -f2)
+info "Ubuntu version: ${CYAN}${UBUNTU_VER}${NC}"
+case "$UBUNTU_VER" in
+  22.04|24.04|26.04) ok "Ubuntu ${UBUNTU_VER} รองรับแล้ว ✅" ;;
+  *) warn "Ubuntu ${UBUNTU_VER} ยังไม่ได้ทดสอบ — อาจมีปัญหา" ;;
+esac
+
 SSH_API_PORT=6789
 XUI_PORT=54321       # x-ui internal port (default x-ui)
 XUI_NGINX_PORT=2503  # port ที่ nginx proxy ออกให้ user เปิด browser
@@ -92,7 +100,7 @@ DEBIAN_FRONTEND=noninteractive timeout 180 apt-get install -y -qq \
   net-tools jq bc cron unzip sqlite3 2>/dev/null || true
 ok "packages หลักเสร็จ"
 
-# iptables-persistent ถูกตัดออก — ค้างเพราะ interactive prompt บน Ubuntu 24.04
+# iptables-persistent ถูกตัดออก — ค้างเพราะ interactive prompt บน Ubuntu 24.04 / 26.04
 
 # ติดตั้ง certbot (ลอง apt ก่อน ข้าม snap เพราะช้ามาก)
 info "ติดตั้ง certbot..."
