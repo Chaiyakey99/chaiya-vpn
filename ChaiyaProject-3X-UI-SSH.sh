@@ -159,7 +159,44 @@ SERVER_IP=$(curl -s4 --max-time 5 https://api.ipify.org 2>/dev/null || \
             curl -s4 --max-time 5 https://ifconfig.me 2>/dev/null || \
             hostname -I | awk '{print $1}')
 [[ -z "$SERVER_IP" ]] && err "ไม่สามารถดึง IP ได้"
-ok "IP: ${CYAN}$SERVER_IP${NC}"
+ok "IPv4: ${CYAN}$SERVER_IP${NC}"
+
+# ── ตรวจสอบ IPv6 ─────────────────────────────────────────────
+USE_IPV6=0
+SERVER_IPV6=""
+info "ตรวจสอบ IPv6..."
+_ipv6_check=$(ip -6 addr show scope global 2>/dev/null | grep -oP '(?<=inet6 )[0-9a-f:]+' | grep -v '^::1' | head -1)
+if [[ -n "$_ipv6_check" ]]; then
+  # ทดสอบว่า IPv6 ใช้งานได้จริง (ping6 google)
+  if ping6 -c 1 -W 3 google.com &>/dev/null 2>&1; then
+    SERVER_IPV6=$(curl -s6 --max-time 5 https://api6.ipify.org 2>/dev/null || echo "$_ipv6_check")
+    ok "พบ IPv6: ${CYAN}$SERVER_IPV6${NC}"
+    echo ""
+    echo -e "${YELLOW}════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}  ตั้งค่า IP Mode${NC}"
+    echo -e "${YELLOW}════════════════════════════════════════${NC}"
+    echo -e "  เซิร์ฟเวอร์นี้มี IPv6 พร้อมใช้งาน"
+    echo -e "  IPv4 : ${CYAN}$SERVER_IP${NC}"
+    echo -e "  IPv6 : ${CYAN}$SERVER_IPV6${NC}"
+    echo ""
+    echo -e "  ${BOLD}[1]${NC} ใช้ IPv4 (ค่าเริ่มต้น)"
+    echo -e "  ${BOLD}[2]${NC} ใช้ IPv6 (ผู้ใช้ที่เชื่อมต่อจะเห็น IPv6)"
+    echo ""
+    while true; do
+      read -rp "  เลือก [1/2]: " _ip_choice
+      case "$_ip_choice" in
+        1|"") USE_IPV6=0; ok "ใช้ IPv4: $SERVER_IP"; break ;;
+        2)    USE_IPV6=1; ok "ใช้ IPv6: $SERVER_IPV6"; break ;;
+        *)    warn "กรุณาเลือก 1 หรือ 2" ;;
+      esac
+    done
+    echo -e "${YELLOW}════════════════════════════════════════${NC}"
+  else
+    warn "พบ IPv6 address แต่เชื่อมต่อออกนอกไม่ได้ — ใช้ IPv4 แทน"
+  fi
+else
+  info "ไม่พบ IPv6 บนเครื่องนี้ — ใช้ IPv4"
+fi
 
 
 
@@ -665,22 +702,26 @@ for _try in 1 2 3; do
   sleep 3
 done
 
+export USE_IPV6
 python3 << PYEOF
-import sqlite3, uuid, json
+import sqlite3, uuid, json, os
 
 DB = '/etc/x-ui/x-ui.db'
+use_ipv6 = os.environ.get('USE_IPV6', '0') == '1'
+listen_addr = '::' if use_ipv6 else ''
+
 try:
     con = sqlite3.connect(DB)
     existing = [r[0] for r in con.execute("SELECT port FROM inbounds").fetchall()]
 
     inbounds = [
-        (8080, 'AIS – กันรั่ว',  'cj-ebb.speedtest.net',           'vless',  'inbound-8080', '/vless'),
-        (8880, 'TRUE – VDO', 'true-internet.zoom.xyz.services', 'vless',  'inbound-8880', '/vless'),
+        (8080, 'AIS \u2013 \u0e01\u0e31\u0e19\u0e23\u0e31\u0e48\u0e27',  'cj-ebb.speedtest.net',           'vless',  'inbound-8080', '/vless'),
+        (8880, 'TRUE \u2013 VDO', 'true-internet.zoom.xyz.services', 'vless',  'inbound-8880', '/vless'),
     ]
 
     for port, remark, host, proto, tag, ws_path in inbounds:
         if port in existing:
-            print(f'[OK] {remark} มีอยู่แล้ว')
+            print(f'[OK] {remark} \u0e21\u0e35\u0e2d\u0e22\u0e39\u0e48\u0e41\u0e25\u0e49\u0e27')
             continue
         uid = str(uuid.uuid4())
         if proto == 'vmess':
@@ -690,10 +731,11 @@ try:
         stream   = json.dumps({'network': 'ws', 'security': 'none', 'wsSettings': {'path': ws_path, 'headers': {'Host': host}}})
         sniffing = json.dumps({'enabled': True, 'destOverride': ['http', 'tls']})
         con.execute(
-            "INSERT INTO inbounds (user_id,up,down,total,remark,enable,expiry_time,listen,port,protocol,settings,stream_settings,tag,sniffing) VALUES (1,0,0,0,?,1,0,'',?,?,?,?,?,?)",
-            (remark, port, proto, settings, stream, tag, sniffing)
+            "INSERT INTO inbounds (user_id,up,down,total,remark,enable,expiry_time,listen,port,protocol,settings,stream_settings,tag,sniffing) VALUES (1,0,0,0,?,1,0,?,?,?,?,?,?,?)",
+            (remark, listen_addr, port, proto, settings, stream, tag, sniffing)
         )
-        print(f'[OK] {proto.upper()} {remark} (port {port})')
+        mode = 'IPv6 [::]' if use_ipv6 else 'IPv4'
+        print(f'[OK] {proto.upper()} {remark} (port {port}) listen={mode}')
     con.commit()
     con.close()
 except Exception as e:
@@ -701,6 +743,45 @@ except Exception as e:
 PYEOF
 
 rm -f "$XUI_COOKIE"
+
+# ── ตั้งค่า xray outbound domainStrategy ตาม IP mode ─────────
+if [[ $USE_IPV6 -eq 1 ]]; then
+  info "ตั้งค่า xray outbound → UseIPv6v4 (IPv6 ก่อน ถ้าไม่ได้ค่อย IPv4)..."
+  _XRAY_CONF_DIR="/usr/local/x-ui/bin"
+  _OUTBOUND_CONF="${_XRAY_CONF_DIR}/config.json"
+  if [[ -f "$_OUTBOUND_CONF" ]]; then
+    python3 - "$_OUTBOUND_CONF" << 'XRAYPY'
+import sys, json
+path = sys.argv[1]
+try:
+    with open(path, 'r') as f:
+        cfg = json.load(f)
+    changed = 0
+    for ob in cfg.get('outbounds', []):
+        if ob.get('protocol') == 'freedom':
+            ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv6v4'
+            changed += 1
+    if changed == 0:
+        cfg.setdefault('outbounds', []).append({
+            'protocol': 'freedom',
+            'settings': {'domainStrategy': 'UseIPv6v4'},
+            'tag': 'direct'
+        })
+    with open(path, 'w') as f:
+        json.dump(cfg, f, indent=2)
+    print(f'[OK] xray config อัพเดต domainStrategy=UseIPv6v4 ({changed} outbound)')
+except Exception as e:
+    print(f'[WARN] แก้ xray config ไม่สำเร็จ: {e}')
+XRAYPY
+  fi
+  echo "$SERVER_IPV6" > /etc/chaiya/my_ipv6.conf
+  echo "1" > /etc/chaiya/use_ipv6.conf
+  ok "xray outbound → UseIPv6v4 (ผู้ใช้เชื่อมต่อจะเห็น IPv6)"
+else
+  echo "0" > /etc/chaiya/use_ipv6.conf
+  ok "xray outbound → IPv4 (ค่าเริ่มต้น)"
+fi
+
 systemctl restart x-ui 2>/dev/null || true
 sleep 2
 ok "Inbounds พร้อม"
