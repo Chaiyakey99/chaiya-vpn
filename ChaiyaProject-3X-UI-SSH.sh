@@ -1149,11 +1149,13 @@ SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 USE_SSL=0
 
-# หยุด WS-Stunnel ชั่วคราวเพื่อ free port 80 ให้ certbot standalone
+# หยุด WS-Stunnel และ nginx ชั่วคราวเพื่อ free port 80 ให้ certbot standalone
 # (Let's Encrypt ต้องการ port 80 จริงๆ — http-01-port อื่นไม่ work)
-info "หยุด WS-Stunnel ชั่วคราว (ปลดล็อก port 80)..."
+info "หยุด WS-Stunnel และ nginx ชั่วคราว (ปลดล็อก port 80)..."
 systemctl stop chaiya-sshws 2>/dev/null || true
+systemctl stop nginx 2>/dev/null || true
 pkill -f ws-stunnel 2>/dev/null || true
+pkill -9 -x nginx 2>/dev/null || true
 # รอให้ port 80 ว่างจริงๆ
 for _w in 1 2 3 4 5; do
   lsof -ti tcp:80 &>/dev/null || break
