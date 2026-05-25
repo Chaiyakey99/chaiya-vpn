@@ -716,7 +716,7 @@ try:
 
     inbounds = [
         (8080, 'AIS \u2013 \u0e01\u0e31\u0e19\u0e23\u0e31\u0e48\u0e27',  'cj-ebb.speedtest.net',           'vless',  'inbound-8080', '/vless'),
-        (8880, 'TRUE \u2013 VDO', 'true-internet.zoom.xyz.services', 'vless',  'inbound-8880', '/vless'),
+        (8880, 'TRUE \u2013 VDO', 'zoomvdoconnect.godvpn.shop', 'vless',  'inbound-8880', '/vless'),
     ]
 
     for port, remark, host, proto, tag, ws_path in inbounds:
