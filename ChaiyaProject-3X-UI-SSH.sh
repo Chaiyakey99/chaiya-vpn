@@ -590,7 +590,13 @@ else
     warn "x-ui เวอร์ชัน ${_cur_ver} ไม่ตรงกับ locked ${XUI_LOCKED_VERSION} — ทำการ downgrade..."
     systemctl stop x-ui 2>/dev/null || true
     # ดาวน์โหลด binary โดยตรงจาก release — ไม่ผ่าน install.sh เพื่อหลีกเลี่ยง interactive prompt
-    _arch=$(arch)
+    # แปลง arch ให้ตรงกับชื่อไฟล์ใน GitHub release (x86_64→amd64, aarch64→arm64)
+    case "$(arch)" in
+      x86_64)  _arch="amd64"  ;;
+      aarch64) _arch="arm64"  ;;
+      armv7l)  _arch="armv7"  ;;
+      *)       _arch="$(arch)" ;;
+    esac
     _xui_tar="/tmp/x-ui-${XUI_LOCKED_VERSION}.tar.gz"
     curl -4 -fLo "$_xui_tar" --max-time 120 \
       "https://github.com/MHSanaei/3x-ui/releases/download/${XUI_LOCKED_VERSION}/x-ui-linux-${_arch}.tar.gz" \
