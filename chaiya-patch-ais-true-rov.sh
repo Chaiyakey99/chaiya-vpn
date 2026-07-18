@@ -35,6 +35,8 @@ path = "$HTML_PATH"
 with open(path, "r", encoding="utf-8") as f:
     html = f.read()
 
+import re
+
 changed = []
 skipped = []
 
@@ -47,6 +49,21 @@ def apply(label, old, new):
         skipped.append(label + " (ไม่พบ pattern เดิม - ข้าม)")
         return
     html = html.replace(old, new)
+    changed.append(label)
+
+def apply_regex(label, pattern, repl_func, already_ok_check):
+    """ใช้ regex เพื่อทนทานต่อค่า else-branch ที่ต่างกันในแต่ละเซิร์ฟเวอร์
+    (เช่น zoomvdoconnect.cloudzerovps.online บนบางเครื่อง vs
+    true-internet.zoom.xyz.services บนอีกเครื่อง)"""
+    global html
+    if already_ok_check(html):
+        skipped.append(label + " (มีอยู่แล้ว)")
+        return
+    m = re.search(pattern, html)
+    if not m:
+        skipped.append(label + " (ไม่พบ pattern เดิม - ข้าม)")
+        return
+    html = re.sub(pattern, repl_func, html, count=1)
     changed.append(label)
 
 # ── PATCH 1: DTAC GAMING -> AIS-NOPRO/64-128K ──
@@ -103,10 +120,11 @@ apply(
     '<div class="sel-logo sel-ais" style="background:#e30613"><span style="font-size:1rem;font-weight:900;color:#fff">ROV</span></div>'
 )
 
-apply(
-    "js sni const: cj-ebb -> roglobal",
-    "const sni  = carrier==='ais' ? 'cj-ebb.speedtest.net' : 'zoomvdoconnect.cloudzerovps.online';",
-    "const sni  = carrier==='ais' ? 'www.roglobal.com' : 'zoomvdoconnect.cloudzerovps.online';"
+apply_regex(
+    "js sni const: cj-ebb -> roglobal (regex, ไม่สนใจค่า else-branch)",
+    r"const sni\s*=\s*carrier==='ais'\s*\?\s*'cj-ebb\.speedtest\.net'\s*:\s*'([^']+)';",
+    lambda m: "const sni  = carrier==='ais' ? 'www.roglobal.com' : '" + m.group(1) + "';",
+    lambda h: re.search(r"const sni\s*=\s*carrier==='ais'\s*\?\s*'www\.roglobal\.com'", h) is not None
 )
 
 apply(
