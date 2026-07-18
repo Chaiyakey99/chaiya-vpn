@@ -120,35 +120,33 @@ command -v certbot &>/dev/null && ok "certbot พร้อม" || warn "certbot 
 info "ติดตั้ง bcrypt..."
 pip3 install bcrypt --break-system-packages -q --timeout=30 2>/dev/null || \
   pip3 install bcrypt -q --timeout=30 2>/dev/null || true
-info "ติดตั้ง speedtest-cli..."
-pip3 install speedtest-cli --break-system-packages -q --timeout=30 2>/dev/null || \
-  pip3 install speedtest-cli -q --timeout=30 2>/dev/null || true
-
-# ถ้า speedtest-cli ยังใช้ไม่ได้ ลอง ookla official speedtest
-if ! command -v speedtest-cli &>/dev/null && ! python3 -c "import speedtest" 2>/dev/null; then
-  info "ลอง ookla speedtest binary..."
-  _arch=$(uname -m)
-  case "$_arch" in
-    x86_64)   _sf="x86_64"  ;;
-    aarch64)  _sf="aarch64" ;;
-    armv7l)   _sf="armhf"   ;;
-    *)        _sf=""         ;;
-  esac
-  if [[ -n "$_sf" ]]; then
-    _ookla_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${_sf}.tgz"
-    wget -q --timeout=30 -O /tmp/speedtest.tgz "$_ookla_url" 2>/dev/null && \
-      tar -xzf /tmp/speedtest.tgz -C /usr/local/bin speedtest 2>/dev/null && \
-      chmod +x /usr/local/bin/speedtest && \
-      rm -f /tmp/speedtest.tgz && \
-      ok "ookla speedtest พร้อม" || warn "ookla speedtest ติดตั้งไม่สำเร็จ"
-  fi
+info "ติดตั้ง Ookla speedtest (native binary)..."
+# หมายเหตุ: pip speedtest-cli ใช้ API เก่าของ Ookla ที่ถูกบล็อก (403 Forbidden) ถาวรแล้ว
+# ต้องใช้ Ookla native CLI เท่านั้น ติดตั้งเสมอไม่ขึ้นกับว่า speedtest-cli มีอยู่หรือไม่
+_arch=$(uname -m)
+case "$_arch" in
+  x86_64)   _sf="x86_64"  ;;
+  aarch64)  _sf="aarch64" ;;
+  armv7l)   _sf="armhf"   ;;
+  *)        _sf=""         ;;
+esac
+if [[ -n "$_sf" ]]; then
+  _ookla_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${_sf}.tgz"
+  wget -q --timeout=30 -O /tmp/speedtest.tgz "$_ookla_url" 2>/dev/null && \
+    mkdir -p /tmp/speedtest-extract && \
+    tar -xzf /tmp/speedtest.tgz -C /tmp/speedtest-extract speedtest 2>/dev/null && \
+    cp /tmp/speedtest-extract/speedtest /usr/local/bin/speedtest-ookla && \
+    chmod +x /usr/local/bin/speedtest-ookla && \
+    rm -rf /tmp/speedtest.tgz /tmp/speedtest-extract && \
+    /usr/local/bin/speedtest-ookla --format=json --accept-license --accept-gdpr >/dev/null 2>&1 && \
+    ok "ookla speedtest พร้อม (/usr/local/bin/speedtest-ookla)" || warn "ookla speedtest ติดตั้งไม่สำเร็จ"
+else
+  warn "ไม่รู้จัก architecture ($_arch) — ข้ามการติดตั้ง ookla speedtest"
 fi
 
 # ตรวจสอบ speedtest พร้อมใช้งาน
-if command -v speedtest-cli &>/dev/null || python3 -c "import speedtest" 2>/dev/null; then
-  ok "speedtest-cli พร้อม"
-elif command -v speedtest &>/dev/null; then
-  ok "ookla speedtest พร้อม"
+if command -v /usr/local/bin/speedtest-ookla &>/dev/null; then
+  ok "speedtest พร้อม"
 else
   warn "speedtest ไม่พร้อม — speed test ใน panel จะใช้ client-side แทน"
 fi
@@ -1040,11 +1038,13 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == '/api/speedtest':
             try:
                 import json as _json, re as _re
-                r = subprocess.run(['speedtest-cli','--json','--secure'], capture_output=True, text=True, timeout=60)
-                if r.returncode != 0:
-                    # ลอง ookla speedtest
-                    r2 = subprocess.run(['speedtest','--format=json','--accept-license','--accept-gdpr'], capture_output=True, text=True, timeout=60)
-                    if r2.returncode == 0:
+                _sp_bin = '/usr/local/bin/speedtest-ookla'
+                _sp_env = {**os.environ, 'HOME': '/root'}
+                if not os.path.exists(_sp_bin):
+                    respond(self, 200, {'ok': False, 'error': 'ookla speedtest not installed'})
+                else:
+                    r2 = subprocess.run([_sp_bin,'--format=json','--accept-license','--accept-gdpr'], capture_output=True, text=True, timeout=60, env=_sp_env)
+                    if r2.returncode == 0 and r2.stdout.strip():
                         d = _json.loads(r2.stdout)
                         respond(self, 200, {
                             'ok': True,
@@ -1056,18 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
                             'timestamp': d.get('timestamp','')
                         })
                     else:
-                        respond(self, 200, {'ok': False, 'error': 'speedtest-cli not found, install: pip install speedtest-cli'})
-                else:
-                    d = _json.loads(r.stdout)
-                    respond(self, 200, {
-                        'ok': True,
-                        'ping': round(d.get('ping',0),1),
-                        'download': round(d.get('download',0)/1000000,2),
-                        'upload': round(d.get('upload',0)/1000000,2),
-                        'ip': d.get('client',{}).get('ip',''),
-                        'server': d.get('server',{}).get('name',''),
-                        'timestamp': d.get('timestamp','')
-                    })
+                        respond(self, 200, {'ok': False, 'error': (r2.stderr or 'speedtest failed').strip()[:200]})
             except Exception as e:
                 respond(self, 200, {'ok': False, 'error': str(e)})
 
@@ -2177,11 +2166,13 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == '/api/speedtest':
             try:
                 import json as _json, re as _re
-                r = subprocess.run(['speedtest-cli','--json','--secure'], capture_output=True, text=True, timeout=60)
-                if r.returncode != 0:
-                    # ลอง ookla speedtest
-                    r2 = subprocess.run(['speedtest','--format=json','--accept-license','--accept-gdpr'], capture_output=True, text=True, timeout=60)
-                    if r2.returncode == 0:
+                _sp_bin = '/usr/local/bin/speedtest-ookla'
+                _sp_env = {**os.environ, 'HOME': '/root'}
+                if not os.path.exists(_sp_bin):
+                    respond(self, 200, {'ok': False, 'error': 'ookla speedtest not installed'})
+                else:
+                    r2 = subprocess.run([_sp_bin,'--format=json','--accept-license','--accept-gdpr'], capture_output=True, text=True, timeout=60, env=_sp_env)
+                    if r2.returncode == 0 and r2.stdout.strip():
                         d = _json.loads(r2.stdout)
                         respond(self, 200, {
                             'ok': True,
@@ -2193,18 +2184,7 @@ class Handler(BaseHTTPRequestHandler):
                             'timestamp': d.get('timestamp','')
                         })
                     else:
-                        respond(self, 200, {'ok': False, 'error': 'speedtest-cli not found, install: pip install speedtest-cli'})
-                else:
-                    d = _json.loads(r.stdout)
-                    respond(self, 200, {
-                        'ok': True,
-                        'ping': round(d.get('ping',0),1),
-                        'download': round(d.get('download',0)/1000000,2),
-                        'upload': round(d.get('upload',0)/1000000,2),
-                        'ip': d.get('client',{}).get('ip',''),
-                        'server': d.get('server',{}).get('name',''),
-                        'timestamp': d.get('timestamp','')
-                    })
+                        respond(self, 200, {'ok': False, 'error': (r2.stderr or 'speedtest failed').strip()[:200]})
             except Exception as e:
                 respond(self, 200, {'ok': False, 'error': str(e)})
 
