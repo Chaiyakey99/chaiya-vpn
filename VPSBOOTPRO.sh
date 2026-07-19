@@ -407,7 +407,20 @@ fi
 echo ""
 echo "== [13/14] ตรึง NIC IRQ เข้าคอร์คงที่ 1:1 + ปิด irqbalance ไม่ให้ยุ่งกับคิวเครือข่าย =="
 
-NIC_IRQS=$(grep -E "$IFACE" /proc/interrupts | awk -F: '{print $1}' | tr -d ' ')
+NIC_IRQS=""
+MSI_DIR="/sys/class/net/$IFACE/device/msi_irqs"
+if [ -d "$MSI_DIR" ] && [ -n "$(ls -A "$MSI_DIR" 2>/dev/null)" ]; then
+  NIC_IRQS=$(ls "$MSI_DIR")
+  echo "[INFO] หา IRQ จาก $MSI_DIR ได้: $NIC_IRQS"
+else
+  VIRTIO_DEV=$(basename "$(readlink -f /sys/class/net/"$IFACE"/device 2>/dev/null)" 2>/dev/null)
+  if [ -n "$VIRTIO_DEV" ] && grep -q "$VIRTIO_DEV" /proc/interrupts 2>/dev/null; then
+    NIC_IRQS=$(grep -E "$VIRTIO_DEV" /proc/interrupts | awk -F: '{print $1}' | tr -d ' ')
+    echo "[INFO] หา IRQ จาก /proc/interrupts ผ่านชื่อ device $VIRTIO_DEV ได้: $NIC_IRQS"
+  else
+    NIC_IRQS=$(grep -E "$IFACE" /proc/interrupts | awk -F: '{print $1}' | tr -d ' ')
+  fi
+fi
 if [ -n "$NIC_IRQS" ]; then
   i=0
   IRQ_PIN_LIST=""
@@ -446,8 +459,19 @@ IRQEOF
 #!/bin/bash
 IFACE="$IFACE"
 NCPU=$NCPU
+MSI_DIR="/sys/class/net/\$IFACE/device/msi_irqs"
+if [ -d "\$MSI_DIR" ] && [ -n "\$(ls -A "\$MSI_DIR" 2>/dev/null)" ]; then
+  IRQ_LIST=\$(ls "\$MSI_DIR")
+else
+  VIRTIO_DEV=\$(basename "\$(readlink -f /sys/class/net/"\$IFACE"/device 2>/dev/null)" 2>/dev/null)
+  if [ -n "\$VIRTIO_DEV" ] && grep -q "\$VIRTIO_DEV" /proc/interrupts 2>/dev/null; then
+    IRQ_LIST=\$(grep -E "\$VIRTIO_DEV" /proc/interrupts | awk -F: '{print \$1}' | tr -d ' ')
+  else
+    IRQ_LIST=\$(grep -E "\$IFACE" /proc/interrupts | awk -F: '{print \$1}' | tr -d ' ')
+  fi
+fi
 i=0
-for irq in \$(grep -E "\$IFACE" /proc/interrupts | awk -F: '{print \$1}' | tr -d ' '); do
+for irq in \$IRQ_LIST; do
   CPU=\$((i % NCPU))
   [ -f "/proc/irq/\$irq/smp_affinity_list" ] && echo "\$CPU" > "/proc/irq/\$irq/smp_affinity_list" 2>/dev/null
   i=\$((i+1))
@@ -552,7 +576,14 @@ sysctl net.core.netdev_budget net.core.netdev_budget_usecs
 
 echo ""
 echo "-- NIC irq affinity (ควรกระจายคนละคอร์ ไม่ใช่ irqbalance คุมแล้ว) --"
-for irq in $(grep -E "$IFACE" /proc/interrupts | awk -F: '{print $1}' | tr -d ' '); do
+_MSI="/sys/class/net/$IFACE/device/msi_irqs"
+if [ -d "$_MSI" ] && [ -n "$(ls -A "$_MSI" 2>/dev/null)" ]; then
+  _IRQS=$(ls "$_MSI")
+else
+  _VDEV=$(basename "$(readlink -f /sys/class/net/"$IFACE"/device 2>/dev/null)" 2>/dev/null)
+  _IRQS=$(grep -E "${_VDEV:-$IFACE}" /proc/interrupts | awk -F: '{print $1}' | tr -d ' ')
+fi
+for irq in $_IRQS; do
   [ -f "/proc/irq/$irq/smp_affinity_list" ] && echo "irq $irq: $(cat /proc/irq/$irq/smp_affinity_list)"
 done
 systemctl is-active vps-irq-pin.service 2>/dev/null
