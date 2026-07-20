@@ -85,7 +85,7 @@ fs.file-max = 2097152
 net.ipv4.ip_local_port_range = 1024 65535
 SYSEOF
 
-sysctl --system > /dev/null 2>&1
+sysctl --system > /dev/null 2>&1 || true
 echo "[OK] sysctl applied"
 sysctl net.core.default_qdisc net.ipv4.tcp_congestion_control net.ipv4.tcp_mtu_probing net.core.netdev_max_backlog net.core.rmem_max net.core.wmem_max net.ipv4.tcp_notsent_lowat net.ipv4.tcp_tw_reuse
 
@@ -395,7 +395,7 @@ if ! grep -q "netdev_budget" "$SYSCTL_FILE" 2>/dev/null; then
 net.core.netdev_budget = 600
 net.core.netdev_budget_usecs = 8000
 BUDEOF
-  sysctl --system > /dev/null 2>&1
+  sysctl --system > /dev/null 2>&1 || true
   echo "[OK] ตั้ง netdev_budget=600, netdev_budget_usecs=8000"
 else
   echo "[SKIP] ตั้งไว้แล้ว"
@@ -504,7 +504,7 @@ fi
 echo ""
 echo "== [14/18] ตั้ง interrupt coalescing ต่ำสุด (adaptive off, rx/tx-usecs=0) =="
 if command -v ethtool &>/dev/null; then
-  ethtool -C "$IFACE" adaptive-rx off adaptive-tx off 2>/dev/null
+  ethtool -C "$IFACE" adaptive-rx off adaptive-tx off 2>/dev/null || true
   if ethtool -C "$IFACE" rx-usecs 0 tx-usecs 0 2>/dev/null; then
     echo "[OK] coalescing rx-usecs=0 tx-usecs=0 (แจ้ง interrupt ทันทีทุกแพ็กเก็ต -> ปิงนิ่งสุด)"
   elif ethtool -C "$IFACE" rx-usecs 1 tx-usecs 1 2>/dev/null; then
@@ -531,7 +531,7 @@ net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_rmem = 4096 87380 67108864
 net.ipv4.tcp_wmem = 4096 65536 67108864
 TCPEOF
-  sysctl --system > /dev/null 2>&1
+  sysctl --system > /dev/null 2>&1 || true
   echo "[OK] ตั้งค่าแล้ว (cwnd จะไม่ reset ตอน tunnel ว่าง, connection ใหม่เร็วขึ้น 1 RTT)"
 else
   echo "[SKIP] ตั้งไว้แล้ว"
@@ -543,9 +543,9 @@ fi
 echo ""
 echo "== [16/18] ปิด THP (transparent hugepage) =="
 if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
-  echo never > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null
-  echo never > /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null
-  echo "[OK] ปิด THP ทันที ($(cat /sys/kernel/mm/transparent_hugepage/enabled))"
+  echo never > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true
+  echo never > /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null || true
+  echo "[OK] ปิด THP ทันที ($(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null))"
 
   cat > /usr/local/sbin/vps-disable-thp.sh << THPEOF
 #!/bin/bash
@@ -590,10 +590,12 @@ net.netfilter.nf_conntrack_tcp_timeout_established = 86400
 net.netfilter.nf_conntrack_udp_timeout = 60
 net.netfilter.nf_conntrack_udp_timeout_stream = 180
 CTEOF
-    sysctl --system > /dev/null 2>&1
+    sysctl --system > /dev/null 2>&1 || true
     CT_HASHSIZE_PATH="/sys/module/nf_conntrack/parameters/hashsize"
     if [ -w "$CT_HASHSIZE_PATH" ]; then
-      echo 262144 > "$CT_HASHSIZE_PATH" 2>/dev/null && echo "[OK] ตั้ง hashsize=262144 คู่กับ nf_conntrack_max"
+      if echo 262144 > "$CT_HASHSIZE_PATH" 2>/dev/null; then
+        echo "[OK] ตั้ง hashsize=262144 คู่กับ nf_conntrack_max"
+      fi
     fi
     echo "[OK] ตั้ง nf_conntrack_max=1048576"
   else
@@ -620,15 +622,18 @@ PRIOEOF
     echo "[SKIP] $svc: ไม่มี unit นี้บนเครื่อง"
   fi
 done
-systemctl daemon-reload
+systemctl daemon-reload || true
 for svc in dropbear.service chaiya-badvpn.service chaiya-sshws.service chaiya-ssh-api.service x-ui.service; do
-  systemctl is-active "$svc" &>/dev/null && systemctl restart "$svc" 2>/dev/null
+  if systemctl is-active "$svc" &>/dev/null; then
+    systemctl restart "$svc" 2>/dev/null || true
+  fi
 done
 echo "[OK] restart service ที่เกี่ยวข้องให้ priority มีผลแล้ว"
 
 # ══════════════════════════════════════════
-# ตรวจสอบผลลัพธ์
+# ตรวจสอบผลลัพธ์ (diagnostic เท่านั้น — ปิด set -e กันคำสั่งแสดงผลพวกนี้ฆ่าสคริปต์)
 # ══════════════════════════════════════════
+set +e
 echo ""
 echo "════════════════════════════════════════"
 echo "  ตรวจสอบผล"
