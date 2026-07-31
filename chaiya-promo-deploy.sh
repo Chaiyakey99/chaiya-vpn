@@ -10,7 +10,8 @@ WEB_ROOT="/var/www/chaiya"
 API_DIR="/opt/chaiya-promo-api"
 SERVICE_NAME="chaiya-promo-api"
 API_PORT="5055"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-chaiya2569}"   # เปลี่ยนได้: ADMIN_PASSWORD=xxxx bash install.sh
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-chaiya2535}"   # เปลี่ยนได้: ADMIN_PASSWORD=xxxx bash install.sh
+DOMAIN="${DOMAIN:-chaiyaproject.cloudzerovps.online}"   # เปลี่ยนได้: DOMAIN=xxx bash install.sh
 
 echo "==> สร้างโฟลเดอร์เว็บ: $WEB_ROOT"
 mkdir -p "$WEB_ROOT"
@@ -79,18 +80,66 @@ echo " API รันที่ 127.0.0.1:$API_PORT (systemd: $SERVICE_NAME)"
 echo " รหัสแอดมิน: $ADMIN_PASSWORD"
 echo ""
 echo " *** อย่าลืมแก้เลขบัญชีธนาคารใน $WEB_ROOT/wallet.html ก่อนใช้งานจริง ***"
-echo ""
-echo " ยังต้องเพิ่ม nginx config เอง (ครั้งเดียว) ถ้ายังไม่มี:"
-echo ""
-echo "   server {"
-echo "       ...(server block เดิมของคุณ)..."
-echo "       root $WEB_ROOT;"
-echo "       location /api/ {"
-echo "           proxy_pass http://127.0.0.1:$API_PORT;"
-echo "           proxy_set_header Host \$host;"
-echo "           client_max_body_size 8m;"
-echo "       }"
-echo "   }"
-echo ""
-echo " แล้วรัน: nginx -t && systemctl reload nginx"
+echo "=========================================================="
+
+# ---------------------------------------------------------
+#  ผูกโดเมน + nginx + SSL (Let's Encrypt)
+# ---------------------------------------------------------
+NGINX_CONF="/etc/nginx/sites-available/chaiya.conf"
+BACKUP_DIR="/root/nginx-backups/$(date +%Y%m%d-%H%M%S)"
+
+echo "==> ตรวจ DNS ของ $DOMAIN"
+RESOLVED_IP=$(getent hosts "$DOMAIN" | awk '{print $1}' | head -n1)
+SERVER_IP=$(curl -s ifconfig.me || curl -s ipinfo.io/ip)
+echo "    โดเมนชี้ไปที่: ${RESOLVED_IP:-ไม่พบ} / เครื่องนี้: $SERVER_IP"
+
+if [ "$RESOLVED_IP" != "$SERVER_IP" ]; then
+  echo "!! DNS ของ $DOMAIN ยังไม่ตรงกับ IP เครื่องนี้ - ข้ามขั้นตอนผูกโดเมน"
+  echo "   ตั้ง A record ให้ $DOMAIN ชี้มา $SERVER_IP แล้วรันสคริปต์นี้ใหม่ (deploy ส่วนบนจะไม่ถูกแตะซ้ำ)"
+else
+  echo "==> ติดตั้ง nginx + certbot (ถ้ายังไม่มี)"
+  apt-get update -y -qq
+  apt-get install -y -qq nginx certbot python3-certbot-nginx
+
+  mkdir -p "$BACKUP_DIR"
+  if [ -f "$NGINX_CONF" ]; then
+    cp "$NGINX_CONF" "$BACKUP_DIR/chaiya.conf.bak"
+    echo "==> backup nginx config เดิมไว้ที่ $BACKUP_DIR"
+  fi
+
+  echo "==> เขียน nginx config"
+  cat > "$NGINX_CONF" << NGINXEOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    root $WEB_ROOT;
+    index index.html;
+    client_max_body_size 8m;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:$API_PORT/api/;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location / {
+        try_files \$uri \$uri.html \$uri/ =404;
+    }
+}
+NGINXEOF
+
+  ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/chaiya.conf
+  [ -f /etc/nginx/sites-enabled/default ] && rm -f /etc/nginx/sites-enabled/default
+
+  nginx -t && systemctl reload nginx
+
+  echo "==> ขอ SSL certificate (Let's Encrypt)"
+  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect
+
+  nginx -t && systemctl reload nginx
+  echo "==> เว็บพร้อมใช้งานที่ https://$DOMAIN"
+fi
 echo "=========================================================="
