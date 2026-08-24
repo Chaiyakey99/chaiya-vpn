@@ -10,11 +10,25 @@ set -e
 PANEL_DIR="/opt/udppro"
 SERVICE_NAME="udppro"
 PANEL_PORT="${PANEL_PORT:-8899}"
+REPO_URL="https://github.com/Chaiyakey99/chaiya-vpn.git"
 
 echo ">> ติดตั้ง UDPPRO ที่ $PANEL_DIR"
 
+# ถ้ารันแบบ one-liner (bash <(curl ...)) จะมีแค่ไฟล์ install.sh ไฟล์เดียว
+# ในโฟลเดอร์ปัจจุบัน ไม่มี requirements.txt/app.py ให้ copy
+# กรณีนี้ต้อง clone repo ทั้งหมดมาไว้ในโฟลเดอร์ชั่วคราวก่อน
+SRC_DIR="$(pwd)"
+if [ ! -f "$SRC_DIR/requirements.txt" ]; then
+  echo ">> ไม่พบไฟล์โปรเจกต์ในโฟลเดอร์ปัจจุบัน กำลังดาวน์โหลดจาก GitHub"
+  apt-get install -y -qq git >/dev/null 2>&1 || true
+  TMP_CLONE_DIR="$(mktemp -d)"
+  trap 'rm -rf "$TMP_CLONE_DIR"' EXIT
+  git clone --depth 1 "$REPO_URL" "$TMP_CLONE_DIR"
+  SRC_DIR="$TMP_CLONE_DIR"
+fi
+
 mkdir -p "$PANEL_DIR"
-cp -r ./* "$PANEL_DIR/"
+cp -r "$SRC_DIR"/* "$PANEL_DIR/"
 cd "$PANEL_DIR"
 
 echo ">> สร้าง Python venv"
