@@ -101,8 +101,47 @@ XRAY_VLESS_TLS_PORT=24443  # VLESS+TCP+TLS (หลัง HAProxy:443, fallback�
 ZIVPN_PORT=5667          # ZiVPN UDP
 UDPCUSTOM_PORT=36712     # UDP Custom
 
+# ── ป้องกัน apt lock ค้าง (VPS ใหม่มักมี unattended-upgrades/apt-daily
+#    ทำงานอัตโนมัติตอนบูตเครื่อง ทำให้ apt-get ทุกคำสั่งค้างรอ lock นานหลายนาที) ──
+disable_unattended_upgrades() {
+  systemctl stop unattended-upgrades 2>/dev/null || true
+  systemctl disable unattended-upgrades 2>/dev/null || true
+  systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+  systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+  systemctl kill --kill-who=all apt-daily.service 2>/dev/null || true
+  systemctl kill --kill-who=all apt-daily-upgrade.service 2>/dev/null || true
+}
+
+_wait_apt() {
+  local _tries=0
+  disable_unattended_upgrades
+  while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock &>/dev/null; do
+    _tries=$((_tries+1))
+    if [[ $_tries -eq 12 ]]; then
+      # รอมา 60s แล้วยังไม่ว่าง — ลองปิด service ที่ถือ lock อีกรอบแล้วฆ่า process apt/dpkg ที่ค้างจริง
+      warn "apt lock ค้างนาน — กำลังบังคับปิด apt/dpkg ที่ค้างอยู่..."
+      disable_unattended_upgrades
+      pkill -9 -f "apt.systemd.daily" 2>/dev/null || true
+      pkill -9 -x apt-get 2>/dev/null || true
+      pkill -9 -x apt 2>/dev/null || true
+      pkill -9 -x dpkg 2>/dev/null || true
+      sleep 2
+      rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock \
+            /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null || true
+      dpkg --configure -a 2>/dev/null || true
+    fi
+    if [[ $_tries -ge 30 ]]; then
+      warn "apt lock ยังไม่ว่างหลังรอ 150s — ข้ามและลองติดตั้งต่อ (อาจมี error บางจุด)"
+      break
+    fi
+    info "รอ apt lock... ($_tries/30)"
+    sleep 5
+  done
+}
+
 # ── INSTALL DEPS ─────────────────────────────────────────────
 info "อัปเดต packages..."
+_wait_apt
 # timeout 120s ป้องกัน apt-get update ค้างกับ mirror ช้า
 timeout 120 apt-get update -qq -o Acquire::ForceIPv4=true \
   -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 2>/dev/null || \
@@ -124,6 +163,7 @@ ok "packages หลักเสร็จ"
 # ติดตั้ง certbot (ลอง apt ก่อน ข้าม snap เพราะช้ามาก)
 info "ติดตั้ง certbot..."
 if ! command -v certbot &>/dev/null; then
+  _wait_apt
   DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y -qq certbot python3-certbot-nginx 2>/dev/null || \
   DEBIAN_FRONTEND=noninteractive timeout 120 apt-get install -y -qq certbot 2>/dev/null || true
 fi
@@ -354,8 +394,27 @@ ok "OpenSSH พร้อม"
 # ── DROPBEAR ─────────────────────────────────────────────────
 info "ตั้งค่า Dropbear..."
 
-# ติดตั้ง dropbear (force ไม่ใช้ || true)
-apt-get install -y dropbear 2>/dev/null || timeout 60 apt-get install -y dropbear-bin 2>/dev/null || true
+# แก้ dpkg ค้างจากรอบก่อนหน้า (ถ้ามี) ก่อนลองติดตั้งใหม่
+dpkg --configure -a 2>/dev/null || true
+
+# อัปเดต apt cache สั้นๆ อีกครั้งเฉพาะจุดนี้ กันเคส mirror ที่ dropbear อยู่ยังไม่ sync ตอน update รอบแรก
+_wait_apt
+timeout 30 apt-get update -qq 2>/dev/null || true
+
+# ติดตั้ง dropbear — ต้องใส่ DEBIAN_FRONTEND=noninteractive เพราะรันผ่าน bash <(curl ...) ไม่มี TTY
+# ถ้าไม่ใส่ postinst ของ dropbear (ถามว่าจะ start อัตโนมัติไหม) จะค้าง/fail แบบเงียบๆ
+_DB_LOG=$(mktemp)
+DEBIAN_FRONTEND=noninteractive timeout 90 apt-get install -y \
+  -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+  dropbear > "$_DB_LOG" 2>&1
+if [[ $? -ne 0 ]]; then
+  warn "apt install dropbear ครั้งแรกล้มเหลว ลองอีกครั้ง..."
+  dpkg --configure -a 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive timeout 90 apt-get install -y --fix-broken \
+    -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+    dropbear >> "$_DB_LOG" 2>&1 || \
+  DEBIAN_FRONTEND=noninteractive timeout 60 apt-get install -y dropbear-bin >> "$_DB_LOG" 2>&1 || true
+fi
 
 # หา binary (อาจอยู่ที่ /usr/sbin หรือ /usr/bin)
 _DB_BIN=""
@@ -365,7 +424,12 @@ done
 
 if [[ -z "$_DB_BIN" ]]; then
   warn "ไม่พบ dropbear binary — ข้ามขั้นตอนนี้"
+  warn "รายละเอียด apt error (10 บรรทัดสุดท้าย):"
+  tail -10 "$_DB_LOG" 2>/dev/null | sed 's/^/    /'
+  warn "แก้เองได้ด้วย: apt-get update && apt-get install -y dropbear แล้วรัน systemctl status dropbear ดู error จริง"
+  rm -f "$_DB_LOG"
 else
+  rm -f "$_DB_LOG"
   systemctl stop dropbear 2>/dev/null || true
   mkdir -p /etc/dropbear
   [[ ! -f /etc/dropbear/dropbear_rsa_host_key ]]     && dropbearkey -t rsa     -f /etc/dropbear/dropbear_rsa_host_key     2>/dev/null || true
@@ -1278,16 +1342,7 @@ fuser -k 80/tcp 2>/dev/null || true
 fuser -k ${NGINX_L7_PORT}/tcp 2>/dev/null || true
 sleep 1
 
-# รอ apt lock ให้ว่างก่อน (กรณี unattended-upgrades กำลังทำงาน)
-_wait_apt() {
-  local _tries=0
-  while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock &>/dev/null; do
-    _tries=$((_tries+1))
-    [[ $_tries -ge 30 ]] && break
-    info "รอ apt lock... ($_tries/30)"
-    sleep 5
-  done
-}
+# (ใช้ _wait_apt / disable_unattended_upgrades ที่ประกาศไว้ตอนต้นสคริปต์)
 
 # ติดตั้ง nginx ถ้ายังไม่มี
 if ! command -v nginx &>/dev/null; then
@@ -1774,6 +1829,16 @@ fi
 
 # ── FIREWALL ─────────────────────────────────────────────────
 info "ตั้งค่า Firewall..."
+
+# ติดตั้ง ufw ถ้ายังไม่มี (บางครั้ง apt install รวมช่วงแรกพลาดแพคเกจนี้ไปเงียบๆ)
+if ! command -v ufw &>/dev/null; then
+  _wait_apt
+  DEBIAN_FRONTEND=noninteractive timeout 90 apt-get install -y -qq ufw 2>/dev/null || true
+fi
+
+if ! command -v ufw &>/dev/null; then
+  warn "ติดตั้ง ufw ไม่สำเร็จ — ข้าม Firewall (เปิด/ปิดพอร์ตเองด้วย iptables ถ้าจำเป็น)"
+else
 ufw --force reset 2>/dev/null || true
 ufw default deny incoming 2>/dev/null || true
 ufw default allow outgoing 2>/dev/null || true
@@ -1800,11 +1865,12 @@ for port in 6789 54321 8080 8880 18080 24443 8888; do
 done
 
 ufw --force enable &>/dev/null
+fi
 
 # ยืนยันว่าพอร์ตสำคัญเปิดอยู่จริง
 info "ตรวจสอบพอร์ต..."
 for port in 22 80 109 143 443 2503 ${DASHBOARD_PORT}; do
-  if ss -tlnp 2>/dev/null | grep -q ":${port} " ||      ufw status | grep -q "^${port}"; then
+  if ss -tlnp 2>/dev/null | grep -q ":${port} " || { command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "^${port}"; }; then
     ok "port $port พร้อม"
   else
     warn "port $port ยังไม่มี service ฟัง (อาจปกติถ้า service ยังไม่ start)"
@@ -3032,7 +3098,11 @@ echo ""
 info "ตรวจสอบ services..."
 # restart dropbear อีกครั้งเพื่อให้แน่ใจ (บางครั้ง race condition ตอนติดตั้ง)
 systemctl restart dropbear 2>/dev/null || true
-sleep 2
+# รอให้ dropbear ขึ้นจริงสูงสุด 15 วินาที แทนที่จะรอ 2 วินาทีตายตัว (กัน false-negative)
+for _i in $(seq 1 5); do
+  systemctl is-active --quiet dropbear && break
+  sleep 3
+done
 
 for svc in nginx haproxy x-ui dropbear chaiya-npxproxy chaiya-ssh-api chaiya-badvpn zivpn; do
   if systemctl is-active --quiet "$svc"; then
@@ -3040,6 +3110,7 @@ for svc in nginx haproxy x-ui dropbear chaiya-npxproxy chaiya-ssh-api chaiya-bad
   else
     warn "$svc ⚠️"
     journalctl -u "$svc" -n 5 --no-pager 2>/dev/null | sed 's/^/    /' || true
+    systemctl status "$svc" --no-pager -l 2>/dev/null | sed -n '1,8p' | sed 's/^/    /' || true
   fi
 done
 
