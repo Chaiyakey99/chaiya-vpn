@@ -101,8 +101,31 @@ XRAY_VLESS_TLS_PORT=24443  # VLESS+TCP+TLS (หลัง HAProxy:443, fallback�
 ZIVPN_PORT=5667          # ZiVPN UDP
 UDPCUSTOM_PORT=36712     # UDP Custom
 
-# ── ป้องกัน apt lock ค้าง (VPS ใหม่มักมี unattended-upgrades/apt-daily
-#    ทำงานอัตโนมัติตอนบูตเครื่อง ทำให้ apt-get ทุกคำสั่งค้างรอ lock นานหลายนาที) ──
+# ── ปิด needrestart interactive prompt (Ubuntu 22.04+ ติดตั้งมาให้ในเครื่อง
+#    จะ pop-up ถามว่าจะ restart service ไหนหลัง apt install ทุกครั้ง ทำให้
+#    สคริปต์ที่รันแบบ bash <(curl ...) ไม่มี TTY ค้างแบบเงียบๆ) ──
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+if [[ -d /etc/needrestart ]] || command -v needrestart &>/dev/null; then
+  mkdir -p /etc/needrestart/conf.d
+  cat > /etc/needrestart/conf.d/99-chaiya-noninteractive.conf << 'NRCONF'
+$nrconf{restart} = 'a';
+$nrconf{ui} = 'NeedRestart::UI::stdio';
+NRCONF
+fi
+
+# ── ป้องกัน apt lock ค้าง (VPS ใหม่มักมี unattended-upgrades/apt-daily/
+#    cloud-init ทำงานอัตโนมัติตอนบูตเครื่อง ทำให้ apt-get ทุกคำสั่งค้างรอ lock นานหลายนาที) ──
+
+# บน VPS ที่เพิ่งสร้างใหม่ cloud-init มักถือ apt lock อยู่ระหว่างตั้งค่าระบบรอบแรก
+# รอให้มันทำงานเสร็จตามปกติก่อน (ไม่บังคับฆ่า เพราะเป็น process ที่ตั้งค่าระบบจริง)
+# timeout 180s กันเคสที่ cloud-init ค้างจริงๆ ไม่ให้บล็อกสคริปต์ทั้งหมด
+if command -v cloud-init &>/dev/null; then
+  info "รอ cloud-init ตั้งค่าระบบรอบแรกให้เสร็จก่อน (สูงสุด 180s)..."
+  timeout 180 cloud-init status --wait &>/dev/null || true
+fi
+
 disable_unattended_upgrades() {
   systemctl stop unattended-upgrades 2>/dev/null || true
   systemctl disable unattended-upgrades 2>/dev/null || true
@@ -118,17 +141,21 @@ _wait_apt() {
   while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock &>/dev/null; do
     _tries=$((_tries+1))
     if [[ $_tries -eq 12 ]]; then
-      # รอมา 60s แล้วยังไม่ว่าง — ลองปิด service ที่ถือ lock อีกรอบแล้วฆ่า process apt/dpkg ที่ค้างจริง
-      warn "apt lock ค้างนาน — กำลังบังคับปิด apt/dpkg ที่ค้างอยู่..."
-      disable_unattended_upgrades
-      pkill -9 -f "apt.systemd.daily" 2>/dev/null || true
-      pkill -9 -x apt-get 2>/dev/null || true
-      pkill -9 -x apt 2>/dev/null || true
-      pkill -9 -x dpkg 2>/dev/null || true
-      sleep 2
-      rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock \
-            /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null || true
-      dpkg --configure -a 2>/dev/null || true
+      # รอมา 60s แล้วยังไม่ว่าง — เช็คว่ายังเป็น cloud-init อยู่ไหมก่อนจะบังคับฆ่า
+      if pgrep -f cloud-init &>/dev/null; then
+        warn "cloud-init ยังทำงานอยู่ — รอต่อ (ไม่ฆ่าเพื่อกันระบบตั้งค่าไม่ครบ)"
+      else
+        warn "apt lock ค้างนาน — กำลังบังคับปิด apt/dpkg ที่ค้างอยู่..."
+        disable_unattended_upgrades
+        pkill -9 -f "apt.systemd.daily" 2>/dev/null || true
+        pkill -9 -x apt-get 2>/dev/null || true
+        pkill -9 -x apt 2>/dev/null || true
+        pkill -9 -x dpkg 2>/dev/null || true
+        sleep 2
+        rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock \
+              /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null || true
+        dpkg --configure -a 2>/dev/null || true
+      fi
     fi
     if [[ $_tries -ge 30 ]]; then
       warn "apt lock ยังไม่ว่างหลังรอ 150s — ข้ามและลองติดตั้งต่อ (อาจมี error บางจุด)"
