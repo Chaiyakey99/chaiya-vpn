@@ -81,7 +81,7 @@ cat > /etc/systemd/system/dropbear.service << EOF
 Description=Dropbear SSH
 After=network.target
 [Service]
-ExecStart=$DB -F -R -p 143 -p 109
+ExecStart=$DB -F -R -K 30 -p 143 -p 109
 Restart=always
 RestartSec=5
 [Install]
@@ -107,8 +107,17 @@ fi
 # ── WS (port 80 -> Dropbear 143) ─────────────────────────────
 cat > /usr/local/bin/chaiya-ws << 'WSPY'
 #!/usr/bin/python3
-import asyncio
+import asyncio, socket
 T = ('127.0.0.1', 143)
+def ka(w):
+    try:
+        s = w.get_extra_info('socket')
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, 90000)
+    except Exception: pass
 async def pipe(r, w):
     try:
         while True:
@@ -120,6 +129,7 @@ async def pipe(r, w):
         try: w.close()
         except Exception: pass
 async def h(r, w):
+    ka(w)
     try:
         await asyncio.wait_for(r.read(8192), 15)
         w.write(b'HTTP/1.1 101 Switching Protocols\r\nContent-Length: 104857600000\r\n\r\n')
@@ -177,16 +187,24 @@ def sh(*a, inp=None):
 def expired(e):
     return datetime.date.fromisoformat(e) < datetime.date.today()
 
-def sessions():
+PU = {}; PINIT = [False]
+def sessions(cn=None):
+    # {user: [pid]} นับเฉพาะ pid ที่มีซ็อกเก็ต ESTABLISHED จริงบน 143/109 (cn) กัน pid ซ้ำ/โปรเซสที่ตายแล้ว
     s = {}
     try:
-        r = subprocess.run(['journalctl', '-u', 'dropbear', '--no-pager', '-o', 'short', '-n', '5000'],
-                           capture_output=True, text=True, timeout=15).stdout
+        a = ['journalctl', '-u', 'dropbear', '--no-pager', '-o', 'short']
+        a += ['--since', '-3min'] if PINIT[0] else ['-n', '60000']
+        r = subprocess.run(a, capture_output=True, text=True, timeout=20).stdout
+        PINIT[0] = True
         for m in re.finditer(r"dropbear\[(\d+)\]: Password auth succeeded for '([^']+)'", r):
-            pid = int(m.group(1))
+            PU[int(m.group(1))] = m.group(2)   # บรรทัดหลังสุดชนะ
+        if cn is not None:
+            for p in [p for p in PU if p not in cn]: PU.pop(p, None)
+        for pid, u in PU.items():
             try:
+                if cn is not None and pid not in cn: continue
                 if open('/proc/%d/comm' % pid).read().strip() == 'dropbear':
-                    s.setdefault(m.group(2), []).append(pid)
+                    s.setdefault(u, []).append(pid)
             except Exception: pass
         r = subprocess.run(['ps', '-eo', 'pid,user:32,comm', '--no-headers'],
                            capture_output=True, text=True, timeout=10).stdout
@@ -216,7 +234,7 @@ def reaper():
         time.sleep(300)
         try:
             with LOCK:
-                ss = sessions()
+                ss = sessions(conns())
                 for u, v in load().items():
                     if expired(v['exp']):
                         sh('usermod', '-L', u)
@@ -242,7 +260,7 @@ class H(BaseHTTPRequestHandler):
         if not s.authed(): return s.out(401, {'error': 'unauthorized'})
         if s.path == '/api/status': return s.out(200, status())
         if s.path == '/api/users':
-            ss = sessions(); res = []
+            ss = sessions(conns()); res = []
             for u, v in sorted(load().items()):
                 left = (datetime.date.fromisoformat(v['exp']) - datetime.date.today()).days
                 res.append({'user': u, 'exp': v['exp'], 'left': left, 'active': left >= 0, 'online': len(ss.get(u, [])), 'limit': v.get('limit', 0), 'over': bool(v.get('over')), 'quota': v.get('quota', 0), 'used': v.get('used', 0), 'qover': bool(v.get('qover')), 'seen': v.get('seen', 0)})
@@ -279,7 +297,7 @@ class H(BaseHTTPRequestHandler):
                 return s.out(200, {'ok': True, 'user': u, 'exp': exp})
             if u not in db: return s.out(404, {'error': 'ไม่พบผู้ใช้ในแผง'})
             if s.path == '/api/delete':
-                for pid in sessions().get(u, []):
+                for pid in sessions(conns()).get(u, []):
                     try: os.kill(pid, 9)
                     except Exception: pass
                 sh('userdel', '-f', u); db.pop(u); save(db); return s.out(200, {'ok': True})
@@ -315,7 +333,8 @@ class H(BaseHTTPRequestHandler):
                 save(db); return s.out(200, {'ok': True, 'locked': locked})
         s.out(404, {'error': 'not found'})
 
-LAST = {}; PMAP = {}
+LAST = {}; PMAP = {}; OVER = {}
+GRACE = 18  # 18 รอบ x 10 วิ = 3 นาที ต้องเกินต่อเนื่องจึงจะระงับ (กันกรณี IP มือถือเปลี่ยนแล้วเซสชันเก่ายังค้าง)
 def conns():
     # {pid: ไบต์ขึ้น+ลง} ของซ็อกเก็ตฝั่งไคลเอนต์ที่ Dropbear (143/109) อ่านจากตัวนับของเคอร์เนล
     out = {}
@@ -339,7 +358,7 @@ def monitor():
         time.sleep(10)
         try:
             with LOCK:
-                db = load(); ss = sessions(); cn = conns(); ch = False; now = int(time.time())
+                db = load(); cn = conns(); ss = sessions(cn); ch = False; now = int(time.time())
                 if cn is not None:
                     for u, pids in ss.items():
                         for p in pids: PMAP[p] = u
@@ -359,7 +378,10 @@ def monitor():
                     if n and now - v.get('seen', 0) > 60: v['seen'] = now; ch = True
                     hit = False
                     lim = int(v.get('limit', 0)); q = int(v.get('quota', 0))
-                    if lim > 0 and n > lim and not v.get('over'): v['over'] = now; hit = True
+                    if lim > 0 and n > lim:
+                        OVER[u] = OVER.get(u, 0) + 1
+                        if OVER[u] >= GRACE and not v.get('over'): v['over'] = now; hit = True
+                    else: OVER.pop(u, None)
                     if q > 0 and v.get('used', 0) >= q and not v.get('qover'): v['qover'] = now; hit = True
                     if hit:
                         sh('usermod', '-L', u); ch = True
@@ -396,131 +418,132 @@ cat > $APP/www/index.html << 'HTML'
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0a1020;--s1:#101a2e;--s2:#16233b;--ln:#223250;--tx:#e8eefc;--mu:#8a9bbd;--ac:#5b8cff;--ok:#34d399;--wn:#fbbf24;--bd:#fb7185;color-scheme:dark}
-*{box-sizing:border-box}
-body{margin:0;min-height:100vh;background:var(--bg);color:var(--tx);font:15px/1.5 "IBM Plex Sans Thai","Noto Sans Thai",system-ui,-apple-system,sans-serif;font-variant-numeric:tabular-nums}
+
+:root{--bg:#070b16;--s1:#0d1424;--s2:#131c32;--s3:#1a2540;--ln:#1e2a47;--tx:#eef2ff;--mu:#8b99ba;--ac:#6d8bff;--ac2:#22d3ee;--ok:#34d399;--wn:#fbbf24;--bd:#fb7185;--g:linear-gradient(135deg,#6d8bff,#9b6bff);color-scheme:dark}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;min-height:100vh;background:radial-gradient(900px 500px at 85% -10%,#6d8bff24,transparent 60%),radial-gradient(700px 420px at -10% 110%,#22d3ee15,transparent 60%),var(--bg);background-attachment:fixed;color:var(--tx);font:15px/1.5 "IBM Plex Sans Thai","Noto Sans Thai",system-ui,-apple-system,sans-serif;font-variant-numeric:tabular-nums}
 button,input{font:inherit;color:inherit}
 .hide{display:none!important}
-:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
-.btn{white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 20px;border:0;border-radius:10px;background:var(--ac);color:#fff;font-weight:600;cursor:pointer;transition:filter .15s}
-.btn:hover{filter:brightness(1.12)}
+:focus-visible{outline:2px solid var(--ac2);outline-offset:2px}
+.i{width:18px;height:18px;flex:none}
+.btn{white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 20px;border:0;border-radius:12px;background:var(--g);color:#fff;font-weight:600;cursor:pointer;box-shadow:0 6px 20px #6d8bff33;transition:transform .12s,filter .15s}
+.btn:hover{filter:brightness(1.1)}.btn:active{transform:scale(.97)}
 .btn[disabled]{opacity:.65;cursor:default}
-.btn.g{background:var(--s2);border:1px solid var(--ln);color:var(--tx)}
-.btn.r{background:var(--bd);color:#2a0710}
-.btn.sm{min-height:34px;padding:0 12px;font-size:13px;border-radius:8px}
+.btn.g{background:var(--s3);border:1px solid var(--ln);color:var(--tx);box-shadow:none}
+.btn.r{background:#fb71851f;border:1px solid #fb718555;color:var(--bd);box-shadow:none}
+.btn.sm{min-height:38px;padding:0 12px;font-size:13px;border-radius:10px;gap:6px}
 .btn.busy::after{content:"";width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .7s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
-.inp{width:100%;min-height:46px;padding:0 14px;background:#0b1426;border:1px solid var(--ln);border-radius:10px}
-.inp:focus{border-color:var(--ac);outline:0;box-shadow:0 0 0 3px #5b8cff33}
+.inp{width:100%;min-height:46px;padding:0 14px;background:#0a1122;border:1px solid var(--ln);border-radius:12px}
+.inp:focus{border-color:var(--ac);outline:0;box-shadow:0 0 0 3px #6d8bff33}
 .inp::placeholder{color:#5d6e90}
 .l{display:block;font-size:13px;color:var(--mu);margin:0 0 6px}
-.fld{margin-bottom:14px}
-.hint{font-size:12px;color:var(--mu);margin-top:5px}
-.ig{display:flex;gap:8px}
-.chips{display:flex;gap:6px;margin-top:8px}
-.chips button{border:1px solid var(--ln);background:transparent;color:var(--mu);border-radius:999px;padding:3px 12px;font-size:12px;cursor:pointer}
+.fld{margin-bottom:14px}.hint{font-size:12px;color:var(--mu);margin-top:5px}.ig{display:flex;gap:8px}
+.chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.chips button{border:1px solid var(--ln);background:var(--s2);color:var(--mu);border-radius:999px;padding:4px 12px;font-size:12px;cursor:pointer}
 .chips button:hover{color:var(--tx);border-color:var(--ac)}
 .mu{color:var(--mu)}
-
-/* ---------- login ---------- */
+.logo{flex:none;white-space:nowrap;display:flex;align-items:center;gap:12px;font-weight:700;font-size:18px}
+.mk{width:36px;height:36px;border-radius:11px;background:var(--g);display:grid;place-items:center;font-size:13px;font-weight:700;color:#fff;box-shadow:0 6px 18px #6d8bff55}
+/* login */
 #lg{min-height:100vh;display:grid;grid-template-columns:1.1fr 1fr}
-.brand{padding:48px;display:flex;flex-direction:column;justify-content:space-between;gap:40px;background:var(--s1);border-right:1px solid var(--ln)}
-.logo{flex:none;white-space:nowrap;display:flex;align-items:center;gap:12px;font-weight:700;font-size:19px}
-.mk{width:36px;height:36px;border-radius:10px;background:var(--ac);display:grid;place-items:center;font-size:14px;font-weight:700;color:#fff}
-.brand h2{font-size:34px;line-height:1.3;margin:0 0 14px;font-weight:700;max-width:14em}
+.brand{padding:48px;display:flex;flex-direction:column;justify-content:space-between;gap:40px;background:linear-gradient(160deg,#6d8bff1f,transparent 55%),var(--s1);border-right:1px solid var(--ln)}
+.brand h2{font-size:36px;line-height:1.3;margin:0 0 14px;max-width:13em;background:linear-gradient(120deg,#fff,#a9b8ff);-webkit-background-clip:text;background-clip:text;color:transparent}
 .brand p{margin:0;color:var(--mu);max-width:26em}
-.ports{list-style:none;margin:0;padding:0;border:1px solid var(--ln);border-radius:14px;overflow:hidden}
-.ports li{display:flex;align-items:baseline;gap:16px;padding:12px 16px;border-top:1px solid var(--ln)}
-.ports li:first-child{border-top:0}
-.ports b{width:56px;font-size:18px;color:var(--ac)}
-.ports span{color:var(--mu);font-size:14px}
-.fw{display:grid;place-items:center;padding:32px 20px}
-.fb{width:100%;max-width:380px}
-.fb h1{font-size:26px;margin:0 0 4px}
-.fb>p{margin:0 0 26px;color:var(--mu)}
+.ports{list-style:none;margin:0;padding:0;border:1px solid var(--ln);border-radius:16px;overflow:hidden;background:#0a112266}
+.ports li{display:flex;align-items:baseline;gap:16px;padding:12px 18px;border-top:1px solid var(--ln)}.ports li:first-child{border-top:0}
+.ports b{width:56px;font-size:18px;color:var(--ac2)}.ports span{color:var(--mu);font-size:14px}
+.fw{display:grid;place-items:center;padding:32px 20px}.fb{width:100%;max-width:380px}
+.fb h1{font-size:28px;margin:0 0 4px}.fb>p{margin:0 0 26px;color:var(--mu)}
 .mlogo{display:none;margin-bottom:32px}
-.pw{position:relative}
-.pw .inp{padding-right:72px}
+.pw{position:relative}.pw .inp{padding-right:72px}
 .pw button{position:absolute;right:6px;top:6px;height:34px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:var(--mu);cursor:pointer;font-size:13px}
-.pw button:hover{color:var(--tx)}
 .err{min-height:22px;margin:0 0 12px;color:var(--bd);font-size:14px}
 #lf.shk{animation:shk .35s}
 @keyframes shk{20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
 @media(max-width:820px){#lg{grid-template-columns:1fr}.brand{display:none}.mlogo{display:flex}}
-
-/* ---------- dashboard ---------- */
-.top{position:sticky;top:0;z-index:5;background:#0a1020ea;backdrop-filter:blur(10px);border-bottom:1px solid var(--ln);padding-top:env(safe-area-inset-top)}
-.tin{max-width:960px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:12px}
-.hn{margin-left:auto;font-size:13px;color:var(--mu);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.wrap{max-width:960px;margin:0 auto;padding:20px 16px calc(60px + env(safe-area-inset-bottom))}
-.pn{background:var(--s1);border:1px solid var(--ln);border-radius:16px;margin-bottom:16px;overflow:hidden}
-.ph{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--ln)}
-.ph h3{margin:0;font-size:16px}
-.ph small{color:var(--mu);font-size:12px}
-.pb{padding:18px}
-.hl{display:grid;grid-template-columns:repeat(4,1fr);padding:22px 8px}
-.gz{display:flex;flex-direction:column;align-items:center;text-align:center;gap:2px}
-.rg{position:relative;width:76px;height:76px;margin-bottom:8px}
-.rg svg{width:76px;height:76px}
-.rv{position:absolute;inset:0;display:grid;place-items:center;font-weight:700;font-size:15px}
-.rg.ld{border:6px solid var(--ln);border-radius:50%}
-.rg.ld .rv{font-size:17px}
-.gz b{font-size:14px}.gz span{font-size:12px;color:var(--mu)}
-.sm4{display:grid;grid-template-columns:repeat(5,1fr);background:var(--s1);border:1px solid var(--ln);border-radius:16px;overflow:hidden;margin-bottom:16px}
-.tl{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:16px 18px;border:0;border-left:1px solid var(--ln);background:transparent;cursor:pointer;text-align:left;box-shadow:inset 0 -3px 0 transparent;transition:background .15s}
-.tl:first-child{border-left:0}
-.tl:hover{background:#16233b80}
-.tl[aria-pressed=true]{background:var(--s2);box-shadow:inset 0 -3px 0 var(--ac)}
-.tl .n{font-size:28px;font-weight:700;line-height:1.2}
-.tl .t{font-size:13px;color:var(--mu)}
-.n.o{color:var(--ok)}.n.w{color:var(--wn)}.n.x{color:var(--bd)}
-.srch{max-width:220px;min-height:36px;font-size:14px}
-.ur{display:grid;grid-template-columns:44px 1fr auto;gap:14px;align-items:center;padding:14px 18px;border-top:1px solid var(--ln)}
-.av{position:relative;width:44px;height:44px;border-radius:12px;background:var(--s2);display:grid;place-items:center;font-weight:700;text-transform:uppercase}
-.av.on::after{content:"";position:absolute;right:-3px;bottom:-3px;width:12px;height:12px;border-radius:50%;background:var(--ok);border:2px solid var(--s1)}
-.nm{font-weight:600;word-break:break-all}
-.bg{display:inline-block;font-size:12px;padding:1px 10px;border-radius:999px;margin-left:8px;font-weight:500;white-space:nowrap}
-.b-ok{background:#34d3991f;color:var(--ok)}.b-wn{background:#fbbf241f;color:var(--wn)}.b-bd{background:#fb71851f;color:var(--bd)}
-.sb{font-size:13px;color:var(--mu)}
-.pr{height:4px;background:var(--ln);border-radius:4px;margin-top:8px;overflow:hidden;max-width:240px}
-.pr i{display:block;height:100%;border-radius:4px}
-.ua{display:flex;gap:6px}
-.em{padding:40px 18px;text-align:center;color:var(--mu)}
-.em b{display:block;color:var(--tx);font-size:16px;margin-bottom:4px}
-.em .btn{margin-top:16px}
-@media(max-width:700px){
- .hl{grid-template-columns:1fr 1fr;row-gap:22px}
- .sm4{grid-template-columns:1fr 1fr}.tl:nth-child(odd){border-left:0}.tl:nth-child(n+3){border-top:1px solid var(--ln)}.tl:nth-child(5){grid-column:1/-1}
- .ur{grid-template-columns:44px 1fr}.ua{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr)}.ua .btn{padding:0 4px}
- .srch{max-width:none;flex:1}
+/* shell: bottom tabs on mobile, sidebar on desktop */
+.nv{position:fixed;z-index:20;left:0;right:0;bottom:0;display:flex;justify-content:space-around;align-items:flex-end;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:#0b1222e6;backdrop-filter:blur(16px);border-top:1px solid var(--ln)}
+.nv .lg{display:none}
+.nv button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;border:0;background:transparent;color:var(--mu);font-size:11px;padding:6px 0;cursor:pointer;border-radius:12px}
+.nv button[aria-current=true]{color:var(--tx)}.nv button[aria-current=true] .i{color:var(--ac2)}
+.nv .pri{flex:none;width:54px;height:54px;margin-top:-26px;border-radius:18px;background:var(--g);color:#fff;box-shadow:0 10px 26px #6d8bff66;justify-content:center}
+.nv .pri span{display:none}.nv .pri .i{width:24px;height:24px}
+.top{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;background:#070b16d9;backdrop-filter:blur(14px);border-bottom:1px solid var(--ln)}
+.top h1{margin:0;font-size:19px}
+.hn{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mu);padding:5px 12px;border:1px solid var(--ln);border-radius:999px;background:var(--s1);max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hn::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.main{max-width:1060px;margin:0 auto;padding:16px 16px calc(100px + env(safe-area-inset-bottom))}
+.mlg{display:flex}
+@media(min-width:900px){
+ .nv{top:0;right:auto;bottom:0;width:236px;flex-direction:column;justify-content:flex-start;align-items:stretch;gap:6px;padding:24px 14px;border-top:0;border-right:1px solid var(--ln)}
+ .nv .lg{display:flex;margin:0 6px 22px}
+ .nv button{flex:none;flex-direction:row;gap:12px;font-size:14px;padding:11px 14px}
+ .nv button[aria-current=true]{background:var(--s3)}
+ .nv .pri{width:auto;height:auto;margin:10px 0 0;border-radius:12px;order:9;padding:12px 14px}.nv .pri span{display:inline}.nv .pri .i{width:18px;height:18px}
+ .nv .ot{margin-top:auto}
+ .top,.main{margin-left:236px}.main{max-width:none;padding:28px 40px 48px}.mlg{display:none}
 }
-
+/* cards & stats */
+.pn{background:linear-gradient(180deg,#ffffff07,transparent),var(--s1);border:1px solid var(--ln);border-radius:20px;margin-bottom:16px;overflow:hidden}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--ln)}
+.ph h3{margin:0;font-size:16px}.ph small{color:var(--mu);font-size:12px}
+.hl{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:22px 12px}
+.gz{display:flex;flex-direction:column;align-items:center;text-align:center;gap:2px}
+.rg{position:relative;width:84px;height:84px;margin-bottom:8px}.rg svg{width:84px;height:84px}
+.rv{position:absolute;inset:0;display:grid;place-items:center;font-weight:700;font-size:16px}
+.rg.ld{border:7px solid var(--ln);border-radius:50%}
+.gz b{font-size:14px}.gz span{font-size:12px;color:var(--mu)}
+.sm4{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px}
+.tl{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:16px;border:1px solid var(--ln);border-radius:16px;background:var(--s1);cursor:pointer;text-align:left;transition:transform .12s,border-color .15s}
+.tl:hover{border-color:var(--ac);transform:translateY(-2px)}
+.tl .n{font-size:30px;font-weight:700;line-height:1.15}.tl .t{font-size:12px;color:var(--mu)}
+.n.o{color:var(--ok)}.n.w{color:var(--wn)}.n.x{color:var(--bd)}
+@media(max-width:700px){.hl{grid-template-columns:1fr 1fr;row-gap:22px}.sm4{grid-template-columns:1fr 1fr}.sm4 .tl:last-child{grid-column:1/-1}}
+/* users */
+.bar{display:flex;gap:10px;margin-bottom:12px}
+.sx{position:relative;flex:1}.sx .i{position:absolute;left:14px;top:14px;color:var(--mu)}.sx .inp{padding-left:42px}
+.fl{display:flex;gap:8px;overflow-x:auto;padding:2px 0 14px;scrollbar-width:none}.fl::-webkit-scrollbar{display:none}
+.fl button{flex:none;display:flex;gap:8px;align-items:center;padding:7px 14px;border:1px solid var(--ln);border-radius:999px;background:var(--s1);color:var(--mu);font-size:13px;cursor:pointer}
+.fl button b{font-size:12px;padding:0 7px;border-radius:999px;background:var(--s3);color:var(--tx)}
+.fl button[aria-pressed=true]{background:var(--g);border-color:transparent;color:#fff}.fl button[aria-pressed=true] b{background:#ffffff33}
+.ul{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,430px),1fr))}
+.uc{background:linear-gradient(180deg,#ffffff07,transparent),var(--s1);border:1px solid var(--ln);border-radius:20px;padding:16px}
+.uc.sus{border-color:#fb718566}
+.uh{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.av{position:relative;flex:none;width:46px;height:46px;border-radius:14px;background:var(--s3);display:grid;place-items:center;font-weight:700;font-size:18px;text-transform:uppercase}
+.av.on::after{content:"";position:absolute;right:-3px;bottom:-3px;width:13px;height:13px;border-radius:50%;background:var(--ok);border:3px solid var(--s1)}
 .av.lk{background:#fb71852b;color:var(--bd)}
-@media(max-width:520px){.hn{display:none}}
+.nm{font-weight:600;font-size:16px;word-break:break-all;line-height:1.25}.sb{font-size:12px;color:var(--mu)}
+.bg{margin-left:auto;flex:none;font-size:12px;padding:3px 11px;border-radius:999px;font-weight:600;white-space:nowrap}
+.b-ok{background:#34d3991f;color:var(--ok)}.b-wn{background:#fbbf241f;color:var(--wn)}.b-bd{background:#fb71851f;color:var(--bd)}
+.al{margin:0 0 12px;padding:10px 12px;border-radius:12px;background:#fb71851a;color:var(--bd);font-size:13px}
+.ms{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.mc{background:#0a1122;border:1px solid var(--ln);border-radius:14px;padding:10px 12px;min-width:0}
+.mc small{display:block;font-size:11px;color:var(--mu);margin-bottom:2px}
+.mc b{display:block;font-size:17px;line-height:1.25;white-space:nowrap}.mc em{display:block;font-style:normal;font-size:11px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr{height:5px;background:var(--ln);border-radius:5px;margin-top:7px;overflow:hidden}.pr i{display:block;height:100%;border-radius:5px}
+.dv{display:flex;gap:4px;margin-top:7px;height:5px}.dv i{flex:1;border-radius:5px;background:var(--ln)}.dv i.f{background:var(--ok)}.dv.x i.f{background:var(--bd)}
+.ua{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.ua .btn{padding:0 4px}
+@media(max-width:380px){.ua .btn span{display:none}}
+.em{padding:48px 18px;text-align:center;color:var(--mu);grid-column:1/-1}.em b{display:block;color:var(--tx);font-size:16px;margin-bottom:4px}.em .btn{margin-top:16px}
 .ck{display:flex;align-items:center;gap:10px;font-size:14px;margin:2px 0 14px;cursor:pointer}.ck input{width:18px;height:18px;accent-color:var(--ac)}
-.dt{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mu);margin-right:6px}.dt.on{background:var(--ok)}
-/* ---------- modal + toast ---------- */
-.ov{position:fixed;inset:0;z-index:50;background:#050a16b8;backdrop-filter:blur(4px);display:grid;place-items:center;padding:16px;animation:fi .15s}
-.md{width:100%;max-width:420px;max-height:92vh;overflow:auto;background:var(--s1);border:1px solid var(--ln);border-radius:20px;box-shadow:0 24px 60px #0009;animation:pop .18s}
+/* modal + toast */
+.ov{position:fixed;inset:0;z-index:50;background:#050a16c4;backdrop-filter:blur(6px);display:grid;place-items:center;padding:16px;animation:fi .15s}
+.md{width:100%;max-width:430px;max-height:92vh;overflow:auto;background:var(--s1);border:1px solid var(--ln);border-radius:24px;box-shadow:0 30px 80px #000a;animation:pop .18s}
 .mh{display:flex;gap:14px;padding:22px 22px 4px}
-.ic{flex:none;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:19px;font-weight:700}
-.ic.i{background:#5b8cff26;color:var(--ac)}.ic.w{background:#fb71852b;color:var(--bd)}.ic.s{background:#34d3992b;color:var(--ok)}
-.md h4{margin:0 0 2px;font-size:17px}
-.md .m{margin:0;color:var(--mu);font-size:14px}
-.mb{padding:16px 22px 0}
-.fe{padding:0 22px;color:var(--bd);font-size:14px;min-height:0}
-.fe:not(:empty){padding-top:4px}
+.ic{flex:none;width:42px;height:42px;border-radius:13px;display:grid;place-items:center;font-size:19px;font-weight:700}
+.ic.i{background:#6d8bff26;color:var(--ac)}.ic.w{background:#fb71852b;color:var(--bd)}.ic.s{background:#34d3992b;color:var(--ok)}
+.md h4{margin:0 0 2px;font-size:18px}.md .m{margin:0;color:var(--mu);font-size:14px}
+.mb{padding:16px 22px 0}.fe{padding:0 22px;color:var(--bd);font-size:14px}.fe:not(:empty){padding-top:4px}
 .mf{display:flex;gap:10px;justify-content:flex-end;padding:18px 22px 22px}
-.kv{display:grid;grid-template-columns:84px 1fr auto;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--ln)}
-.kv:first-child{border-top:0}
-.kv span{color:var(--mu);font-size:13px}
-.kv code{font:600 14px ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
-@keyframes fi{from{opacity:0}}
-@keyframes pop{from{opacity:0;transform:scale(.96) translateY(8px)}}
-@keyframes up{from{opacity:0;transform:translateY(24px)}}
-@media(max-width:520px){.ov{align-items:end;padding:0}.md{max-width:none;border-radius:20px 20px 0 0;animation:up .22s}.mf .btn{flex:1}}
-#tt{position:fixed;z-index:60;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));display:grid;gap:8px;width:min(92vw,400px);pointer-events:none}
-.ts{pointer-events:auto;padding:12px 16px;background:var(--s2);border:1px solid var(--ln);border-left:4px solid var(--ac);border-radius:12px;box-shadow:0 10px 30px #0007;font-size:14px;animation:up .2s}
+.kv{display:grid;grid-template-columns:84px 1fr auto;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--ln)}.kv:first-child{border-top:0}
+.kv span{color:var(--mu);font-size:13px}.kv code{font:600 14px ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+@keyframes fi{from{opacity:0}}@keyframes pop{from{opacity:0;transform:scale(.96) translateY(8px)}}@keyframes up{from{opacity:0;transform:translateY(24px)}}
+@media(max-width:520px){.ov{align-items:end;padding:0}.md{max-width:none;border-radius:24px 24px 0 0;animation:up .22s}.mf .btn{flex:1}}
+#tt{position:fixed;z-index:60;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom));display:grid;gap:8px;width:min(92vw,400px);pointer-events:none}
+@media(min-width:900px){#tt{bottom:24px}}
+.ts{pointer-events:auto;padding:12px 16px;background:var(--s3);border:1px solid var(--ln);border-left:4px solid var(--ac);border-radius:14px;box-shadow:0 10px 30px #0008;font-size:14px;animation:up .2s}
 .ts.ok{border-left-color:var(--ok)}.ts.er{border-left-color:var(--bd)}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
@@ -528,16 +551,9 @@ button,input{font:inherit;color:inherit}
 <div id="lg">
  <aside class="brand">
   <div class="logo"><span class="mk">&gt;_</span>Chaiya SSH</div>
-  <div>
-   <h2>จัดการบัญชี SSH ทั้งหมดจากหน้าเดียว</h2>
-   <p>สร้าง ต่ออายุ และตัดการเชื่อมต่อผู้ใช้ พร้อมดูสถานะเซิร์ฟเวอร์ตามเวลาจริง</p>
-  </div>
-  <ul class="ports">
-   <li><b>80</b><span>WebSocket</span></li>
-   <li><b>143</b><span>Dropbear SSH</span></li>
-   <li><b>109</b><span>Dropbear SSH พอร์ตสำรอง</span></li>
-   <li><b>7300</b><span>BadVPN UDPGW</span></li>
-  </ul>
+  <div><h2>จัดการบัญชี SSH ทั้งหมดจากหน้าเดียว</h2>
+   <p>สร้าง ต่ออายุ และควบคุมโควต้าผู้ใช้ พร้อมดูสถานะเซิร์ฟเวอร์ตามเวลาจริง</p></div>
+  <ul class="ports"><li><b>80</b><span>WebSocket</span></li><li><b>143</b><span>Dropbear SSH</span></li><li><b>109</b><span>Dropbear SSH พอร์ตสำรอง</span></li><li><b>7300</b><span>BadVPN UDPGW</span></li></ul>
  </aside>
  <main class="fw"><div class="fb">
   <div class="logo mlogo"><span class="mk">&gt;_</span>Chaiya SSH</div>
@@ -552,25 +568,24 @@ button,input{font:inherit;color:inherit}
 </div>
 
 <div id="ap" class="hide">
- <header class="top"><div class="tin">
-  <div class="logo"><span class="mk">&gt;_</span>Chaiya SSH</div>
-  <span class="hn" id="hn"></span>
-  <button class="btn g sm" id="out">ออกจากระบบ</button>
- </div></header>
- <div class="wrap">
-  <section class="pn">
-   <div class="ph"><h3>สถานะเซิร์ฟเวอร์</h3><small id="up"></small></div>
-   <div class="hl" id="hl"></div>
-  </section>
-  <div class="sm4" id="st"></div>
-  <section class="pn">
-   <div class="ph"><div><h3>ผู้ใช้ SSH</h3><small id="tot"></small></div>
-    <div style="display:flex;gap:8px;flex:1;justify-content:flex-end">
-     <input class="inp srch" id="q" type="search" placeholder="ค้นหาชื่อผู้ใช้" aria-label="ค้นหาชื่อผู้ใช้">
-     <button class="btn sm" data-a="new" id="nw">สร้างผู้ใช้</button>
-    </div></div>
-   <div id="ls"></div>
-  </section>
+ <nav class="nv" aria-label="เมนูหลัก">
+  <div class="logo lg"><span class="mk">&gt;_</span>Chaiya SSH</div>
+  <button data-v="ov" data-i="home"><span>ภาพรวม</span></button>
+  <button data-v="us" data-i="users"><span>ผู้ใช้</span></button>
+  <button class="pri" id="nw" data-i="plus" aria-label="สร้างผู้ใช้"><span>สร้างผู้ใช้</span></button>
+  <button id="out" class="ot" data-i="out"><span>ออกจากระบบ</span></button>
+ </nav>
+ <header class="top"><div class="logo mlg"><span class="mk">&gt;_</span></div><h1 id="pt">ภาพรวม</h1><span class="hn" id="hn"></span></header>
+ <div class="main">
+  <div id="v-ov">
+   <section class="pn"><div class="ph"><h3>สถานะเซิร์ฟเวอร์</h3><small id="up"></small></div><div class="hl" id="hl"></div></section>
+   <div class="sm4" id="st"></div>
+  </div>
+  <div id="v-us" class="hide">
+   <div class="bar"><div class="sx"><span data-i="search"></span><input class="inp" id="q" type="search" placeholder="ค้นหาชื่อผู้ใช้" aria-label="ค้นหาชื่อผู้ใช้"></div></div>
+   <div class="fl" id="fl"></div>
+   <div class="ul" id="ls"></div>
+  </div>
  </div>
 </div>
 <div id="tt" aria-live="polite"></div>
@@ -621,6 +636,14 @@ async function api(p,b){
 function lo(m){T='';sessionStorage.removeItem('t');clearInterval(TM);document.querySelectorAll('.ov').forEach(x=>x.remove());
  $('#ap').classList.add('hide');$('#lg').classList.remove('hide');if(m)toast(m,'er')}
 
+/* ---------- ไอคอน + เมนู ---------- */
+const P={home:'M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',users:'M16 8a4 4 0 1 0-8 0 4 4 0 0 0 8 0zM4 21a8 8 0 0 1 16 0',plus:'M12 5v14M5 12h14',clock:'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',key:'M15 7a4 4 0 1 1-3.5 6L4 20.5V17h3v-3h3l1.5-1.5A4 4 0 0 1 15 7z',gauge:'M4 18a9 9 0 1 1 16 0M12 18l4-6',trash:'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',unlock:'M7 11V8a5 5 0 0 1 9.6-2M5 11h14v10H5z',out:'M9 4H5v16h4M16 8l4 4-4 4M20 12H9',search:'M21 21l-4.3-4.3M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0z'};
+const I=n=>'<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="'+P[n]+'"/></svg>';
+document.querySelectorAll('[data-i]').forEach(e=>e.insertAdjacentHTML('afterbegin',I(e.dataset.i)));
+let V='ov';
+function nav(v){V=v;$('#v-ov').classList.toggle('hide',v!=='ov');$('#v-us').classList.toggle('hide',v!=='us');
+ document.querySelectorAll('.nv [data-v]').forEach(b=>b.setAttribute('aria-current',b.dataset.v===v));$('#pt').textContent=v==='ov'?'ภาพรวม':'ผู้ใช้ SSH';window.scrollTo(0,0)}
+
 /* ---------- สถานะ + สรุปยอด ---------- */
 const ring=(v,lab,sub)=>{const c=v<60?'--ok':v<85?'--wn':'--bd';
  return '<div class="gz"><div class="rg"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--ln)" stroke-width="6"/><circle cx="32" cy="32" r="26" fill="none" stroke="var('+c+')" stroke-width="6" stroke-linecap="round" stroke-dasharray="'+(v*1.634).toFixed(1)+' 163.4" transform="rotate(-90 32 32)"/></svg><div class="rv">'+v+'%</div></div><b>'+lab+'</b><span>'+sub+'</span></div>'};
@@ -628,36 +651,36 @@ function health(s){
  const up=s.up>=24?Math.floor(s.up/24)+' วัน '+s.up%24+' ชม.':s.up+' ชม.';
  $('#hl').innerHTML=ring(s.cpu,'CPU','โปรเซสเซอร์')+ring(s.ram,'RAM','หน่วยความจำ')+ring(s.disk,'Disk','พื้นที่จัดเก็บ')
   +'<div class="gz"><div class="rg ld"><div class="rv">'+s.load+'</div></div><b>Load</b><span>เปิดมา '+up+'</span></div>';
- $('#up').textContent=s.host+' | อัปเดต '+new Date().toLocaleTimeString('th-TH');HOST=s.host;$('#hn').textContent=s.host}
+ $('#up').textContent='อัปเดต '+new Date().toLocaleTimeString('th-TH');HOST=s.host;$('#hn').textContent=s.host}
 const fb=n=>n>=1073741824?(n/1073741824).toFixed(n>=107374182400?0:1)+' GB':n>=1048576?Math.round(n/1048576)+' MB':Math.round(n/1024)+' KB';
 const ago=t=>{if(!t)return 'ยังไม่เคยเชื่อมต่อ';const s=Math.max(0,Date.now()/1000-t);return s<90?'เมื่อสักครู่':s<3600?Math.round(s/60)+' นาทีที่แล้ว':s<86400?Math.round(s/3600)+' ชม.ที่แล้ว':Math.round(s/86400)+' วันที่แล้ว'};
-const stt=x=>x.over?['b-bd','ล็อกอินเกินจำนวน']:x.qover?['b-bd','ดาต้าหมด']:!x.active?['b-bd','หมดอายุ']:x.left<=3?['b-wn','ใกล้หมด']:['b-ok','ใช้งานได้'];
+const stt=x=>x.over?['b-bd','เกินจำนวนเครื่อง']:x.qover?['b-bd','ดาต้าหมด']:!x.active?['b-bd','หมดอายุ']:x.left<=3?['b-wn','ใกล้หมด']:['b-ok','ใช้งานได้'];
+const FL=[['all','ทั้งหมด',x=>1,''],['on','ออนไลน์',x=>x.online,'o'],['soon','ใกล้หมด',x=>x.active&&!x.over&&!x.qover&&x.left<=3,'w'],['sus','ระงับ',x=>x.over||x.qover,'x'],['exp','หมดอายุ',x=>!x.active,'x']];
 function tiles(){
- const a=USERS,d=[['all',a.length,'ผู้ใช้ทั้งหมด',''],['on',a.filter(x=>x.online).length,'ออนไลน์ตอนนี้','o'],
-  ['soon',a.filter(x=>x.active&&!x.over&&!x.qover&&x.left<=3).length,'ใกล้หมดอายุ (3 วัน)','w'],
-  ['sus',a.filter(x=>x.over||x.qover).length,'ถูกระงับ','x'],['exp',a.filter(x=>!x.active).length,'หมดอายุแล้ว','x']];
- $('#st').innerHTML=d.map(x=>'<button class="tl" data-f="'+x[0]+'" aria-pressed="'+(F===x[0])+'"><span class="n '+x[3]+'">'+x[1]+'</span><span class="t">'+x[2]+'</span></button>').join('');
- $('#tot').textContent='ใช้ดาต้ารวม '+fb(a.reduce((s,x)=>s+(x.used||0),0))}
+ const t=['ผู้ใช้ทั้งหมด','ออนไลน์ตอนนี้','ใกล้หมดอายุ (3 วัน)','ถูกระงับ','หมดอายุแล้ว'];
+ $('#st').innerHTML=FL.map((f,i)=>'<button class="tl" data-f="'+f[0]+'"><span class="n '+f[3]+'">'+USERS.filter(f[2]).length+'</span><span class="t">'+t[i]+'</span></button>').join('');
+ $('#fl').innerHTML=FL.map(f=>'<button data-f="'+f[0]+'" aria-pressed="'+(F===f[0])+'">'+f[1]+'<b>'+USERS.filter(f[2]).length+'</b></button>').join('')}
+function card(x){
+ const k=stt(x),sus=x.over||x.qover,ok=x.active&&!sus,on=x.online&&!sus,u=esc(x.user);
+ const dq=x.quota>0,dp=dq?Math.min(100,x.used/x.quota*100):0,dc=dp>=90?'--bd':dp>=70?'--wn':'--ok';
+ const pc=ok?Math.min(100,Math.max(4,x.left/30*100)):0,col=!ok?'--bd':x.left<=3?'--wn':'--ok';
+ const why=x.over&&x.qover?'เชื่อมต่อเกินจำนวนและดาต้าครบ':x.over?'เชื่อมต่อเกินจำนวนเครื่อง':'ดาต้าครบโควต้า';
+ const n=Math.min(x.limit||0,8),dots=n?'<div class="dv'+(x.online>x.limit?' x':'')+'">'+Array.from({length:n},(_,i)=>'<i'+(i<x.online?' class="f"':'')+'></i>').join('')+'</div>':'';
+ return '<article class="uc'+(sus?' sus':'')+'"><div class="uh"><div class="av'+(on?' on':'')+(sus?' lk':'')+'">'+u.charAt(0)+'</div>'
+  +'<div style="min-width:0"><div class="nm">'+u+'</div><div class="sb">'+(on?'ออนไลน์ตอนนี้':'ออฟไลน์ · '+ago(x.seen))+'</div></div><span class="bg '+k[0]+'">'+k[1]+'</span></div>'
+  +(sus?'<div class="al">ถูกระงับเพราะ'+why+' และตัดการเชื่อมต่อแล้ว</div>':'')
+  +'<div class="ms"><div class="mc"><small>เครื่อง</small><b>'+x.online+' / '+(x.limit||'∞')+'</b>'+(dots||'<em>ไม่จำกัด</em>')+'</div>'
+  +'<div class="mc"><small>ดาต้า</small><b>'+fb(x.used||0)+'</b>'+(dq?'<em>จาก '+fb(x.quota)+'</em><div class="pr"><i style="width:'+dp+'%;background:var('+dc+')"></i></div>':'<em>ไม่จำกัด</em>')+'</div>'
+  +'<div class="mc"><small>อายุ</small><b>'+(x.active?x.left+' วัน':'หมดอายุ')+'</b><em>'+(x.active?'ถึง ':'เมื่อ ')+fmt(x.exp)+'</em><div class="pr"><i style="width:'+pc+'%;background:var('+col+')"></i></div></div></div>'
+  +'<div class="ua"><button class="btn g sm" data-a="ext" data-u="'+u+'">'+I('clock')+'<span>ต่ออายุ</span></button><button class="btn g sm" data-a="pw" data-u="'+u+'">'+I('key')+'<span>รหัสผ่าน</span></button>'
+  +'<button class="btn'+(sus?'':' g')+' sm" data-a="'+(x.over?'unl':'lim')+'" data-u="'+u+'">'+I(x.over?'unlock':'gauge')+'<span>'+(x.over?'ปลดล็อก':x.qover?'เพิ่มดาต้า':'โควต้า')+'</span></button>'
+  +'<button class="btn r sm" data-a="del" data-u="'+u+'">'+I('trash')+'<span>ลบ</span></button></div></article>'}
 function list(){
- const q=$('#q').value.trim().toLowerCase();
- const a=USERS.filter(x=>(!q||x.user.includes(q))&&(F==='all'||(F==='on'&&x.online)||(F==='soon'&&x.active&&!x.over&&!x.qover&&x.left<=3)||(F==='sus'&&(x.over||x.qover))||(F==='exp'&&!x.active)));
+ const q=$('#q').value.trim().toLowerCase(),f=FL.find(y=>y[0]===F)[2];
+ const a=USERS.filter(x=>(!q||x.user.includes(q))&&f(x));
  if(!USERS.length)return $('#ls').innerHTML='<div class="em"><b>ยังไม่มีผู้ใช้</b>สร้างผู้ใช้คนแรกเพื่อเริ่มแจกบัญชี SSH<br><button class="btn" data-a="new">สร้างผู้ใช้</button></div>';
  if(!a.length)return $('#ls').innerHTML='<div class="em"><b>ไม่พบผู้ใช้ที่ตรงเงื่อนไข</b>ลองเปลี่ยนคำค้นหาหรือตัวกรอง<br><button class="btn g" data-a="clr">ล้างตัวกรอง</button></div>';
- $('#ls').innerHTML=a.map(x=>{
-  const k=stt(x),sus=x.over||x.qover,ok=x.active&&!sus,on=x.online&&!sus,u=esc(x.user);
-  const pc=ok?Math.min(100,Math.max(4,x.left/30*100)):0,col=!ok?'--bd':x.left<=3?'--wn':'--ok';
-  const dq=x.quota>0,dp=dq?Math.min(100,x.used/x.quota*100):0,dc=dp>=90?'--bd':dp>=70?'--wn':'--ok';
-  const why=x.over&&x.qover?'เชื่อมต่อเกินจำนวนและดาต้าครบ':x.over?'เชื่อมต่อเกินจำนวน':'ดาต้าครบ';
-  const st=sus?'<div class="sb" style="color:var(--bd)">ถูกระงับเพราะ'+why+' ตัดการเชื่อมต่อทั้งหมดแล้ว</div>'
-   :'<div class="sb"><span class="dt'+(on?' on':'')+'"></span>'+(on?'ออนไลน์ '+x.online+(x.limit?'/'+x.limit:'')+' เครื่อง':'ออฟไลน์ ('+ago(x.seen)+')')+'</div>';
-  const dd='<div class="sb">ดาต้า '+(dq?'ใช้ '+fb(x.used)+' จาก '+fb(x.quota)+' เหลือ '+fb(Math.max(0,x.quota-x.used)):'ใช้ไป '+fb(x.used)+' (ไม่จำกัด)')+'</div>';
-  return '<div class="ur"><div class="av'+(on?' on':'')+(sus?' lk':'')+'">'+u.charAt(0)+'</div><div><div><span class="nm">'+u+'</span><span class="bg '+k[0]+'">'+k[1]+'</span></div>'
-   +st+'<div class="sb">'+(x.active?'หมดอายุ '+fmt(x.exp)+' เหลือ '+x.left+' วัน':'หมดอายุเมื่อ '+fmt(x.exp))+'</div>'+dd
-   +'<div class="pr"><i style="width:'+pc+'%;background:var('+col+')"></i></div>'
-   +(dq?'<div class="pr" style="margin-top:4px"><i style="width:'+dp+'%;background:var('+dc+')"></i></div>':'')+'</div>'
-   +'<div class="ua"><button class="btn g sm" data-a="ext" data-u="'+u+'">ต่ออายุ</button><button class="btn g sm" data-a="pw" data-u="'+u+'">รหัสผ่าน</button>'
-   +'<button class="btn'+(sus?'':' g')+' sm" data-a="'+(x.over?'unl':'lim')+'" data-u="'+u+'">'+(x.over?'ปลดล็อก':x.qover?'เพิ่มดาต้า':'โควต้า')+'</button>'
-   +'<button class="btn r sm" data-a="del" data-u="'+u+'">ลบ</button></div></div>'}).join('')}
+ $('#ls').innerHTML=a.map(card).join('')}
 async function load(){
  const r=await Promise.all([api('status'),api('users')]);health(r[0]);USERS=r[1].users;tiles();list()}
 
@@ -672,7 +695,7 @@ async function mk(){
   fields:[{k:'user',label:'ชื่อผู้ใช้',ph:'เช่น somchai01',hint:'a-z 0-9 _ - ความยาว 3-31 ตัว'},
    {k:'password',label:'รหัสผ่าน',gen:1,hint:'4-64 ตัว ห้ามเว้นวรรคและเครื่องหมาย :'},
    {k:'days',label:'จำนวนวันใช้งาน',type:'number',value:30,min:1,chips:[7,30,90]},
-   {k:'limit',label:'จำกัดจำนวนเครื่องที่เชื่อมต่อพร้อมกัน',type:'number',value:2,min:1,chips:[1,2,3,5],unit:'เครื่อง',hint:'ถ้าเชื่อมต่อเกินจำนวนนี้ ระบบจะระงับบัญชีและตัดการเชื่อมต่อทั้งหมดทันที'},
+   {k:'limit',label:'จำกัดจำนวนเครื่องที่เชื่อมต่อพร้อมกัน',type:'number',value:2,min:1,chips:[1,2,3,5],unit:'เครื่อง',hint:'ถ้าเกินจำนวนนี้ต่อเนื่องนานกว่า 3 นาที ระบบจะระงับบัญชีและตัดการเชื่อมต่อทั้งหมด (ไอพีมือถือเปลี่ยนชั่วคราวไม่นับ)'},
    {k:'gb',label:'จำกัดดาต้า (GB)',type:'number',value:0,min:0,chips:[10,50,100],unit:'GB',hint:'0 = ไม่จำกัด เมื่อใช้ครบ ระบบจะระงับบัญชีและตัดการเชื่อมต่อทั้งหมด'}],
   run:async v=>{const j=await api('create',{user:v.user.trim(),password:v.password,days:+v.days,limit:+v.limit,gb:+v.gb||0});return{user:j.user,exp:j.exp,password:v.password,limit:+v.limit,gb:+v.gb||0}}});
  if(r&&r!==true){await load();conn(r)}}
@@ -702,8 +725,11 @@ $('#ls').onclick=e=>{const b=e.target.closest('button');if(!b)return;const a=b.d
  if(a==='new')mk();else if(a==='ext')ext(u);else if(a==='pw')pw(u);else if(a==='lim')lim(u);else if(a==='unl')lim(u,1);else if(a==='del')del(u);
  else if(a==='clr'){F='all';$('#q').value='';tiles();list()}};
 $('#nw').onclick=mk;
-$('#st').onclick=e=>{const b=e.target.closest('[data-f]');if(!b)return;F=b.dataset.f;tiles();list()};
+const pick=e=>{const b=e.target.closest('[data-f]');if(!b)return;F=b.dataset.f;tiles();list();nav('us')};
+$('#st').onclick=pick;$('#fl').onclick=pick;
+document.querySelector('.nv').addEventListener('click',e=>{const b=e.target.closest('[data-v]');if(b)nav(b.dataset.v)});
 $('#q').oninput=list;
+nav('ov');
 
 /* ---------- เข้า/ออกระบบ ---------- */
 async function enter(){
